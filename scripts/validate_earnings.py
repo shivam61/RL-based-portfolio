@@ -196,14 +196,36 @@ def layer2_coverage(
     else:
         ok("All tickers have at least some earnings data for at least one feature")
 
-    # 2. Suspiciously dense ticker vs sparse peers
-    mean_obs = df.groupby("ticker")["n_obs"].sum()
-    p95 = mean_obs.quantile(0.95)
-    outliers = mean_obs[mean_obs > p95 * 2].index.tolist()
-    if outliers:
-        warn(f"Suspiciously dense tickers (>2× p95 obs count): {outliers}")
+    # 2. "Forward-filled forever" — detect via value-change frequency.
+    # A forward-filled series changes value only when a new quarter arrives.
+    # If a series hasn't changed in >18 months, the source data is stale.
+    stale_cutoff = pd.Timestamp.today() - pd.DateOffset(months=18)
+    stale_tickers = []
+    if isinstance(panel.columns, pd.MultiIndex):
+        feat = "rev_growth_yoy"
+        if feat in panel.columns.get_level_values(0):
+            for ticker in panel.columns.get_level_values(1).unique():
+                if (feat, ticker) not in panel.columns:
+                    continue
+                s = panel[(feat, ticker)].dropna()
+                if s.empty:
+                    continue
+                # Last date where the value actually changed
+                changes = s[s != s.shift()]
+                if changes.empty:
+                    continue
+                last_change = changes.index[-1]
+                if last_change < stale_cutoff:
+                    stale_tickers.append(
+                        f"{ticker} (last update: {last_change.date()})"
+                    )
+    if stale_tickers:
+        warn(
+            f"Tickers with no earnings update in 18+ months "
+            f"(forward-filled stale): {stale_tickers}"
+        )
     else:
-        ok("No abnormally over-populated tickers vs peers")
+        ok("All tickers had an earnings update within the last 18 months")
 
     # Summary stats
     logger.info(

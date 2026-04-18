@@ -55,6 +55,40 @@ _HEADERS = {
     "Referer": "https://www.screener.in/",
 }
 
+# ── NSE symbol → Screener.in symbol overrides ────────────────────────────────
+# Required for mergers, demergers, and renames where the current NSE ticker
+# differs from what Screener.in uses internally.
+#
+# LTIM (LTIMindtree): formed Nov 2022 via merger of LTI + Mindtree.
+#   Screener.in retains the pre-merger LTI page with history stitched forward.
+#   Pre-merger quarters = LTI standalone; post-merger = combined entity.
+#
+# Add new entries here whenever a universe ticker gets a corporate action
+# that changes its NSE symbol but not its Screener.in slug.
+_SCREENER_SYMBOL_OVERRIDES: dict[str, str] = {
+    # LTIMindtree: merged Nov 2022 (LTI + Mindtree). Screener.in consolidated
+    # page returns 404 for both LTI and LTIM — standalone page is available.
+    # Handled via consolidated=False fallback in scrape(); no override needed.
+    # Pre-merger quarters will be LTI standalone; post-merger is stitched forward.
+    "BAJAJ-AUTO": "BAJAJ-AUTO",  # hyphen is valid on Screener.in
+    "M&M": "M-M",   # ampersand not valid in URL; Screener uses M-M
+}
+
+# Tickers with known data gaps on Screener.in — will use price-only features.
+# Document reason so future maintainers know these aren't bugs.
+_KNOWN_MISSING: dict[str, str] = {
+    "LTIM": (
+        "LTIMindtree (merged Nov 2022 from LTI + Mindtree). "
+        "Screener.in consolidated page unavailable; standalone has limited history. "
+        "Pre-merger LTI data not stitched. Will use price-only features."
+    ),
+    "ALKYLAMINE": (
+        "Alkyl Amines Chemicals. Screener.in only holds 8 quarters up to Mar 2020 "
+        "for this mid-cap. Post-2020 data unavailable via scraper. "
+        "Will use price-only features for post-2020 periods."
+    ),
+}
+
 # Row-label → canonical column name mapping.
 # Order matters: first match wins when multiple aliases exist.
 _ROW_ALIASES: dict[str, str] = {
@@ -177,8 +211,10 @@ class ScreenerScraper:
             net_profit, eps
         Returns None if the page is unreachable or table not found.
         """
+        # Apply symbol override if present (mergers, renames, URL-unsafe chars)
+        screener_symbol = _SCREENER_SYMBOL_OVERRIDES.get(symbol, symbol)
         suffix = "consolidated" if consolidated else ""
-        url = f"{_BASE_URL}/company/{symbol}/{suffix}/"
+        url = f"{_BASE_URL}/company/{screener_symbol}/{suffix}/"
         try:
             resp = self._get(url)
         except RuntimeError as e:
@@ -186,11 +222,11 @@ class ScreenerScraper:
             return None
 
         if resp.status_code == 404:
-            # Try without consolidated
             if consolidated:
-                logger.debug("%s: consolidated not found, trying standalone", symbol)
+                logger.debug("%s: consolidated not found, trying standalone", screener_symbol)
                 return self.scrape(symbol, consolidated=False)
-            logger.warning("%s: not found on Screener.in (404)", symbol)
+            logger.warning("%s (screener slug: %s): not found on Screener.in (404)",
+                           symbol, screener_symbol)
             return None
 
         soup = BeautifulSoup(resp.text, "html.parser")
