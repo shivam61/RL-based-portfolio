@@ -306,13 +306,18 @@ class ReportGenerator:
 
         if current_portfolio:
             print("\n  CURRENT PORTFOLIO RECOMMENDATION:")
+            weights = current_portfolio.get("weights", current_portfolio)
+            if not isinstance(weights, dict):
+                weights = {}
             top = sorted(
-                [(t, w) for t, w in current_portfolio.items() if t != "CASH"],
+                [(t, w) for t, w in weights.items()
+                 if t != "CASH" and isinstance(w, (int, float))],
                 key=lambda x: x[1], reverse=True
             )[:10]
             for t, w in top:
                 print(f"    {t:20s}  {w:.1%}")
-            print(f"    {'CASH':20s}  {current_portfolio.get('CASH', 0):.1%}")
+            cash = current_portfolio.get("cash", weights.get("CASH", 0))
+            print(f"    {'CASH':20s}  {float(cash):.1%}")
 
         print("=" * 70)
         print(f"  Full report saved → {self.report_dir}")
