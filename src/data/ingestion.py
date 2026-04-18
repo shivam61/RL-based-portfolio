@@ -61,18 +61,21 @@ def download_ticker(
     """Download OHLCV for one ticker, cache as parquet, return DataFrame."""
     path = _raw_path(cfg, ticker)
 
+    cached: Optional[pd.DataFrame] = None
     if not force and path.exists():
-        df = _load_parquet(path)
-        # incremental refresh: only download missing tail
-        if df is not None and not df.empty:
-            last = df.index[-1].date() if hasattr(df.index[-1], "date") else df.index[-1]
-            if str(last) >= end:
-                return df
+        cached = _load_parquet(path)
+        if cached is not None and not cached.empty:
+            last = cached.index[-1].date() if hasattr(cached.index[-1], "date") else cached.index[-1]
+            # return cache if already up-to-date (within 1 trading day)
+            end_dt = datetime.strptime(end, "%Y-%m-%d").date()
+            if (end_dt - last).days <= 1:
+                logger.debug("Cache up-to-date for %s (last=%s)", ticker, last)
+                return cached
             start = str(last + timedelta(days=1))
 
     if not HAS_YFINANCE:
         logger.error("yfinance not installed. Run: pip install yfinance")
-        return None
+        return cached  # return whatever we have
 
     for attempt in range(retry):
         try:
@@ -85,6 +88,9 @@ def download_ticker(
                 threads=False,
             )
             if raw is None or raw.empty:
+                if cached is not None and not cached.empty:
+                    logger.debug("No new data for %s; using cache", ticker)
+                    return cached
                 logger.warning("No data for %s", ticker)
                 return None
 
@@ -122,6 +128,11 @@ def download_ticker(
         except Exception as exc:
             logger.warning("Attempt %d failed for %s: %s", attempt + 1, ticker, exc)
             time.sleep(2 ** attempt)
+
+    # all retries exhausted — return cached data if available
+    if cached is not None and not cached.empty:
+        logger.warning("Download failed for %s; using cached data", ticker)
+        return cached
 
     return None
 
