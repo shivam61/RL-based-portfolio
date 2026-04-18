@@ -1,188 +1,43 @@
 """
-Quarterly earnings / fundamentals data for Indian equities.
+Earnings / fundamental features panel.
 
-Downloads via yfinance quarterly_financials. Coverage is typically
-4–5 years back for large-caps; older periods return NaN (ranker falls
-back to price momentum).
+Primary source : Screener.in (via src.data.screener)
+Fallback       : None — yfinance earnings are too sparse for this backtest.
 
-Outputs a daily forward-filled panel:
-  data/processed/earnings_panel.parquet  (date × ticker columns)
+Canonical processed path: data/processed/screener_panel.parquet
 
-Features produced (all lagged 1 quarter = 63 trading days):
-  rev_growth_yoy       — revenue vs same quarter 1 year ago
-  earnings_growth_yoy  — net income vs same quarter 1 year ago
-  ebitda_margin        — EBITDA / Revenue (level, not growth)
-  ebitda_margin_chg    — EBITDA margin vs same quarter 1 year ago
+Public API
+----------
+build_earnings_panel(tickers, price_index, raw_dir)  → pd.DataFrame
+save_earnings_panel(panel, path)
+load_earnings_panel(path)                             → pd.DataFrame | None
 """
 from __future__ import annotations
 
 import logging
-import time
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
+
+from src.data.screener import build_screener_panel
 
 logger = logging.getLogger(__name__)
 
-_EARNINGS_LAG_DAYS = 63   # 1 quarter reporting delay
-_RATE_LIMIT_SEC   = 0.3   # pause between yfinance calls
-
-
-def download_earnings(
-    tickers: list[str],
-    save_dir: Path,
-    force: bool = False,
-) -> dict[str, pd.DataFrame]:
-    """
-    Download quarterly financials for each ticker and cache as parquet.
-    Returns {ticker: raw_quarterly_df}.
-    """
-    try:
-        import yfinance as yf
-    except ImportError:
-        logger.error("yfinance not installed")
-        return {}
-
-    save_dir.mkdir(parents=True, exist_ok=True)
-    results: dict[str, pd.DataFrame] = {}
-    ok = err = skip = 0
-
-    for ticker in tickers:
-        path = save_dir / f"{ticker.replace('/', '_')}.parquet"
-        if path.exists() and not force:
-            try:
-                results[ticker] = pd.read_parquet(path)
-                skip += 1
-                continue
-            except Exception:
-                pass
-
-        try:
-            t = yf.Ticker(ticker)
-            qf = t.quarterly_financials
-            if qf is None or qf.empty:
-                err += 1
-                continue
-
-            df = qf.T.copy()
-            df.index = pd.to_datetime(df.index)
-            df.sort_index(inplace=True)
-
-            df.to_parquet(path)
-            results[ticker] = df
-            ok += 1
-        except Exception as e:
-            logger.debug("Earnings download failed for %s: %s", ticker, e)
-            err += 1
-
-        time.sleep(_RATE_LIMIT_SEC)
-
-    logger.info(
-        "Earnings download: %d ok  %d skipped (cached)  %d failed  / %d total",
-        ok, skip, err, len(tickers),
-    )
-    return results
-
-
-def _safe_growth(series: pd.Series, winsor_clip: float = 5.0) -> pd.Series:
-    """
-    YoY growth: compare each quarter to the one 4 periods prior.
-    Winsorised to [-winsor_clip, winsor_clip] to handle near-zero base periods
-    (e.g. pandemic quarters where earnings briefly touched zero).
-    """
-    shifted = series.shift(4)
-    denom = shifted.abs().replace(0, np.nan)
-    raw = (series - shifted) / denom
-    return raw.clip(-winsor_clip, winsor_clip)
+_DEFAULT_PANEL_NAME = "screener_panel.parquet"
 
 
 def build_earnings_panel(
     tickers: list[str],
     price_index: pd.DatetimeIndex,
     raw_dir: Path,
-    lag_days: int = _EARNINGS_LAG_DAYS,
 ) -> pd.DataFrame:
     """
-    Build a daily forward-filled panel of earnings features.
+    Build the full earnings feature panel from cached Screener.in data.
 
-    Returns wide DataFrame: index=date, columns=MultiIndex(feature, ticker).
-    Caller should call .stack(level=1) to get long format if needed.
+    Temporal safety: all features respect available_from_date
+    (quarter_end + regulatory lag). No lookahead possible.
     """
-    feature_frames: dict[str, dict[str, pd.Series]] = {
-        "rev_growth_yoy": {},
-        "earnings_growth_yoy": {},
-        "ebitda_margin": {},
-        "ebitda_margin_chg": {},
-    }
-
-    for ticker in tickers:
-        path = raw_dir / f"{ticker.replace('/', '_')}.parquet"
-        if not path.exists():
-            continue
-        try:
-            df = pd.read_parquet(path)
-        except Exception:
-            continue
-
-        # Normalise column names (yfinance returns verbose names)
-        cols_lower = {c: c.lower().replace(" ", "_") for c in df.columns}
-        df = df.rename(columns=cols_lower)
-
-        # Revenue — broad fallback chain covers banks (net_interest_income)
-        # and insurers (total_expenses as proxy) in addition to regular companies
-        _REV_CANDIDATES = [
-            "total_revenue",
-            "revenue",
-            "net_interest_income",   # banks
-            "operating_revenue",
-            "gross_profit",          # last resort: still growth-correlated
-        ]
-        rev_col = next((c for c in _REV_CANDIDATES if c in df.columns), None)
-        if rev_col:
-            rev = df[rev_col].dropna()
-            feature_frames["rev_growth_yoy"][ticker] = _safe_growth(rev)
-
-        # Net income — broad fallback chain
-        _NI_CANDIDATES = [
-            "net_income",
-            "net_income_common_stockholders",
-            "net_income_from_continuing_operation_net_minority_interest",
-            "normalized_income",
-        ]
-        ni_col = next((c for c in _NI_CANDIDATES if c in df.columns), None)
-        if ni_col:
-            ni = df[ni_col].dropna()
-            feature_frames["earnings_growth_yoy"][ticker] = _safe_growth(ni)
-
-        # EBITDA margin (non-banks only — banks have no meaningful EBITDA)
-        ebitda_col = next((c for c in df.columns if "ebitda" in c), None)
-        if ebitda_col and rev_col and rev_col not in ("net_interest_income",):
-            ebitda = df[ebitda_col].dropna()
-            rev_align = df[rev_col].reindex(ebitda.index).replace(0, np.nan)
-            margin = (ebitda / rev_align).clip(-1.0, 2.0)   # margin clipped to sane range
-            feature_frames["ebitda_margin"][ticker] = margin
-            feature_frames["ebitda_margin_chg"][ticker] = _safe_growth(margin, winsor_clip=2.0)
-
-    # ── Reindex each quarterly series to daily and forward-fill ──────────────
-    panel_parts: list[pd.DataFrame] = []
-
-    for feat_name, ticker_series in feature_frames.items():
-        if not ticker_series:
-            continue
-        wide = pd.DataFrame(ticker_series)
-        wide = wide.reindex(price_index, method="ffill")
-        wide = wide.shift(lag_days)    # point-in-time lag
-        wide.columns = pd.MultiIndex.from_product([[feat_name], wide.columns])
-        panel_parts.append(wide)
-
-    if not panel_parts:
-        logger.warning("No earnings data built — all tickers missing or failed")
-        return pd.DataFrame(index=price_index)
-
-    panel = pd.concat(panel_parts, axis=1)
-    panel.index.name = "date"
-    return panel
+    return build_screener_panel(tickers, price_index, raw_dir)
 
 
 def save_earnings_panel(panel: pd.DataFrame, out_path: Path) -> None:
@@ -191,11 +46,15 @@ def save_earnings_panel(panel: pd.DataFrame, out_path: Path) -> None:
     logger.info("Earnings panel saved: %s  shape=%s", out_path, panel.shape)
 
 
-def load_earnings_panel(out_path: Path) -> pd.DataFrame | None:
-    if not out_path.exists():
+def load_earnings_panel(path: Path) -> pd.DataFrame | None:
+    """Load pre-built screener panel. Returns None if file absent."""
+    if not path.exists():
+        logger.debug("Earnings panel not found at %s", path)
         return None
     try:
-        return pd.read_parquet(out_path)
+        df = pd.read_parquet(path)
+        logger.info("Earnings panel loaded: %s  shape=%s", path, df.shape)
+        return df
     except Exception as e:
-        logger.warning("Could not load earnings panel: %s", e)
+        logger.warning("Could not load earnings panel at %s: %s", path, e)
         return None

@@ -164,35 +164,31 @@ class StockFeatureBuilder:
             })
             feat_dict[f"{feat_name}_vs_sector"] = feat_dict[feat_name] - sec_mean_df
 
-        # ── Earnings / fundamental features (optional, NaN-safe) ─────────────
-        earnings_feat_names = [
-            "rev_growth_yoy", "earnings_growth_yoy",
-            "ebitda_margin", "ebitda_margin_chg",
+        # ── Earnings / fundamental features (Screener.in, NaN-safe) ─────────
+        # Features are pre-aligned to available_from_date in the panel —
+        # no additional lag needed here (unlike price features above).
+        _SCREENER_FEATS = [
+            "rev_growth_yoy", "profit_growth_yoy", "opm_level",
+            "opm_change_yoy", "eps_growth_yoy",
+            "rev_vs_trend", "profit_vs_trend",
         ]
         ep = earnings_panel
         if ep is None:
-            ep_path = Path(self.cfg["paths"]["processed_data"]) / "earnings_panel.parquet"
+            ep_path = Path(self.cfg["paths"]["processed_data"]) / "screener_panel.parquet"
             ep = load_earnings_panel(ep_path)
 
-        if ep is not None and not ep.empty:
-            for feat_name in earnings_feat_names:
-                if feat_name not in ep.columns.get_level_values(0):
+        if ep is not None and not ep.empty and isinstance(ep.columns, pd.MultiIndex):
+            available_feats = ep.columns.get_level_values(0).unique()
+            for feat_name in _SCREENER_FEATS:
+                if feat_name not in available_feats:
                     continue
                 feat_wide = ep[feat_name].reindex(index=prices.index)
-                # keep only tickers present in this build
                 avail_tickers = [t for t in tickers if t in feat_wide.columns]
                 if avail_tickers:
+                    # Do NOT shift — temporal alignment already done in panel builder
                     feat_dict[feat_name] = feat_wide[avail_tickers].reindex(
                         columns=prices.columns
                     )
-
-            # pe_vs_sector: cross-sectional P/E rank within each sector
-            # Requires trailing earnings; skip if earnings panel lacks coverage
-            if "earnings_growth_yoy" in ep.columns.get_level_values(0):
-                # Use trailing-12m price / net-income proxy as a rough rank signal
-                # (avoids absolute EPS needing shares outstanding)
-                # Already lagged in the panel — no additional shift needed here
-                pass  # placeholder for future P/E ratio computation
 
         # ── Assemble into long format ─────────────────────────────────────────
         all_dfs = []

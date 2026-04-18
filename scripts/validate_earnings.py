@@ -247,9 +247,11 @@ def layer3_temporal(
     leakage_found = False
 
     for ticker in sample_tickers:
-        path = raw_dir / f"{ticker.replace('/', '_')}.parquet"
+        # Screener raw files use NSE symbol without .NS
+        symbol = ticker.replace(".NS", "").replace(".BO", "")
+        path = raw_dir / f"{symbol}.parquet"
         if not path.exists():
-            warn(f"{ticker}: no raw file, skipping temporal check")
+            warn(f"{ticker}: no raw Screener file, skipping temporal check")
             continue
 
         try:
@@ -261,8 +263,9 @@ def layer3_temporal(
         raw.index = pd.to_datetime(raw.index)
         raw.sort_index(inplace=True)
 
-        # Take last n_events quarter-end dates
-        event_dates = raw.index[-n_events:]
+        if "available_from" not in raw.columns:
+            warn(f"{ticker}: raw file missing available_from column")
+            continue
 
         if not isinstance(panel.columns, pd.MultiIndex):
             continue
@@ -273,31 +276,60 @@ def layer3_temporal(
 
         panel_series = panel[(feat, ticker)].dropna()
 
-        for qdate in event_dates:
-            # The feature should first appear >= qdate + lag (63 days)
-            earliest_allowed = qdate + pd.tseries.offsets.BDay(63)
-            # Find first non-null panel date on or after qdate
-            after_q = panel_series[panel_series.index >= qdate]
-            if after_q.empty:
-                continue
-            first_nonull = after_q.index[0]
+        # Take last n_events quarter-end dates that have available_from
+        check_rows = raw.dropna(subset=["available_from"]).tail(n_events)
 
-            if first_nonull < earliest_allowed:
-                logger.warning(
-                    "%s[LEAK]%s  %s | quarter_end=%s  first_feature_date=%s  "
-                    "earliest_allowed=%s  (gap=%d days)",
-                    RED, RESET, ticker,
-                    qdate.date(), first_nonull.date(), earliest_allowed.date(),
-                    (earliest_allowed - first_nonull).days,
+        for q_date, row in check_rows.iterrows():
+            avail_from = pd.Timestamp(row["available_from"])
+
+            # Feature must NOT appear before available_from
+            before_avail = panel_series[panel_series.index < avail_from]
+            at_or_after   = panel_series[panel_series.index >= avail_from]
+
+            # Check if a new value appears before available_from
+            # (a value that matches this quarter's value)
+            if not at_or_after.empty and not before_avail.empty:
+                q_val = at_or_after.iloc[0]
+                # If the same value exists before available_from, that's leakage
+                matching_early = before_avail[
+                    (before_avail >= q_val - 1e-6) & (before_avail <= q_val + 1e-6)
+                ]
+                # Only flag if value appeared AFTER q_date (so it's actually
+                # this quarter's data, not a coincidentally equal prior value)
+                if not matching_early.empty:
+                    earliest_match = matching_early.index[0]
+                    if earliest_match >= q_date:
+                        logger.warning(
+                            "%s[LEAK]%s  %s | q_end=%s  available_from=%s  "
+                            "feature_appeared=%s  (leakage: %d days early)",
+                            RED, RESET, ticker,
+                            q_date.date(), avail_from.date(),
+                            earliest_match.date(),
+                            (avail_from - earliest_match).days,
+                        )
+                        leakage_found = True
+
+        # Verify feature onset matches available_from for each quarter
+        for q_date, row in check_rows.iterrows():
+            avail_from = pd.Timestamp(row["available_from"])
+            # Find first panel date where this quarter's value appears
+            at_or_after = panel_series[panel_series.index >= avail_from]
+            if at_or_after.empty:
+                continue
+            first_use = at_or_after.index[0]
+            gap_days = (first_use - avail_from).days
+            if gap_days > 5:  # allow small offset for trading-day rounding
+                logger.info(
+                    "  %s | q=%s  available=%s  first_use=%s  (gap=%d days — normal)",
+                    ticker, q_date.date(), avail_from.date(), first_use.date(), gap_days
                 )
-                leakage_found = True
 
     if not leakage_found:
         ok(f"No lookahead leakage detected across {len(sample_tickers)} tickers × {n_events} events")
     else:
-        fail("Lookahead leakage detected — feature appears before permitted date")
+        fail("Lookahead leakage detected — feature appears before available_from date")
 
-    # Check for backward-fill artifacts: values changing on weekend/non-biz days
+    # Check for backward-fill artifacts: values changing on weekends
     for ticker in sample_tickers[:3]:
         feat = "rev_growth_yoy"
         if not isinstance(panel.columns, pd.MultiIndex):
@@ -305,14 +337,12 @@ def layer3_temporal(
         if (feat, ticker) not in panel.columns:
             continue
         s = panel[(feat, ticker)].dropna()
-        # Find dates where value changes
         changes = s[s != s.shift()]
         if changes.empty:
             continue
-        # Check if any change happens on a Saturday or Sunday
         weekend_changes = changes[changes.index.dayofweek >= 5]
         if not weekend_changes.empty:
-            warn(f"{ticker}: {feat} changes value on weekends: {weekend_changes.index[:3].tolist()}")
+            warn(f"{ticker}: {feat} changes on weekends: {weekend_changes.index[:3].tolist()}")
         else:
             ok(f"{ticker}: no weekend value changes")
 
@@ -406,8 +436,8 @@ def main(verbose: bool, sample_n: int, config: str | None) -> None:
     cfg = load_config(config)
     setup_logging(cfg)
 
-    panel_path = Path(cfg["paths"]["processed_data"]) / "earnings_panel.parquet"
-    raw_dir    = Path(cfg["paths"]["raw_data"]) / "earnings"
+    panel_path = Path(cfg["paths"]["processed_data"]) / "screener_panel.parquet"
+    raw_dir    = Path(cfg["paths"]["raw_data"]) / "screener"
 
     if not panel_path.exists():
         logger.error("Earnings panel not found at %s — run download_data.py --earnings-only first", panel_path)
