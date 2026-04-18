@@ -1,7 +1,7 @@
 # Next Steps — Improvement Backlog
 
 Each item is implemented one at a time, backtested, committed, and measured before moving on.
-Best known result: **run_010 — 23.57% CAGR, Sharpe 0.93, ₹54.1L final NAV** (8-week retrain, no triggers)
+Best known result: **run_010 — 23.57% CAGR, Sharpe 0.93, ₹54.1L final NAV** (8-week retrain, no triggers, 36-feature set)
 
 ---
 
@@ -19,6 +19,8 @@ Best known result: **run_010 — 23.57% CAGR, Sharpe 0.93, ₹54.1L final NAV** 
 | run_008 | FII proxy in RL state (noisy signal) | 20.3% | 0.78 | -29.91% | ₹37.5L | -3.4% ❌ |
 | run_009 | Reverted: noisy signals removed, clean baseline | 19.34% | 0.71 | -30.58% | ₹36.5L | -4.4% |
 | **run_010** | **Ablation Config B: retrain_freq_weeks 12→8** | **23.57%** | **0.93** | -32.06% | **₹54.1L** | **+4.2% vs run_009** ✅ |
+| run_011 | INVALID — stale 36-col feature store served old data | 20.14% | 0.82 | -38.32% | ₹39.4L | discard |
+| run_012 | TASK-2: real 44-col technical feature set (ffill fix + new signals) | 19.88% | 0.74 | -31.03% | ₹38.5L | -3.7% vs run_010 ❌ |
 
 ### Ablation: Retrain Frequency × Event Triggers (run from run_009 state)
 
@@ -49,6 +51,12 @@ experience buffer will grow and performance should converge back to run_004 leve
 
 1. **Data quality beats model complexity.** The biggest win (+6.5% CAGR) was a bug fix
    (sector dedup), not a new feature. Every complexity addition since has hurt.
+
+5. **More features ≠ better ranker.** run_012 (44 features) underperformed run_010 (36 features).
+   Adding correlated momentum signals (ret_1m, ret_2w, rsi_14, ret_1m_vs_sector all encode
+   the same 1-month effect) degrades LightGBM LambdaRank via redundancy — the model splits
+   on near-duplicate columns, weakening each split's information gain. Next: prune to an
+   orthogonal set and re-test.
 
 2. **RL needs data, not architecture.** With only 147 training steps, adding state dims
    adds noise faster than signal. P0-B and FII proxy both hurt for this reason.
