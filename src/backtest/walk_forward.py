@@ -43,6 +43,7 @@ from src.models.stock_ranker import StockRanker
 from src.optimizer.portfolio_optimizer import PortfolioOptimizer
 from src.rl.agent import RLSectorAgent
 from src.rl.environment import SectorAllocationEnv, SECTORS
+from src.rl.retrain_triggers import EventDetector
 from src.risk.risk_engine import RiskEngine
 
 logger = logging.getLogger(__name__)
@@ -100,10 +101,15 @@ class WalkForwardEngine:
         self.stock_ranker = StockRanker(self.cfg)
         self.rl_agent = RLSectorAgent(self.cfg)
 
+        # Adaptive retrain trigger detector
+        self.event_detector = EventDetector(self.cfg)
+
         # Results
         self.rebalance_records: list[RebalanceRecord] = []
         self.nav_series: pd.Series = pd.Series(dtype=float)
         self.daily_log: list[dict] = []
+        self._trigger_log: list[dict] = []  # records every event that fired
+        self._rl_retrain_count: int = 0
 
     # ── Main simulation ───────────────────────────────────────────────────────
 
@@ -460,6 +466,36 @@ class WalkForwardEngine:
                 }
                 self.rl_agent.record_step(exp_step)
 
+            # ── N. Adaptive retrain trigger check ─────────────────────────────
+            trigger_events = self.event_detector.update({
+                "portfolio_return":      period_return,
+                "max_drawdown_episode":  risk_signal.drawdown,
+                "reward":                period_return,
+                "macro_state":           macro_now.to_dict() if isinstance(macro_now, pd.Series) else macro_now,
+                "risk_regime":           risk_regime,
+                "sector_scores":         sector_scores,
+            })
+            if trigger_events:
+                for ev in trigger_events:
+                    self._trigger_log.append({
+                        "date": str(current_date.date()),
+                        "tier": ev.tier, "name": ev.name,
+                        "severity": ev.severity, "reason": ev.reason,
+                    })
+                # Tier 1 triggers always force retrain; Tier 2/3 only if enough buffer
+                highest_tier = min(ev.tier for ev in trigger_events)
+                has_enough_buffer = self.rl_agent.buffer_size() >= 30
+                if self.use_rl and has_enough_buffer and (
+                    highest_tier == 1 or (highest_tier <= 2 and self._should_retrain_rl(i))
+                ):
+                    logger.info(
+                        "Event-triggered RL retrain at %s: %s",
+                        current_date.date(),
+                        "; ".join(f"[T{e.tier}] {e.name}" for e in trigger_events),
+                    )
+                    self._train_rl()
+                    self.event_detector.notify_retrained()
+
         # ── Build final NAV series ─────────────────────────────────────────────
         all_dates, all_navs = zip(*nav_points) if nav_points else ([], [])
         self.nav_series = pd.Series(
@@ -478,6 +514,8 @@ class WalkForwardEngine:
             if self.rebalance_records else 0.0
         )
         metrics["initial_capital"] = self.initial_capital
+        metrics["n_rl_retrains"] = self._rl_retrain_count
+        metrics["n_trigger_events"] = len(self._trigger_log)
 
         # Sector contributions
         metrics["sector_contributions"] = self._compute_sector_contributions()
@@ -591,6 +629,7 @@ class WalkForwardEngine:
                         self.rl_agent.buffer_size(), total_ts)
             t0 = time.perf_counter()
             self.rl_agent.train(total_timesteps=total_ts)
+            self._rl_retrain_count += 1
             logger.info("  [timing] rl_agent.train      → %.2fs  (%.0f ts/s)",
                         time.perf_counter() - t0,
                         total_ts / max(time.perf_counter() - t0, 1e-6))

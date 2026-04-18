@@ -111,6 +111,29 @@ rl:
   retrain_freq_weeks: 12        # RL policy retrain every 3 months
   use_rl: true                  # set false to disable RL overlay
 
+# ── Adaptive retrain triggers ─────────────────────────────────────────────────
+rl_triggers:
+  enabled: false                # set true to enable event-triggered retraining
+
+  tier1_portfolio:              # hard triggers — immediate retrain
+    drawdown_threshold: 0.10    # portfolio drawdown > 10%
+    period_shock: -0.04         # single period return < -4%
+    consecutive_losses: 3       # N losing periods in a row
+    hit_rate_window: 10         # periods to measure realised win rate
+    hit_rate_min: 0.45          # below this → model not working
+
+  tier2_macro:                  # regime triggers — require persistence
+    vix_jump_pct: 0.40          # India VIX rises 40%+ from 21-day avg
+    vix_persistence_periods: 2  # must persist this many rebalance periods
+    regime_flip: true           # bull↔bear or neutral↔stressed flip
+
+  tier3_drift:                  # drift triggers — subtle but powerful
+    sector_leadership_window: 4         # periods to track sector momentum rank
+    sector_leadership_churn: 0.50       # >50% churn in top-3 sectors → retrain
+    reward_shift_std: 1.5               # reward drops >1.5 std vs training baseline
+    rl_entropy_increase_pct: 0.30       # action entropy up 30% → policy flattening
+    min_buffer_for_drift: 20            # only check drift after this many steps
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging:
   level: "INFO"
