@@ -135,18 +135,24 @@ class PortfolioSimulator:
         # Remove near-zero holdings
         new_holdings = {t: s for t, s in new_holdings.items() if s > 1e-6}
 
-        # Compute new NAV
-        holdings_value = sum(
-            shares * prices.get(t, 0)
-            for t, shares in new_holdings.items()
-            if not pd.isna(prices.get(t, np.nan))
-        )
-        new_nav = max(holdings_value + cash, 1.0)  # floor at 1 rupee to avoid degenerate state
+        # Compute new NAV — use previous weight×nav as fallback for missing prices
+        holdings_value = 0.0
+        for t, shares in new_holdings.items():
+            p = prices.get(t, np.nan)
+            if pd.isna(p) or p <= 0:
+                # fallback: preserve value using prior weight
+                p = (current_state.weights.get(t, 0) * current_state.nav / shares
+                     if shares > 0 else 0.0)
+            holdings_value += shares * p
+        new_nav = max(holdings_value + cash, 1.0)
 
         # Compute new weights
         new_weights: dict[str, float] = {}
         for t, shares in new_holdings.items():
-            p = prices.get(t, 0)
+            p = prices.get(t, np.nan)
+            if pd.isna(p) or p <= 0:
+                p = (current_state.weights.get(t, 0) * current_state.nav / shares
+                     if shares > 0 else 0.0)
             if p > 0 and new_nav > 0:
                 new_weights[t] = shares * p / new_nav
 

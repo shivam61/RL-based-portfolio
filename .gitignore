@@ -10,11 +10,13 @@ venv/
 data/raw/
 data/processed/
 artifacts/feature_store/
-artifacts/models/
 artifacts/reports/
 *.parquet
-*.pkl
 *.h5
+
+# Track model artifacts in git for RL state persistence + easy rollback
+# pkl files are tracked (small); ppo_model.zip excluded (large binary)
+artifacts/models/rl_agent/ppo_model.zip
 
 # Logs
 *.log

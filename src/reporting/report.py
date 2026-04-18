@@ -104,23 +104,87 @@ class ReportGenerator:
 
     def _save_rebalance_log(self, records: list[RebalanceRecord]) -> None:
         rows = []
-        for r in records:
+        prev_weights: dict[str, float] = {}
+        cum_nav = records[0].pre_nav if records else 1.0
+
+        for i, r in enumerate(records):
+            cur_weights = {t: w for t, w in r.target_weights.items() if t != "CASH"}
+
+            stocks_added   = sorted(set(cur_weights) - set(prev_weights))
+            stocks_removed = sorted(set(prev_weights) - set(cur_weights))
+
+            top5 = sorted(cur_weights.items(), key=lambda x: -x[1])[:5]
+            top5_str = "|".join(f"{t}:{w:.1%}" for t, w in top5)
+
+            period_ret = (r.post_nav - r.pre_nav) / r.pre_nav if r.pre_nav > 0 else 0.0
+            cum_ret    = (r.post_nav - cum_nav) / cum_nav if cum_nav > 0 else 0.0
+
+            # RL tilt summary
+            over  = sorted([(s, t) for s, t in r.sector_tilts.items() if t > 1.1], key=lambda x: -x[1])[:3]
+            under = sorted([(s, t) for s, t in r.sector_tilts.items() if t < 0.9], key=lambda x: x[1])[:3]
+
+            buys  = [t for t in r.trades if t.direction == "buy"]
+            sells = [t for t in r.trades if t.direction == "sell"]
+
             rows.append({
-                "date": str(r.rebalance_date),
-                "pre_nav": r.pre_nav,
-                "post_nav": r.post_nav,
-                "turnover": r.total_turnover,
-                "cost": r.total_cost,
-                "cash_target": r.cash_target,
-                "aggressiveness": r.aggressiveness,
-                "n_trades": len(r.trades),
-                "emergency": r.emergency,
-                **{f"tilt_{k}": v for k, v in r.sector_tilts.items()},
+                "date":              str(r.rebalance_date),
+                "mode":              "RL" if r.rl_action.get("sector_tilts") else "Rule",
+                "pre_nav":           round(r.pre_nav, 2),
+                "post_nav":          round(r.post_nav, 2),
+                "period_return_pct": round(period_ret * 100, 3),
+                "cum_return_pct":    round(cum_ret * 100, 3),
+                "n_stocks":          len(cur_weights),
+                "cash_pct":          round(r.target_weights.get("CASH", 0) * 100, 2),
+                "turnover_pct":      round(r.total_turnover * 100, 2),
+                "cost_inr":          round(r.total_cost, 2),
+                "n_buys":            len(buys),
+                "n_sells":           len(sells),
+                "stocks_added":      ",".join(stocks_added),
+                "stocks_removed":    ",".join(stocks_removed),
+                "top5_holdings":     top5_str,
+                "rl_overweight":     "|".join(f"{s}×{t:.1f}" for s, t in over),
+                "rl_underweight":    "|".join(f"{s}×{t:.1f}" for s, t in under),
+                "aggressiveness":    round(r.aggressiveness, 2),
+                "emergency":         r.emergency,
+                **{f"tilt_{k}": round(v, 3) for k, v in r.sector_tilts.items()},
             })
+            prev_weights = cur_weights
+
         df = pd.DataFrame(rows)
         df.to_parquet(self.report_dir / "rebalance_log.parquet", engine="pyarrow")
         df.to_csv(self.report_dir / "rebalance_log.csv", index=False)
         logger.info("Rebalance log saved: %d records", len(records))
+        self._print_decision_log(df)
+
+    def _print_decision_log(self, df: pd.DataFrame) -> None:
+        print("\n" + "=" * 90)
+        print("  DETAILED REBALANCE DECISION LOG")
+        print("=" * 90)
+        print(f"  {'Date':<12} {'Mode':<5} {'NAV (₹)':<12} {'Period%':>8} {'Stocks':>7} "
+              f"{'Cash%':>6} {'TO%':>5} {'Cost₹':>7}  Top Holdings / Changes")
+        print("-" * 90)
+        for _, row in df.iterrows():
+            nav_str  = f"{row['post_nav']:>11,.0f}"
+            top5     = row['top5_holdings'] or "ALL CASH"
+            added    = row['stocks_added']
+            removed  = row['stocks_removed']
+            changes  = []
+            if added:   changes.append(f"+[{added}]")
+            if removed: changes.append(f"-[{removed}]")
+            change_str = "  ".join(changes) if changes else ""
+            rl_info  = ""
+            if row['rl_overweight']:  rl_info += f"  ↑{row['rl_overweight']}"
+            if row['rl_underweight']: rl_info += f"  ↓{row['rl_underweight']}"
+            emerg = " ⚠ EMERGENCY" if row['emergency'] else ""
+            print(f"  {row['date']:<12} {row['mode']:<5} {nav_str} "
+                  f"{row['period_return_pct']:>+8.2f}% "
+                  f"{int(row['n_stocks']):>6}  "
+                  f"{row['cash_pct']:>5.1f}% "
+                  f"{row['turnover_pct']:>5.1f}% "
+                  f"{row['cost_inr']:>7,.0f}  {top5}")
+            if change_str: print(f"    {'':12}  Changes: {change_str}")
+            if rl_info:    print(f"    {'':12}  RL:      {rl_info.strip()}{emerg}")
+        print("=" * 90 + "\n")
 
     def _save_current_portfolio(self, portfolio: dict) -> None:
         path = self.report_dir / "current_portfolio.json"

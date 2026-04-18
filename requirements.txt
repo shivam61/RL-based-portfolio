@@ -46,6 +46,10 @@ mlflow>=2.9.0
 pytest>=7.4.0
 pytest-cov>=4.1.0
 
+# API
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
 # Utilities
 python-dateutil>=2.8.2
 requests>=2.31.0
