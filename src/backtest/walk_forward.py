@@ -617,7 +617,10 @@ class WalkForwardEngine:
 
     def _get_prices(self, date: pd.Timestamp) -> pd.Series:
         avail = self.price_matrix[self.price_matrix.index <= date]
-        return avail.iloc[-1].dropna() if not avail.empty else pd.Series(dtype=float)
+        if avail.empty:
+            return pd.Series(dtype=float)
+        # ffill so holiday/sparse rows use the last known price for each ticker
+        return avail.ffill().iloc[-1].dropna()
 
     def _get_macro_features(self, date: pd.Timestamp) -> pd.Series:
         avail = self.macro_features[self.macro_features.index <= date]
@@ -705,21 +708,25 @@ class WalkForwardEngine:
             (self.price_matrix.index > start) &
             (self.price_matrix.index <= end)
         ]
-        tickers = [t for t in portfolio.holdings if t in period.columns]
+        if period.empty:
+            return []
+
+        # Forward-fill then backward-fill so holidays/gaps use last known price
+        period = period.ffill().bfill()
+
+        holding_tickers = [t for t in portfolio.holdings if portfolio.holdings[t] > 1e-6]
         nav_points = []
 
         for ts, row in period.iterrows():
             value = portfolio.cash
-            for t in tickers:
-                shares = portfolio.holdings.get(t, 0)
-                if shares == 0:
-                    continue
-                price = row.get(t, np.nan)
+            for t in holding_tickers:
+                shares = portfolio.holdings[t]
+                price = row.get(t, np.nan) if t in period.columns else np.nan
                 if price is None or not np.isfinite(float(price)):
-                    price = entry_prices.get(t, 0)
-                if price is None or not np.isfinite(float(price)):
-                    price = 0.0
-                value += shares * float(price)
+                    # last resort: entry price or prior weight-based value
+                    price = float(entry_prices.get(t, 0) or 0)
+                if price > 0:
+                    value += shares * price
             nav_points.append((ts, max(value, 0)))
 
         return nav_points
