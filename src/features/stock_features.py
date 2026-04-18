@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import load_config
+from src.data.earnings import load_earnings_panel
 from src.features.base import (
     compute_beta,
     lag_series,
@@ -48,6 +49,7 @@ class StockFeatureBuilder:
         volume_matrix: pd.DataFrame | None,  # date × ticker (INR crore)
         sector_map: dict[str, str],          # ticker → sector
         benchmark_prices: pd.Series | None = None,
+        earnings_panel: pd.DataFrame | None = None,  # optional; loaded from disk if None
     ) -> pd.DataFrame:
         """
         Returns long-format DataFrame indexed by (date, ticker).
@@ -161,6 +163,36 @@ class StockFeatureBuilder:
                 for t in tickers if t in sector_map
             })
             feat_dict[f"{feat_name}_vs_sector"] = feat_dict[feat_name] - sec_mean_df
+
+        # ── Earnings / fundamental features (optional, NaN-safe) ─────────────
+        earnings_feat_names = [
+            "rev_growth_yoy", "earnings_growth_yoy",
+            "ebitda_margin", "ebitda_margin_chg",
+        ]
+        ep = earnings_panel
+        if ep is None:
+            ep_path = Path(self.cfg["paths"]["processed_data"]) / "earnings_panel.parquet"
+            ep = load_earnings_panel(ep_path)
+
+        if ep is not None and not ep.empty:
+            for feat_name in earnings_feat_names:
+                if feat_name not in ep.columns.get_level_values(0):
+                    continue
+                feat_wide = ep[feat_name].reindex(index=prices.index)
+                # keep only tickers present in this build
+                avail_tickers = [t for t in tickers if t in feat_wide.columns]
+                if avail_tickers:
+                    feat_dict[feat_name] = feat_wide[avail_tickers].reindex(
+                        columns=prices.columns
+                    )
+
+            # pe_vs_sector: cross-sectional P/E rank within each sector
+            # Requires trailing earnings; skip if earnings panel lacks coverage
+            if "earnings_growth_yoy" in ep.columns.get_level_values(0):
+                # Use trailing-12m price / net-income proxy as a rough rank signal
+                # (avoids absolute EPS needing shares outstanding)
+                # Already lagged in the panel — no additional shift needed here
+                pass  # placeholder for future P/E ratio computation
 
         # ── Assemble into long format ─────────────────────────────────────────
         all_dfs = []

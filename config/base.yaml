@@ -95,7 +95,7 @@ risk:
 # ── RL agent ─────────────────────────────────────────────────────────────────
 rl:
   algorithm: "PPO"
-  total_timesteps: 20000         # per incremental retrain; increased from 2000 for meaningful policy gradient
+  total_timesteps: 50000         # ablation TASK-4: testing 50k vs 20k baseline (run_010: 23.57%)
   learning_rate: 3.0e-4
   n_steps: 36                   # match minimum buffer size (36 periods before first retrain)
   batch_size: 16
