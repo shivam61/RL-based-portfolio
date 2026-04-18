@@ -140,7 +140,7 @@ class SectorAllocationEnv(_GymBase):
             "vix_level", "usdinr_ret_1m", "crude_ret_1m", "sp500_ret_1m",
             "gold_ret_1m", "risk_on_score", "macro_stress_score",
             "rbi_rate", "rate_cutting_cycle", "election_window",
-            "nifty_ret_1m", "nifty_above_200ma",
+            "fii_flow_zscore", "fii_sell_regime",
         ]
         for i, k in enumerate(macro_keys[:MACRO_DIM]):
             v = macro.get(k, 0.0)

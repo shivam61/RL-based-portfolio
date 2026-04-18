@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from src.config import load_config
+from src.data.fii_proxy import build_fii_features
 from src.features.base import ewma, rolling_vol
 
 logger = logging.getLogger(__name__)
@@ -180,8 +181,21 @@ class MacroFeatureBuilder:
         result = pd.DataFrame(feats)
         result.index.name = "date"
 
+        # ── FII/DII flow proxy features ───────────────────────────────────────
+        fii_feats = build_fii_features(macro_df, lag=self._lag)
+        fii_feats = fii_feats.reindex(result.index)
+        result = pd.concat([result, fii_feats], axis=1)
+
+        # incorporate FII sell regime into macro stress score
+        if "fii_sell_regime" in result.columns and "macro_stress_score" in result.columns:
+            result["macro_stress_score"] = (
+                result["macro_stress_score"] * 0.7 + result["fii_sell_regime"] * 0.3
+            )
+
         # ── Enforce lag (no lookahead) ────────────────────────────────────────
-        result = result.shift(self._lag)
+        # Note: lag already applied inside build_fii_features; only shift non-FII cols
+        non_fii = [c for c in result.columns if c not in fii_feats.columns]
+        result[non_fii] = result[non_fii].shift(self._lag)
 
         out_path = Path(self.cfg["paths"]["feature_data"]) / "macro_features.parquet"
         result.to_parquet(out_path, engine="pyarrow")
