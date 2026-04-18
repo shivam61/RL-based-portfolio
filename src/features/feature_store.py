@@ -6,13 +6,17 @@ Layout on disk:
     macro/year=YYYY/data.parquet          (~3 500 rows × 40 cols per year)
     sector/year=YYYY/data.parquet         (~3 500 × 15 sectors × 25 cols per year)
     stock/year=YYYY/month=MM/data.parquet (~30 000 rows × 35 cols per shard)
-    _metadata.json                        last_computed_date per feature type
+    _metadata.json                        last_computed_date + schema_hash per type
 
 Design guarantees
 -----------------
 * Point-in-time safe  – callers pass as_of; store never returns future rows.
 * Compute-once        – build_or_append() is idempotent; re-running skips
                         already-computed date ranges.
+* Schema-aware        – if the feature column set changes (new features added),
+                        is_fresh() returns False and the store rebuilds from scratch.
+* Shard-verified      – is_fresh() confirms actual parquet files exist on disk,
+                        not just that metadata claims they do.
 * Transparent I/O     – callers use load() / snapshot(); partition layout is
                         an internal detail.
 * Memory-efficient    – only the needed year/month partitions are loaded;
@@ -22,8 +26,10 @@ Design guarantees
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import shutil
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -80,9 +86,91 @@ class FeatureStore:
         val = self._meta.get(ft, {}).get("last_date")
         return pd.Timestamp(val) if val else None
 
+    # ── Schema hash helpers ───────────────────────────────────────────────────
+
+    @staticmethod
+    def _col_hash(columns: list[str]) -> str:
+        """Stable 8-char hash of a sorted column list."""
+        key = ",".join(sorted(columns))
+        return hashlib.md5(key.encode()).hexdigest()[:8]
+
+    def _stored_schema_hash(self, ft: FeatureType) -> str | None:
+        return self._meta.get(ft, {}).get("schema_hash")
+
+    def _latest_shard_columns(self, ft: FeatureType) -> list[str] | None:
+        """Read column list from the most recent shard on disk, or None."""
+        try:
+            if ft == "stock":
+                shards = sorted(self.base_dir.joinpath("stock").rglob("*.parquet"))
+            elif ft == "sector":
+                shards = sorted(self.base_dir.joinpath("sector").rglob("*.parquet"))
+            else:
+                shards = sorted(self.base_dir.joinpath("macro").rglob("*.parquet"))
+            if not shards:
+                return None
+            df = pd.read_parquet(shards[-1], engine="pyarrow")
+            return sorted(df.columns.tolist())
+        except Exception:
+            return None
+
+    def _shards_exist(self, ft: FeatureType) -> bool:
+        """Return True only if at least one parquet shard file exists on disk."""
+        subdir = self.base_dir / ft
+        return subdir.exists() and any(subdir.rglob("*.parquet"))
+
     def is_fresh(self, ft: FeatureType, as_of: pd.Timestamp) -> bool:
+        """
+        True iff:
+          1. metadata claims data is current through as_of, AND
+          2. at least one shard file actually exists on disk, AND
+          3. the schema hash in metadata matches the current shard columns.
+
+        Any mismatch triggers a full rebuild so the model never trains on a
+        stale or mismatched feature set.
+        """
         last = self.last_computed_date(ft)
-        return last is not None and last >= as_of
+        if last is None or last < as_of:
+            return False
+
+        # Guard 2: shard files must physically exist
+        if not self._shards_exist(ft):
+            logger.warning(
+                "FeatureStore[%s] metadata claims current but no shard files found — "
+                "will rebuild", ft
+            )
+            self._meta.get(ft, {}).pop("last_date", None)
+            self._save_meta()
+            return False
+
+        # Guard 3: schema must match stored hash
+        stored_hash = self._stored_schema_hash(ft)
+        if stored_hash is not None:
+            current_cols = self._latest_shard_columns(ft)
+            if current_cols is not None:
+                current_hash = self._col_hash(current_cols)
+                if current_hash != stored_hash:
+                    logger.warning(
+                        "FeatureStore[%s] schema changed (stored=%s current=%s) — "
+                        "will rebuild", ft, stored_hash, current_hash
+                    )
+                    self.invalidate(ft)
+                    return False
+
+        return True
+
+    def invalidate(self, ft: FeatureType) -> None:
+        """
+        Force a full rebuild of one feature type on next build_or_append().
+        Deletes all shards for that type and clears metadata.
+        Call this whenever the feature builder logic changes.
+        """
+        shard_dir = self.base_dir / ft
+        if shard_dir.exists():
+            shutil.rmtree(shard_dir)
+            logger.info("FeatureStore[%s] shards deleted for rebuild", ft)
+        self._meta.pop(ft, None)
+        self._save_meta()
+        _read_shard.cache_clear()
 
     # ── Shard paths ───────────────────────────────────────────────────────────
 
@@ -176,9 +264,12 @@ class FeatureStore:
         for year, grp in new_rows.groupby(new_rows.index.year):
             path = self._macro_path(year)
             self._merge_and_write(grp, path, dedup_cols=None)
-        self._meta["macro"]["last_date"] = str(end.date())
+        cols = self._latest_shard_columns("macro") or []
+        self._meta.setdefault("macro", {})["last_date"] = str(end.date())
+        self._meta["macro"]["schema_hash"] = self._col_hash(cols)
         self._save_meta()
-        logger.info("FeatureStore[macro] persisted %d rows", len(new_rows))
+        logger.info("FeatureStore[macro] persisted %d rows (schema=%s)",
+                    len(new_rows), self._meta["macro"]["schema_hash"])
 
     def _append_sector(
         self,
@@ -228,9 +319,12 @@ class FeatureStore:
                 combined = grp.sort_index()
             self._write(combined, path)
 
-        self._meta["sector"]["last_date"] = str(end.date())
+        cols = self._latest_shard_columns("sector") or []
+        self._meta.setdefault("sector", {})["last_date"] = str(end.date())
+        self._meta["sector"]["schema_hash"] = self._col_hash(cols)
         self._save_meta()
-        logger.info("FeatureStore[sector] persisted %d rows", len(new_rows))
+        logger.info("FeatureStore[sector] persisted %d rows (schema=%s)",
+                    len(new_rows), self._meta["sector"]["schema_hash"])
 
     def _append_stock(
         self,
@@ -264,9 +358,12 @@ class FeatureStore:
                 dedup_cols=["date", "ticker"],
             )
 
-        self._meta["stock"]["last_date"] = str(end.date())
+        cols = self._latest_shard_columns("stock") or []
+        self._meta.setdefault("stock", {})["last_date"] = str(end.date())
+        self._meta["stock"]["schema_hash"] = self._col_hash(cols)
         self._save_meta()
-        logger.info("FeatureStore[stock] persisted %d rows", len(new_rows))
+        logger.info("FeatureStore[stock] persisted %d rows (schema=%s)",
+                    len(new_rows), self._meta["stock"]["schema_hash"])
 
     def _merge_and_write(
         self,
