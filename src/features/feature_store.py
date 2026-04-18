@@ -211,7 +211,22 @@ class FeatureStore:
             return
 
         for year, grp in new_rows.groupby(new_rows.index.year):
-            self._merge_and_write(grp, self._sector_path(year), dedup_cols=None)
+            path = self._sector_path(year)
+            existing = self._read(path)
+            if existing is not None:
+                combined = pd.concat([existing, grp])
+                # Dedup on (date, sector) — index is date, sector is a column
+                combined = (
+                    combined.reset_index()
+                    .rename(columns={"index": "date"})
+                    .drop_duplicates(subset=["date", "sector"], keep="last")
+                    .set_index("date")
+                    .sort_index()
+                )
+                combined.index.name = "date"
+            else:
+                combined = grp.sort_index()
+            self._write(combined, path)
 
         self._meta["sector"]["last_date"] = str(end.date())
         self._save_meta()
@@ -328,7 +343,9 @@ class FeatureStore:
             if not parts:
                 return pd.DataFrame()
             out = pd.concat(parts)
-            out = out[~out.index.duplicated(keep="last")].sort_index()
+            # Sector is long-format: 15 rows per date (one per sector).
+            # Do NOT dedup by index — the non-unique DatetimeIndex is intentional.
+            out = out.sort_index()
             return out.loc[start:end]
 
         else:  # stock
