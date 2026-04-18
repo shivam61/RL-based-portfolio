@@ -92,8 +92,7 @@ class StockFeatureBuilder:
         feat_dict["price_to_52w_high"] = prices / prices.rolling(252).max()
         feat_dict["price_to_52w_low"] = prices / prices.rolling(252).min()
 
-        # ── Reversal ──────────────────────────────────────────────────────────
-        feat_dict["reversal_1w"] = -feat_dict.get("ret_1w", pd.DataFrame())
+        # ── Mean-reversion ────────────────────────────────────────────────────
         feat_dict["zscore_6m"] = (
             (prices - prices.rolling(int(self.medium * 2)).mean())
             / prices.rolling(int(self.medium * 2)).std().replace(0, np.nan)
@@ -152,17 +151,10 @@ class StockFeatureBuilder:
             vol_20d = vols.rolling(20).mean().replace(0, np.nan)
             feat_dict["vol_spike"] = (vols / vol_20d).reindex(columns=prices.columns)
 
-        # RSI-14: classic momentum quality filter
-        delta = returns
-        gain = delta.clip(lower=0).rolling(14).mean()
-        loss = (-delta.clip(upper=0)).rolling(14).mean().replace(0, np.nan)
-        rs   = gain / loss
-        feat_dict["rsi_14"] = 100 - (100 / (1 + rs))
-
-        # 2-week return (between 1w and 1m, captures earnings drift window)
-        feat_dict["ret_2w"] = returns.rolling(10).apply(
-            lambda x: (1 + x).prod() - 1, raw=True
-        )
+        # RSI-14: gain/loss asymmetry — orthogonal to ret_1m level
+        gain = returns.clip(lower=0).rolling(14).mean()
+        loss = (-returns.clip(upper=0)).rolling(14).mean().replace(0, np.nan)
+        feat_dict["rsi_14"] = 100 - (100 / (1 + gain / loss))
 
         # ── Sector-relative features ──────────────────────────────────────────
         sectors = sorted(set(sector_map.values()))

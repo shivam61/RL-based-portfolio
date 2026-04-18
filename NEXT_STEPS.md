@@ -21,6 +21,7 @@ Best known result: **run_010 — 23.57% CAGR, Sharpe 0.93, ₹54.1L final NAV** 
 | **run_010** | **Ablation Config B: retrain_freq_weeks 12→8** | **23.57%** | **0.93** | -32.06% | **₹54.1L** | **+4.2% vs run_009** ✅ |
 | run_011 | INVALID — stale 36-col feature store served old data | 20.14% | 0.82 | -38.32% | ₹39.4L | discard |
 | run_012 | TASK-2: real 44-col technical feature set (ffill fix + new signals) | 19.88% | 0.74 | -31.03% | ₹38.5L | -3.7% vs run_010 ❌ |
+| run_013 | Pruned: dropped ret_2w + reversal_1w (42 features) | 17.94% | 0.76 | -29.34% | ₹32.0L | -5.6% vs run_010 ❌ |
 
 ### Ablation: Retrain Frequency × Event Triggers (run from run_009 state)
 
@@ -52,11 +53,12 @@ experience buffer will grow and performance should converge back to run_004 leve
 1. **Data quality beats model complexity.** The biggest win (+6.5% CAGR) was a bug fix
    (sector dedup), not a new feature. Every complexity addition since has hurt.
 
-5. **More features ≠ better ranker.** run_012 (44 features) underperformed run_010 (36 features).
-   Adding correlated momentum signals (ret_1m, ret_2w, rsi_14, ret_1m_vs_sector all encode
-   the same 1-month effect) degrades LightGBM LambdaRank via redundancy — the model splits
-   on near-duplicate columns, weakening each split's information gain. Next: prune to an
-   orthogonal set and re-test.
+5. **run_012/013 could not beat run_010.** Adding new technical features (44 cols) and then
+   pruning redundant ones (42 cols) both underperformed the original 36-feature baseline.
+   Dropping ret_2w + reversal_1w hurt further — those features carried real short-term signal
+   (2019 +18% vs +30%, 2020 +24% vs +51%). The real gap vs run_010 is likely the RL experience
+   buffer being reset — run_010 had accumulated buffer from prior runs; run_012/013 started fresh.
+   Next: revert stock features to run_010's 36-col set and re-run to isolate buffer effect.
 
 2. **RL needs data, not architecture.** With only 147 training steps, adding state dims
    adds noise faster than signal. P0-B and FII proxy both hurt for this reason.
