@@ -296,55 +296,40 @@ def layer3_temporal(
         if (feat, ticker) not in panel.columns:
             continue
 
-        panel_series = panel[(feat, ticker)].dropna()
+        panel_series = panel[(feat, ticker)]
 
         # Take last n_events quarter-end dates that have available_from
         check_rows = raw.dropna(subset=["available_from"]).tail(n_events)
 
+        # Correct leakage test: the feature value must NOT CHANGE in the window
+        # [q_date, available_from). Any change means new quarter data appeared early.
+        # (Non-null values in that window are expected — they are the previous
+        # quarter's forward-filled value, which is correct and not a leak.)
         for q_date, row in check_rows.iterrows():
             avail_from = pd.Timestamp(row["available_from"])
 
-            # Feature must NOT appear before available_from
-            before_avail = panel_series[panel_series.index < avail_from]
-            at_or_after   = panel_series[panel_series.index >= avail_from]
-
-            # Check if a new value appears before available_from
-            # (a value that matches this quarter's value)
-            if not at_or_after.empty and not before_avail.empty:
-                q_val = at_or_after.iloc[0]
-                # If the same value exists before available_from, that's leakage
-                matching_early = before_avail[
-                    (before_avail >= q_val - 1e-6) & (before_avail <= q_val + 1e-6)
-                ]
-                # Only flag if value appeared AFTER q_date (so it's actually
-                # this quarter's data, not a coincidentally equal prior value)
-                if not matching_early.empty:
-                    earliest_match = matching_early.index[0]
-                    if earliest_match >= q_date:
-                        logger.warning(
-                            "%s[LEAK]%s  %s | q_end=%s  available_from=%s  "
-                            "feature_appeared=%s  (leakage: %d days early)",
-                            RED, RESET, ticker,
-                            q_date.date(), avail_from.date(),
-                            earliest_match.date(),
-                            (avail_from - earliest_match).days,
-                        )
-                        leakage_found = True
-
-        # Verify feature onset matches available_from for each quarter
-        for q_date, row in check_rows.iterrows():
-            avail_from = pd.Timestamp(row["available_from"])
-            # Find first panel date where this quarter's value appears
-            at_or_after = panel_series[panel_series.index >= avail_from]
-            if at_or_after.empty:
+            prior = panel_series[panel_series.index < q_date].dropna()
+            if prior.empty:
                 continue
-            first_use = at_or_after.index[0]
-            gap_days = (first_use - avail_from).days
-            if gap_days > 5:  # allow small offset for trading-day rounding
-                logger.info(
-                    "  %s | q=%s  available=%s  first_use=%s  (gap=%d days — normal)",
-                    ticker, q_date.date(), avail_from.date(), first_use.date(), gap_days
+            prev_val = prior.iloc[-1]
+
+            window = panel_series[
+                (panel_series.index >= q_date) & (panel_series.index < avail_from)
+            ].dropna()
+            if window.empty:
+                continue
+
+            changed = window[abs(window - prev_val) > 1e-9]
+            if not changed.empty:
+                logger.warning(
+                    "%s[LEAK]%s  %s | q_end=%s  available_from=%s  "
+                    "value changed on %s (%.4f → %.4f, %d days early)",
+                    RED, RESET, ticker,
+                    q_date.date(), avail_from.date(),
+                    changed.index[0].date(), prev_val, changed.iloc[0],
+                    (avail_from - changed.index[0]).days,
                 )
+                leakage_found = True
 
     if not leakage_found:
         ok(f"No lookahead leakage detected across {len(sample_tickers)} tickers × {n_events} events")

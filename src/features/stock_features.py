@@ -56,7 +56,7 @@ class StockFeatureBuilder:
         All features lag-adjusted.
         """
         tickers = [t for t in price_matrix.columns if t in sector_map]
-        prices = price_matrix[tickers]
+        prices = price_matrix[tickers].ffill()  # fill holiday NaNs so rolling windows work
         returns = prices.pct_change()
 
         feat_dict: dict[str, pd.DataFrame] = {}
@@ -64,9 +64,7 @@ class StockFeatureBuilder:
         # ── Returns / Momentum ────────────────────────────────────────────────
         for h, name in [(5, "1w"), (self.short, "1m"), (self.medium, "3m"),
                         (int(self.medium * 2), "6m"), (self.long, "12m")]:
-            feat_dict[f"ret_{name}"] = returns.rolling(h).apply(
-                lambda x: (1 + x).prod() - 1, raw=True
-            )
+            feat_dict[f"ret_{name}"] = prices.pct_change(h)
 
         # skip-1-month momentum (standard factor)
         feat_dict["mom_12m_skip1m"] = (
@@ -145,9 +143,41 @@ class StockFeatureBuilder:
                 returns[vol_tickers].abs() / vols.replace(0, np.nan)
             ).rolling(self.short).mean()
 
+        # ── Additional momentum / trend features ─────────────────────────────
+        # MA crossover as continuous ratio (richer signal than binary above/below)
+        feat_dict["ma_50_200_ratio"] = (
+            prices.rolling(50).mean() / prices.rolling(200).mean().replace(0, np.nan) - 1
+        )
+
+        # Price percentile in 1-year range: 0 = at 52w low, 1 = at 52w high
+        roll_high = prices.rolling(self.long).max()
+        roll_low  = prices.rolling(self.long).min()
+        feat_dict["price_pctile_1y"] = (
+            (prices - roll_low) / (roll_high - roll_low).replace(0, np.nan)
+        )
+
+        # Volume spike: today's volume vs 20-day average (momentum confirmation)
+        if volume_matrix is not None and "avg_vol_1m" in feat_dict:
+            vol_tickers = [t for t in tickers if t in volume_matrix.columns]
+            vols = volume_matrix[vol_tickers]
+            vol_20d = vols.rolling(20).mean().replace(0, np.nan)
+            feat_dict["vol_spike"] = (vols / vol_20d).reindex(columns=prices.columns)
+
+        # RSI-14: classic momentum quality filter
+        delta = returns
+        gain = delta.clip(lower=0).rolling(14).mean()
+        loss = (-delta.clip(upper=0)).rolling(14).mean().replace(0, np.nan)
+        rs   = gain / loss
+        feat_dict["rsi_14"] = 100 - (100 / (1 + rs))
+
+        # 2-week return (between 1w and 1m, captures earnings drift window)
+        feat_dict["ret_2w"] = returns.rolling(10).apply(
+            lambda x: (1 + x).prod() - 1, raw=True
+        )
+
         # ── Sector-relative features ──────────────────────────────────────────
         sectors = sorted(set(sector_map.values()))
-        for feat_name in ["ret_1m", "ret_3m", "vol_3m"]:
+        for feat_name in ["ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_12m", "vol_3m"]:
             if feat_name not in feat_dict:
                 continue
             sector_means: dict[str, pd.Series] = {}

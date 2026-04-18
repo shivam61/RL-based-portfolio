@@ -44,6 +44,8 @@ class SectorFeatureBuilder:
         All features lagged 1 day.
         """
         sectors = sorted(set(sector_map.values()))
+        # ffill to fill holiday NaNs before rolling calculations
+        price_matrix = price_matrix.ffill()
         daily_returns = price_matrix.pct_change()
 
         all_rows = []
@@ -85,11 +87,23 @@ class SectorFeatureBuilder:
                     / bm_rets.rolling(self.medium).var().replace(0, np.nan)
                 )
 
-            # ── Breadth (fraction of stocks up over 1m / 3m) ─────────────────
+            # ── Breadth ───────────────────────────────────────────────────────
             rets_1m = price_matrix[tickers].pct_change(self.short)
             feat["breadth_1m"] = (rets_1m > 0).sum(axis=1) / len(tickers)
             rets_3m = price_matrix[tickers].pct_change(self.medium)
             feat["breadth_3m"] = (rets_3m > 0).sum(axis=1) / len(tickers)
+
+            # % stocks in sector above 50 DMA (validates sector trend quality)
+            ma50 = price_matrix[tickers].rolling(50).mean()
+            feat["pct_above_50ma"] = (
+                (price_matrix[tickers] > ma50).sum(axis=1) / len(tickers)
+            )
+
+            # % stocks near 52-week high (within 5%) — sector leadership strength
+            high_52w = price_matrix[tickers].rolling(self.long).max()
+            feat["new_high_ratio"] = (
+                (price_matrix[tickers] >= high_52w * 0.95).sum(axis=1) / len(tickers)
+            )
 
             # ── Dispersion (cross-sectional vol within sector) ────────────────
             feat["dispersion_1m"] = (
