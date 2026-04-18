@@ -86,6 +86,7 @@ class RLSectorAgent:
                 clip_range=self._rl_cfg.get("clip_range", 0.2),
                 ent_coef=self._rl_cfg.get("ent_coef", 0.01),
                 verbose=0,
+                device="cpu",
             )
         else:
             # continue training with new environment
