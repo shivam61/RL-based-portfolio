@@ -749,7 +749,7 @@ class WalkForwardEngine:
         out_dir = Path(self.cfg["paths"]["artifact_dir"])
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        self.nav_series.to_parquet(out_dir / "nav_series.parquet")
+        self.nav_series.to_frame("nav").to_parquet(out_dir / "nav_series.parquet")
         with open(out_dir / "rebalance_records.pkl", "wb") as f:
             pickle.dump(self.rebalance_records, f)
 
