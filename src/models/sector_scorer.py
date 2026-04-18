@@ -81,7 +81,7 @@ class SectorScorer:
                 "colsample_bytree": self._model_cfg["colsample_bytree"],
                 "min_child_samples": self._model_cfg["min_child_samples"],
                 "verbose": -1,
-                "n_jobs": -1,
+                "n_jobs": 1,
             }
             self.model = lgb.LGBMRegressor(**params)
             self.model.fit(X_arr, y.values)

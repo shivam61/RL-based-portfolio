@@ -85,7 +85,7 @@ class StockRanker:
                     "colsample_bytree": self._model_cfg["colsample_bytree"],
                     "min_child_samples": self._model_cfg["min_child_samples"],
                     "verbose": -1,
-                    "n_jobs": -1,
+                    "n_jobs": 1,
                 }
                 model = lgb.LGBMRanker(**params)
                 model.fit(X_scaled, y.values, group=groups)
