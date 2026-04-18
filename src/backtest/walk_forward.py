@@ -254,7 +254,7 @@ class WalkForwardEngine:
                 for _, row in ranking.iterrows():
                     ticker = row["ticker"]
                     raw_score = float(row["score"])
-                    alpha_scores[ticker] = raw_score * tilt
+                    alpha_scores[ticker] = raw_score  # tilt applied once in optimizer
 
             # fallback: if no alpha scores, use sector-momentum top stocks
             if not alpha_scores and not stock_feats_now.empty:
@@ -544,18 +544,29 @@ class WalkForwardEngine:
         sector_map = self.universe_mgr.get_sector_map(snapshot)
 
         # sector return matrix for labels
+        # NOTE: extend price window by fwd_window to allow label computation,
+        # but sector_feats are truncated to label_cutoff to prevent lookahead.
+        fwd_window = 28
+        label_cutoff = as_of - pd.offsets.BDay(fwd_window + 2)
+        extended_prices = self.price_matrix.loc[
+            (self.price_matrix.index >= train_start) &
+            (self.price_matrix.index < as_of)
+        ]
         sec_returns = pd.DataFrame({
-            sec: train_prices[[t for t, s in sector_map.items() if s == sec and t in train_prices.columns]].mean(axis=1).pct_change()
+            sec: extended_prices[[t for t, s in sector_map.items() if s == sec and t in extended_prices.columns]].mean(axis=1).pct_change()
             for sec in snapshot.sectors
         })
+
+        # Truncate sector features to label_cutoff (prevents forward-label leakage)
+        safe_sector_feats = sector_feats[sector_feats.index <= label_cutoff] if not sector_feats.empty else sector_feats
 
         # train sector scorer (monthly)
         if train_sector:
             t0 = time.perf_counter()
             self.sector_scorer.fit(
-                sector_feats,
+                safe_sector_feats,
                 sec_returns,
-                fwd_window=28,
+                fwd_window=fwd_window,
                 macro_features=self.macro_features.loc[
                     (self.macro_features.index >= train_start) &
                     (self.macro_features.index < as_of)
