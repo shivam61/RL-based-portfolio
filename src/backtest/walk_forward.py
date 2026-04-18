@@ -218,6 +218,7 @@ class WalkForwardEngine:
                     macro_state=macro_now.to_dict() if isinstance(macro_now, pd.Series) else macro_now,
                     sector_state=sector_state,
                     portfolio_state=port_feats,
+                    prev_realized_sector_weights=portfolio.sector_weights,
                 )
             else:
                 rl_decision = RLSectorAgent.rule_based_action(
@@ -454,6 +455,7 @@ class WalkForwardEngine:
                         "turnover": exec_result.total_turnover,
                         "concentration_hhi": risk_signal.hhi,
                         "liquidity_stress": float(risk_signal.liquidity_stress),
+                        "realized_sector_weights": dict(sw),
                     },
                 }
                 self.rl_agent.record_step(exp_step)

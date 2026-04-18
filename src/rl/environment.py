@@ -42,10 +42,11 @@ N_SECTORS = len(SECTORS)
 ACTION_DIM = N_SECTORS + 3
 
 # State dimensions
-MACRO_DIM = 12    # macro features
+MACRO_DIM = 12          # macro features
 SECTOR_DIM = N_SECTORS * 4  # per-sector: mom_1m, mom_3m, rel_str_1m, breadth_3m
-PORT_DIM = 10     # portfolio state features
-STATE_DIM = MACRO_DIM + SECTOR_DIM + PORT_DIM
+PORT_DIM = 10           # portfolio state features
+REALIZED_SECTOR_DIM = N_SECTORS  # actual post-optimizer sector weights from prior rebalance
+STATE_DIM = MACRO_DIM + SECTOR_DIM + PORT_DIM + REALIZED_SECTOR_DIM  # 12+60+10+15 = 97
 
 
 _GymBase = gym.Env if HAS_GYM else object
@@ -166,6 +167,18 @@ class SectorAllocationEnv(_GymBase):
         for i, k in enumerate(port_keys[:PORT_DIM]):
             v = port.get(k, 0.0)
             state_vec[offset + i] = 0.0 if (v is None or np.isnan(v)) else float(v)
+        offset += PORT_DIM
+
+        # realized sector weights from previous step's outcome
+        # gives RL feedback on what the optimizer actually produced vs intended tilts
+        if idx > 0:
+            prev_realized = self.experience[idx - 1].get("outcome", {}).get(
+                "realized_sector_weights", {}
+            )
+        else:
+            prev_realized = {}
+        for j, sec in enumerate(SECTORS):
+            state_vec[offset + j] = float(prev_realized.get(sec, 0.0))
 
         # clip and normalize
         state_vec = np.clip(state_vec, -10, 10)
