@@ -114,10 +114,9 @@ Revisit after 12+ months of live rebalancing (~13 new steps/quarter × 4 quarter
 3. `realized_sector_weights[15]` — P0-B (already coded, just not enabled)
 **Files**: `environment.py` REALIZED_SECTOR_DIM re-enable + add new PORT_DIM keys
 
-### TASK-4 — RL timesteps experiment [LOW RISK, try when ready]
-**Hypothesis**: 20k timesteps with 147 steps may be too few PPO updates to converge.
-Try 50k. Single config line: `total_timesteps: 50000`.
-Backtest takes ~30 min. Low risk — if it hurts, revert immediately.
+### TASK-4 — RL timesteps experiment [DONE ✅ — 20k confirmed optimal]
+**Result**: 50k = 23.37% CAGR / Sharpe 0.89 vs 20k = 23.57% / Sharpe 0.93.
+More timesteps = more overfitting to the same thin buffer. 20k stays.
 
 ### TASK-5 — Sector cap revisit [DEFERRED — needs more live data]
 Re-enable P0-A (cap 0.35→0.50) only after TASK-3 unlocks (500+ live steps).

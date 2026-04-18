@@ -82,7 +82,8 @@ def main(force, start, end, config, macro_only, equity_only, earnings_only, no_e
                 price_matrix = None
 
         if price_matrix is not None:
-            tickers = [t for t in price_matrix.columns if not t.startswith("^")]
+            # Only equity tickers — skip macro proxies (futures, FX, indices)
+            tickers = [t for t in price_matrix.columns if t.endswith(".NS") or t.endswith(".BO")]
             download_earnings(tickers, raw_dir, force=force)
             panel = build_earnings_panel(tickers, price_matrix.index, raw_dir)
             save_earnings_panel(panel, processed_path)

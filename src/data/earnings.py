@@ -85,11 +85,16 @@ def download_earnings(
     return results
 
 
-def _safe_growth(series: pd.Series) -> pd.Series:
-    """YoY growth: compare each quarter to the one 4 periods prior."""
+def _safe_growth(series: pd.Series, winsor_clip: float = 5.0) -> pd.Series:
+    """
+    YoY growth: compare each quarter to the one 4 periods prior.
+    Winsorised to [-winsor_clip, winsor_clip] to handle near-zero base periods
+    (e.g. pandemic quarters where earnings briefly touched zero).
+    """
     shifted = series.shift(4)
     denom = shifted.abs().replace(0, np.nan)
-    return (series - shifted) / denom
+    raw = (series - shifted) / denom
+    return raw.clip(-winsor_clip, winsor_clip)
 
 
 def build_earnings_panel(
@@ -124,29 +129,40 @@ def build_earnings_panel(
         cols_lower = {c: c.lower().replace(" ", "_") for c in df.columns}
         df = df.rename(columns=cols_lower)
 
-        # Revenue
-        rev_col = next((c for c in df.columns if "total_revenue" in c or "revenue" == c), None)
+        # Revenue — broad fallback chain covers banks (net_interest_income)
+        # and insurers (total_expenses as proxy) in addition to regular companies
+        _REV_CANDIDATES = [
+            "total_revenue",
+            "revenue",
+            "net_interest_income",   # banks
+            "operating_revenue",
+            "gross_profit",          # last resort: still growth-correlated
+        ]
+        rev_col = next((c for c in _REV_CANDIDATES if c in df.columns), None)
         if rev_col:
             rev = df[rev_col].dropna()
             feature_frames["rev_growth_yoy"][ticker] = _safe_growth(rev)
 
-        # Net income
-        ni_col = next(
-            (c for c in df.columns if c in ("net_income", "net_income_common_stockholders")),
-            None,
-        )
+        # Net income — broad fallback chain
+        _NI_CANDIDATES = [
+            "net_income",
+            "net_income_common_stockholders",
+            "net_income_from_continuing_operation_net_minority_interest",
+            "normalized_income",
+        ]
+        ni_col = next((c for c in _NI_CANDIDATES if c in df.columns), None)
         if ni_col:
             ni = df[ni_col].dropna()
             feature_frames["earnings_growth_yoy"][ticker] = _safe_growth(ni)
 
-        # EBITDA margin
+        # EBITDA margin (non-banks only — banks have no meaningful EBITDA)
         ebitda_col = next((c for c in df.columns if "ebitda" in c), None)
-        if ebitda_col and rev_col:
+        if ebitda_col and rev_col and rev_col not in ("net_interest_income",):
             ebitda = df[ebitda_col].dropna()
             rev_align = df[rev_col].reindex(ebitda.index).replace(0, np.nan)
-            margin = ebitda / rev_align
+            margin = (ebitda / rev_align).clip(-1.0, 2.0)   # margin clipped to sane range
             feature_frames["ebitda_margin"][ticker] = margin
-            feature_frames["ebitda_margin_chg"][ticker] = _safe_growth(margin)
+            feature_frames["ebitda_margin_chg"][ticker] = _safe_growth(margin, winsor_clip=2.0)
 
     # ── Reindex each quarterly series to daily and forward-fill ──────────────
     panel_parts: list[pd.DataFrame] = []
