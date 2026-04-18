@@ -1,7 +1,7 @@
 # Next Steps — Improvement Backlog
 
 Each item is implemented one at a time, backtested, committed, and measured before moving on.
-Best known result: **ablation Config F — 23.96% CAGR, Sharpe 0.88, ₹56.0L final NAV** (8-week retrain + event triggers)
+Best known result: **run_010 — 23.57% CAGR, Sharpe 0.93, ₹54.1L final NAV** (8-week retrain, no triggers)
 
 ---
 
@@ -18,6 +18,7 @@ Best known result: **ablation Config F — 23.96% CAGR, Sharpe 0.88, ₹56.0L fi
 | run_007 | P0-A+B combined (cap 0.50 + realized weights) | 11.3% | 0.35 | -39.48% | ₹19.4L | -12.4% ❌ |
 | run_008 | FII proxy in RL state (noisy signal) | 20.3% | 0.78 | -29.91% | ₹37.5L | -3.4% ❌ |
 | run_009 | Reverted: noisy signals removed, clean baseline | 19.34% | 0.71 | -30.58% | ₹36.5L | -4.4% |
+| **run_010** | **Ablation Config B: retrain_freq_weeks 12→8** | **23.57%** | **0.93** | -32.06% | **₹54.1L** | **+4.2% vs run_009** ✅ |
 
 ### Ablation: Retrain Frequency × Event Triggers (run from run_009 state)
 

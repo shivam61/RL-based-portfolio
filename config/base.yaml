@@ -108,7 +108,7 @@ rl:
   reward_lambda_to: 0.5         # turnover penalty weight
   reward_lambda_conc: 0.3       # concentration penalty
   reward_lambda_liq: 0.2        # liquidity penalty
-  retrain_freq_weeks: 12        # RL policy retrain every 3 months
+  retrain_freq_weeks: 8         # ablation Config B: optimal frequency (8w beats 4/12/26w)
   use_rl: true                  # set false to disable RL overlay
 
 # ── Adaptive retrain triggers ─────────────────────────────────────────────────
