@@ -1,0 +1,117 @@
+# ── Core simulation parameters ───────────────────────────────────────────────
+backtest:
+  start_date: "2013-01-01"
+  end_date: "2026-04-17"        # inclusive; use "latest" to auto-detect
+  initial_capital: 500000       # INR
+  rebalance_freq_weeks: 4
+  min_train_years: 2            # walk-forward warm-up
+  transaction_cost_bps: 25      # round-trip bps per trade
+  slippage_bps: 10              # market impact per trade
+  emergency_rebalance: true     # risk-triggered intra-period rebalance
+  benchmark_ticker: "^NSEI"
+
+# ── Data paths ────────────────────────────────────────────────────────────────
+paths:
+  raw_data: "data/raw"
+  processed_data: "data/processed"
+  feature_data: "data/features"
+  artifact_dir: "artifacts"
+  model_dir: "artifacts/models"
+  report_dir: "artifacts/reports"
+  log_dir: "artifacts/logs"
+
+# ── Universe ──────────────────────────────────────────────────────────────────
+universe:
+  config_file: "config/universe.yaml"
+  min_market_cap_cr: 500        # INR crore
+  min_avg_volume_cr: 1          # INR crore daily avg volume
+  max_stocks: 120
+  large_cap_top_n: 100          # Nifty 100 proxy
+  mid_cap_top_n: 150
+  small_cap_top_n: 250
+  cap_buckets:
+    large: 0.60
+    mid: 0.30
+    small: 0.10
+
+# ── Features ─────────────────────────────────────────────────────────────────
+features:
+  lookback_short: 21            # ~1 month
+  lookback_medium: 63           # ~3 months
+  lookback_long: 252            # ~1 year
+  macro_lag: 1                  # days lag for macro features
+  stock_lag: 1                  # days lag for stock features
+
+# ── Sector scoring model ──────────────────────────────────────────────────────
+sector_model:
+  type: "lightgbm"
+  n_estimators: 100
+  learning_rate: 0.05
+  max_depth: 4
+  num_leaves: 31
+  subsample: 0.8
+  colsample_bytree: 0.8
+  min_child_samples: 20
+  retrain_freq_weeks: 12         # retrain every quarter (much faster than every 4w)
+  target: "fwd_4w_return_rank"  # cross-sectional rank of 4-week forward return
+
+# ── Stock ranking model ───────────────────────────────────────────────────────
+stock_model:
+  type: "lightgbm"
+  objective: "rank"
+  n_estimators: 60
+  learning_rate: 0.08
+  max_depth: 4
+  num_leaves: 31
+  subsample: 0.8
+  colsample_bytree: 0.8
+  min_child_samples: 30
+  retrain_freq_weeks: 12         # retrain every quarter
+  top_k_per_sector: 5           # stocks selected per sector
+
+# ── Portfolio optimizer ───────────────────────────────────────────────────────
+optimizer:
+  objective: "mean_variance"
+  risk_aversion: 2.0
+  max_stock_weight: 0.08
+  max_sector_weight: 0.35
+  min_stock_weight: 0.005
+  max_cash: 0.30
+  min_cash: 0.0
+  max_turnover_per_rebalance: 0.40
+  no_trade_band: 0.005          # ignore weight changes below this
+  solver: "CLARABEL"
+
+# ── Risk engine ───────────────────────────────────────────────────────────────
+risk:
+  max_drawdown_soft: 0.12       # soft alert
+  max_drawdown_hard: 0.18       # hard cut
+  max_realized_vol_ann: 0.30
+  max_concentration_hhi: 0.15   # Herfindahl-Hirschman Index
+  min_liquidity_days: 10        # portfolio can be liquidated in N days
+  stress_cash_floor: 0.15       # cash floor in stressed regime
+  regime_vol_threshold: 0.22    # above → stressed
+
+# ── RL agent ─────────────────────────────────────────────────────────────────
+rl:
+  algorithm: "PPO"
+  total_timesteps: 8000          # per incremental retrain (not full; use scripts/train_rl.py for full)
+  learning_rate: 3.0e-4
+  n_steps: 512
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+  reward_lambda_dd: 2.0         # drawdown penalty weight
+  reward_lambda_to: 0.5         # turnover penalty weight
+  reward_lambda_conc: 0.3       # concentration penalty
+  reward_lambda_liq: 0.2        # liquidity penalty
+  retrain_freq_weeks: 12        # RL policy retrain every 3 months
+  use_rl: true                  # set false to disable RL overlay
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging:
+  level: "INFO"
+  format: "%(asctime)s | %(levelname)s | %(name)s | %(message)s"

@@ -1,0 +1,522 @@
+# Indian equity universe — NSE tickers with .NS suffix
+# sector: one of the 14 canonical sectors used throughout the system
+# cap: large | mid | small
+
+stocks:
+
+  # ── Information Technology ────────────────────────────────────────────────
+  - ticker: TCS.NS
+    name: Tata Consultancy Services
+    sector: IT
+    cap: large
+  - ticker: INFY.NS
+    name: Infosys
+    sector: IT
+    cap: large
+  - ticker: WIPRO.NS
+    name: Wipro
+    sector: IT
+    cap: large
+  - ticker: HCLTECH.NS
+    name: HCL Technologies
+    sector: IT
+    cap: large
+  - ticker: TECHM.NS
+    name: Tech Mahindra
+    sector: IT
+    cap: large
+  - ticker: LTIM.NS
+    name: LTIMindtree
+    sector: IT
+    cap: large
+  - ticker: COFORGE.NS
+    name: Coforge
+    sector: IT
+    cap: mid
+  - ticker: PERSISTENT.NS
+    name: Persistent Systems
+    sector: IT
+    cap: mid
+  - ticker: MPHASIS.NS
+    name: Mphasis
+    sector: IT
+    cap: mid
+
+  # ── Banking ───────────────────────────────────────────────────────────────
+  - ticker: HDFCBANK.NS
+    name: HDFC Bank
+    sector: Banking
+    cap: large
+  - ticker: ICICIBANK.NS
+    name: ICICI Bank
+    sector: Banking
+    cap: large
+  - ticker: SBIN.NS
+    name: State Bank of India
+    sector: Banking
+    cap: large
+  - ticker: KOTAKBANK.NS
+    name: Kotak Mahindra Bank
+    sector: Banking
+    cap: large
+  - ticker: AXISBANK.NS
+    name: Axis Bank
+    sector: Banking
+    cap: large
+  - ticker: INDUSINDBK.NS
+    name: IndusInd Bank
+    sector: Banking
+    cap: large
+  - ticker: FEDERALBNK.NS
+    name: Federal Bank
+    sector: Banking
+    cap: mid
+  - ticker: BANDHANBNK.NS
+    name: Bandhan Bank
+    sector: Banking
+    cap: mid
+  - ticker: IDFCFIRSTB.NS
+    name: IDFC First Bank
+    sector: Banking
+    cap: mid
+
+  # ── Financial Services (NBFC / Insurance) ─────────────────────────────────
+  - ticker: BAJFINANCE.NS
+    name: Bajaj Finance
+    sector: FinancialServices
+    cap: large
+  - ticker: BAJAJFINSV.NS
+    name: Bajaj Finserv
+    sector: FinancialServices
+    cap: large
+  - ticker: SBILIFE.NS
+    name: SBI Life Insurance
+    sector: FinancialServices
+    cap: large
+  - ticker: HDFCLIFE.NS
+    name: HDFC Life Insurance
+    sector: FinancialServices
+    cap: large
+  - ticker: CHOLAFIN.NS
+    name: Cholamandalam Finance
+    sector: FinancialServices
+    cap: mid
+  - ticker: MUTHOOTFIN.NS
+    name: Muthoot Finance
+    sector: FinancialServices
+    cap: mid
+  - ticker: LICHSGFIN.NS
+    name: LIC Housing Finance
+    sector: FinancialServices
+    cap: mid
+
+  # ── FMCG ─────────────────────────────────────────────────────────────────
+  - ticker: HINDUNILVR.NS
+    name: Hindustan Unilever
+    sector: FMCG
+    cap: large
+  - ticker: ITC.NS
+    name: ITC
+    sector: FMCG
+    cap: large
+  - ticker: NESTLEIND.NS
+    name: Nestle India
+    sector: FMCG
+    cap: large
+  - ticker: BRITANNIA.NS
+    name: Britannia Industries
+    sector: FMCG
+    cap: large
+  - ticker: DABUR.NS
+    name: Dabur India
+    sector: FMCG
+    cap: large
+  - ticker: MARICO.NS
+    name: Marico
+    sector: FMCG
+    cap: mid
+  - ticker: COLPAL.NS
+    name: Colgate-Palmolive India
+    sector: FMCG
+    cap: mid
+  - ticker: GODREJCP.NS
+    name: Godrej Consumer Products
+    sector: FMCG
+    cap: mid
+
+  # ── Automobiles ───────────────────────────────────────────────────────────
+  - ticker: MARUTI.NS
+    name: Maruti Suzuki
+    sector: Automobiles
+    cap: large
+  - ticker: TATAMOTORS.NS
+    name: Tata Motors
+    sector: Automobiles
+    cap: large
+  - ticker: "BAJAJ-AUTO.NS"
+    name: Bajaj Auto
+    sector: Automobiles
+    cap: large
+  - ticker: EICHERMOT.NS
+    name: Eicher Motors
+    sector: Automobiles
+    cap: large
+  - ticker: HEROMOTOCO.NS
+    name: Hero MotoCorp
+    sector: Automobiles
+    cap: large
+  - ticker: M&M.NS
+    name: Mahindra & Mahindra
+    sector: Automobiles
+    cap: large
+  - ticker: ASHOKLEY.NS
+    name: Ashok Leyland
+    sector: Automobiles
+    cap: mid
+  - ticker: TVSMOTOR.NS
+    name: TVS Motor
+    sector: Automobiles
+    cap: mid
+
+  # ── Pharmaceuticals ───────────────────────────────────────────────────────
+  - ticker: SUNPHARMA.NS
+    name: Sun Pharmaceutical
+    sector: Pharma
+    cap: large
+  - ticker: DRREDDY.NS
+    name: Dr. Reddy's Laboratories
+    sector: Pharma
+    cap: large
+  - ticker: CIPLA.NS
+    name: Cipla
+    sector: Pharma
+    cap: large
+  - ticker: DIVISLAB.NS
+    name: Divi's Laboratories
+    sector: Pharma
+    cap: large
+  - ticker: AUROPHARMA.NS
+    name: Aurobindo Pharma
+    sector: Pharma
+    cap: mid
+  - ticker: TORNTPHARM.NS
+    name: Torrent Pharmaceuticals
+    sector: Pharma
+    cap: mid
+  - ticker: ALKEM.NS
+    name: Alkem Laboratories
+    sector: Pharma
+    cap: mid
+  - ticker: BIOCON.NS
+    name: Biocon
+    sector: Pharma
+    cap: mid
+
+  # ── Energy & Oil & Gas ────────────────────────────────────────────────────
+  - ticker: RELIANCE.NS
+    name: Reliance Industries
+    sector: Energy
+    cap: large
+  - ticker: ONGC.NS
+    name: ONGC
+    sector: Energy
+    cap: large
+  - ticker: BPCL.NS
+    name: Bharat Petroleum
+    sector: Energy
+    cap: large
+  - ticker: IOC.NS
+    name: Indian Oil Corporation
+    sector: Energy
+    cap: large
+  - ticker: GAIL.NS
+    name: GAIL India
+    sector: Energy
+    cap: large
+  - ticker: PETRONET.NS
+    name: Petronet LNG
+    sector: Energy
+    cap: mid
+  - ticker: MGL.NS
+    name: Mahanagar Gas
+    sector: Energy
+    cap: mid
+
+  # ── Metals & Mining ───────────────────────────────────────────────────────
+  - ticker: TATASTEEL.NS
+    name: Tata Steel
+    sector: Metals
+    cap: large
+  - ticker: HINDALCO.NS
+    name: Hindalco Industries
+    sector: Metals
+    cap: large
+  - ticker: JSWSTEEL.NS
+    name: JSW Steel
+    sector: Metals
+    cap: large
+  - ticker: VEDL.NS
+    name: Vedanta
+    sector: Metals
+    cap: large
+  - ticker: SAIL.NS
+    name: Steel Authority of India
+    sector: Metals
+    cap: large
+  - ticker: NMDC.NS
+    name: NMDC
+    sector: Metals
+    cap: mid
+  - ticker: COALINDIA.NS
+    name: Coal India
+    sector: Metals
+    cap: large
+
+  # ── Telecom ───────────────────────────────────────────────────────────────
+  - ticker: BHARTIARTL.NS
+    name: Bharti Airtel
+    sector: Telecom
+    cap: large
+  - ticker: INDUSTOWER.NS
+    name: Indus Towers
+    sector: Telecom
+    cap: large
+
+  # ── Cement ────────────────────────────────────────────────────────────────
+  - ticker: ULTRACEMCO.NS
+    name: UltraTech Cement
+    sector: Cement
+    cap: large
+  - ticker: GRASIM.NS
+    name: Grasim Industries
+    sector: Cement
+    cap: large
+  - ticker: AMBUJACEM.NS
+    name: Ambuja Cements
+    sector: Cement
+    cap: large
+  - ticker: ACC.NS
+    name: ACC
+    sector: Cement
+    cap: mid
+  - ticker: SHREECEM.NS
+    name: Shree Cement
+    sector: Cement
+    cap: large
+
+  # ── Capital Goods & Infrastructure ───────────────────────────────────────
+  - ticker: LT.NS
+    name: Larsen & Toubro
+    sector: CapitalGoods
+    cap: large
+  - ticker: POWERGRID.NS
+    name: Power Grid Corporation
+    sector: CapitalGoods
+    cap: large
+  - ticker: NTPC.NS
+    name: NTPC
+    sector: CapitalGoods
+    cap: large
+  - ticker: BHEL.NS
+    name: BHEL
+    sector: CapitalGoods
+    cap: large
+  - ticker: ABB.NS
+    name: ABB India
+    sector: CapitalGoods
+    cap: mid
+  - ticker: SIEMENS.NS
+    name: Siemens India
+    sector: CapitalGoods
+    cap: mid
+  - ticker: CUMMINSIND.NS
+    name: Cummins India
+    sector: CapitalGoods
+    cap: mid
+  - ticker: ADANIPORTS.NS
+    name: Adani Ports
+    sector: CapitalGoods
+    cap: large
+
+  # ── Consumer Discretionary ────────────────────────────────────────────────
+  - ticker: ASIANPAINT.NS
+    name: Asian Paints
+    sector: ConsumerDiscretionary
+    cap: large
+  - ticker: TITAN.NS
+    name: Titan Company
+    sector: ConsumerDiscretionary
+    cap: large
+  - ticker: HAVELLS.NS
+    name: Havells India
+    sector: ConsumerDiscretionary
+    cap: mid
+  - ticker: PIDILITIND.NS
+    name: Pidilite Industries
+    sector: ConsumerDiscretionary
+    cap: large
+  - ticker: VOLTAS.NS
+    name: Voltas
+    sector: ConsumerDiscretionary
+    cap: mid
+  - ticker: WHIRLPOOL.NS
+    name: Whirlpool India
+    sector: ConsumerDiscretionary
+    cap: mid
+  - ticker: DMART.NS
+    name: Avenue Supermarts (D-Mart)
+    sector: ConsumerDiscretionary
+    cap: large
+
+  # ── Healthcare ────────────────────────────────────────────────────────────
+  - ticker: APOLLOHOSP.NS
+    name: Apollo Hospitals
+    sector: Healthcare
+    cap: large
+  - ticker: FORTIS.NS
+    name: Fortis Healthcare
+    sector: Healthcare
+    cap: mid
+  - ticker: MAXHEALTH.NS
+    name: Max Healthcare
+    sector: Healthcare
+    cap: mid
+  - ticker: METROPOLIS.NS
+    name: Metropolis Healthcare
+    sector: Healthcare
+    cap: mid
+
+  # ── Real Estate ───────────────────────────────────────────────────────────
+  - ticker: DLF.NS
+    name: DLF
+    sector: RealEstate
+    cap: large
+  - ticker: GODREJPROP.NS
+    name: Godrej Properties
+    sector: RealEstate
+    cap: mid
+  - ticker: OBEROIRLTY.NS
+    name: Oberoi Realty
+    sector: RealEstate
+    cap: mid
+  - ticker: PRESTIGE.NS
+    name: Prestige Estates
+    sector: RealEstate
+    cap: mid
+  - ticker: BRIGADE.NS
+    name: Brigade Enterprises
+    sector: RealEstate
+    cap: mid
+
+  # ── Chemicals ─────────────────────────────────────────────────────────────
+  - ticker: DEEPAKNTR.NS
+    name: Deepak Nitrite
+    sector: Chemicals
+    cap: mid
+  - ticker: PIIND.NS
+    name: PI Industries
+    sector: Chemicals
+    cap: mid
+  - ticker: ALKYLAMINE.NS
+    name: Alkyl Amines
+    sector: Chemicals
+    cap: small
+  - ticker: AARTIIND.NS
+    name: Aarti Industries
+    sector: Chemicals
+    cap: mid
+  - ticker: NAVINFLUOR.NS
+    name: Navin Fluorine
+    sector: Chemicals
+    cap: mid
+
+# ── Sector metadata ───────────────────────────────────────────────────────────
+sectors:
+  IT:
+    commodity_sensitivity: low
+    rate_sensitivity: low
+    fx_sensitivity: high      # USD revenue
+    cyclicality: medium
+  Banking:
+    commodity_sensitivity: low
+    rate_sensitivity: high
+    fx_sensitivity: low
+    cyclicality: high
+  FinancialServices:
+    commodity_sensitivity: low
+    rate_sensitivity: high
+    fx_sensitivity: low
+    cyclicality: high
+  FMCG:
+    commodity_sensitivity: medium
+    rate_sensitivity: low
+    fx_sensitivity: low
+    cyclicality: low
+  Automobiles:
+    commodity_sensitivity: high
+    rate_sensitivity: medium
+    fx_sensitivity: medium
+    cyclicality: high
+  Pharma:
+    commodity_sensitivity: low
+    rate_sensitivity: low
+    fx_sensitivity: high
+    cyclicality: low
+  Energy:
+    commodity_sensitivity: high
+    rate_sensitivity: low
+    fx_sensitivity: medium
+    cyclicality: high
+  Metals:
+    commodity_sensitivity: high
+    rate_sensitivity: low
+    fx_sensitivity: medium
+    cyclicality: high
+  Telecom:
+    commodity_sensitivity: low
+    rate_sensitivity: high
+    fx_sensitivity: low
+    cyclicality: low
+  Cement:
+    commodity_sensitivity: high
+    rate_sensitivity: medium
+    fx_sensitivity: low
+    cyclicality: high
+  CapitalGoods:
+    commodity_sensitivity: medium
+    rate_sensitivity: medium
+    fx_sensitivity: low
+    cyclicality: high
+  ConsumerDiscretionary:
+    commodity_sensitivity: low
+    rate_sensitivity: medium
+    fx_sensitivity: low
+    cyclicality: medium
+  Healthcare:
+    commodity_sensitivity: low
+    rate_sensitivity: low
+    fx_sensitivity: low
+    cyclicality: low
+  RealEstate:
+    commodity_sensitivity: medium
+    rate_sensitivity: high
+    fx_sensitivity: low
+    cyclicality: high
+  Chemicals:
+    commodity_sensitivity: high
+    rate_sensitivity: low
+    fx_sensitivity: medium
+    cyclicality: medium
+
+# ── Global market proxies ─────────────────────────────────────────────────────
+global_proxies:
+  nifty50: "^NSEI"
+  nifty_bank: "^NSEBANK"
+  sp500: "^GSPC"
+  vix: "^VIX"
+  crude_oil: "CL=F"
+  gold: "GC=F"
+  dxy: "DX-Y.NYB"
+  usdinr: "INR=X"
+  us_10y: "^TNX"
+  us_2y: "^IRX"

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.env
+venv/
+.venv/
+
+# Data & artifacts (large files)
+data/raw/
+data/processed/
+artifacts/feature_store/
+artifacts/models/
+artifacts/reports/
+*.parquet
+*.pkl
+*.h5
+
+# Logs
+*.log
+artifacts/logs/
+
+# IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Claude
+.claude/
