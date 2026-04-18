@@ -120,6 +120,34 @@ class MacroFeatureBuilder:
             feats["nifty_above_200ma"] = (nifty > nifty.rolling(200).mean()).astype(float)
             feats["nifty_vol_1m"] = rolling_vol(nifty.pct_change(), 21, 252)
 
+        # ── NSE sector indices ────────────────────────────────────────────────
+        if "nifty_bank" in macro_df.columns:
+            nb = macro_df["nifty_bank"]
+            feats["niftybank_ret_1m"] = nb.pct_change(21)
+            feats["niftybank_ret_3m"] = nb.pct_change(63)
+            if "nifty50" in macro_df.columns:
+                feats["bank_vs_nifty_rel_1m"] = (
+                    nb.pct_change(21) - macro_df["nifty50"].pct_change(21)
+                )
+
+        if "nifty_it" in macro_df.columns:
+            ni = macro_df["nifty_it"]
+            feats["niftyit_ret_1m"] = ni.pct_change(21)
+            feats["niftyit_ret_3m"] = ni.pct_change(63)
+            if "nifty50" in macro_df.columns:
+                feats["it_vs_nifty_rel_1m"] = (
+                    ni.pct_change(21) - macro_df["nifty50"].pct_change(21)
+                )
+
+        # ── India VIX ─────────────────────────────────────────────────────────
+        if "india_vix" in macro_df.columns:
+            feats["india_vix_ret_1m"] = macro_df["india_vix"].pct_change(21)
+            feats["india_vix_pctile_1y"] = (
+                macro_df["india_vix"]
+                .rolling(252)
+                .apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1])
+            )
+
         # ── Composite signals ─────────────────────────────────────────────────
         # Risk-on / risk-off score (0 = full risk-off, 1 = full risk-on)
         risk_on_components = []

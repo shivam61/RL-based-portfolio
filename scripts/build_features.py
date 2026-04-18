@@ -50,7 +50,7 @@ def main(incremental: bool, start: str | None, end: str | None, feature_types: s
     processed = Path(cfg["paths"]["processed_data"])
     price_path  = processed / "price_matrix.parquet"
     volume_path = processed / "volume_matrix.parquet"
-    macro_path  = processed / "macro_data.parquet"
+    macro_path  = processed / "macro.parquet"
 
     if not price_path.exists():
         logger.error("Price matrix not found at %s — run download_data.py first", price_path)

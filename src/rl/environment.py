@@ -75,6 +75,7 @@ class SectorAllocationEnv(_GymBase):
         self._rng = np.random.default_rng(seed)
         self._step_idx: int = 0
         self._max_steps: int = max(len(experience_buffer), 1)
+        self._return_history: list[float] = []   # rolling window for vol estimation
 
         if HAS_GYM:
             self._setup_gym_spaces()
@@ -104,6 +105,7 @@ class SectorAllocationEnv(_GymBase):
     ) -> tuple[np.ndarray, dict]:
         # start from a random point in experience buffer
         self._step_idx = int(self._rng.integers(0, max(1, self._max_steps - 10)))
+        self._return_history = []
         obs = self._get_obs(self._step_idx)
         return obs.astype(np.float32), {}
 
@@ -181,8 +183,19 @@ class SectorAllocationEnv(_GymBase):
         hhi = float(outcome.get("concentration_hhi", 0.0))
         liq_stress = float(outcome.get("liquidity_stress", 0.0))
 
+        # Sharpe-based reward: scale return by rolling vol estimate (annualized)
+        self._return_history.append(port_return)
+        window = min(len(self._return_history), 12)  # ~12 periods = 1 year
+        if window >= 3:
+            vol = float(np.std(self._return_history[-window:]) * np.sqrt(13) + 1e-6)
+            # risk-free per 4-week period (6.5% annual RBI rate)
+            rf_period = 0.065 / 13
+            sharpe_component = (port_return - rf_period) / vol
+        else:
+            sharpe_component = port_return * 10  # no vol history yet; scale raw return
+
         reward = (
-            port_return
+            sharpe_component
             - rl_cfg["reward_lambda_dd"] * drawdown
             - rl_cfg["reward_lambda_to"] * turnover
             - rl_cfg["reward_lambda_conc"] * hhi

@@ -512,8 +512,10 @@ sectors:
 global_proxies:
   nifty50: "^NSEI"
   nifty_bank: "^NSEBANK"
+  nifty_it: "^CNXIT"
   sp500: "^GSPC"
   vix: "^VIX"
+  india_vix: "^INDIAVIX"
   crude_oil: "CL=F"
   gold: "GC=F"
   dxy: "DX-Y.NYB"

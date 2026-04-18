@@ -194,6 +194,18 @@ class MacroDataManager:
                 .apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1])
             )
 
+        if "india_vix" in macro.columns:
+            macro["india_vix_ret_1m"] = macro["india_vix"].pct_change(21)
+            macro["india_vix_pctile_1y"] = (
+                macro["india_vix"]
+                .rolling(252)
+                .apply(lambda x: pd.Series(x).rank(pct=True).iloc[-1])
+            )
+            # India VIX is more relevant than US VIX for Indian equities; prefer it
+            macro["vix_pctile_1y"] = macro["india_vix_pctile_1y"].combine_first(
+                macro.get("vix_pctile_1y", pd.Series(dtype=float))
+            )
+
         if "sp500" in macro.columns:
             macro["sp500_ret_1m"] = macro["sp500"].pct_change(21)
             macro["sp500_ret_3m"] = macro["sp500"].pct_change(63)
