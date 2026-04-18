@@ -1,7 +1,7 @@
 # Next Steps — Improvement Backlog
 
 Each item is implemented one at a time, backtested, committed, and measured before moving on.
-Best known result: **run_004 — 23.71% CAGR, Sharpe 0.92, ₹54.8L final NAV**
+Best known result: **ablation Config F — 23.96% CAGR, Sharpe 0.88, ₹56.0L final NAV** (8-week retrain + event triggers)
 
 ---
 
@@ -18,6 +18,24 @@ Best known result: **run_004 — 23.71% CAGR, Sharpe 0.92, ₹54.8L final NAV**
 | run_007 | P0-A+B combined (cap 0.50 + realized weights) | 11.3% | 0.35 | -39.48% | ₹19.4L | -12.4% ❌ |
 | run_008 | FII proxy in RL state (noisy signal) | 20.3% | 0.78 | -29.91% | ₹37.5L | -3.4% ❌ |
 | run_009 | Reverted: noisy signals removed, clean baseline | 19.34% | 0.71 | -30.58% | ₹36.5L | -4.4% |
+
+### Ablation: Retrain Frequency × Event Triggers (run from run_009 state)
+
+| Config | Description | CAGR | Sharpe | MaxDD | Final NAV | RL Retrains | Events Fired |
+|--------|-------------|------|--------|-------|-----------|-------------|--------------|
+| A | 4-week retrain (no triggers) | 15.15% | 0.61 | -36.35% | ₹24.4L | 29 | 0 |
+| B | **8-week retrain (no triggers)** | **23.57%** | **0.93** | -32.06% | **₹54.1L** | 15 | 0 |
+| C | 12-week retrain — baseline | 14.88% | 0.58 | -29.59% | ₹23.8L | 10 | 0 |
+| D | 26-week retrain (no triggers) | 14.50% | 0.55 | -33.29% | ₹22.9L | 4 | 0 |
+| E | 26-week + event triggers | 19.54% | 0.76 | -27.23% | ₹37.2L | 44 | 229 |
+| **F** | **8-week + event triggers** | **23.96%** | **0.88** | -32.57% | **₹56.0L** | 56 | 233 |
+
+**Key findings:**
+1. **8-week is the optimal scheduled frequency** — Config B (23.57%, Sharpe 0.93) beats the current 12-week by +8.7% CAGR
+2. **Event triggers provide lift when retraining is infrequent** — D→E: +5% CAGR; B→F: +0.4% CAGR
+3. **Config B has the best Sharpe (0.93)** — cleaner risk-adjusted return than F (0.88)
+4. **Over-retraining hurts** — 4-week (29 retrains) degrades vs 8-week (15 retrains)
+5. **Next run**: change `retrain_freq_weeks: 12 → 8`, keep `rl_triggers.enabled: false`
 
 **Note on run_009 vs run_004**: Same architecture and config. CAGR gap (19.3% vs 23.7%)
 is because run_009 retrains RL from a fresh experience buffer — the RL hasn't yet seen
