@@ -1,32 +1,20 @@
 """
-Stock-level features: returns, momentum, volatility, quality, valuation,
-liquidity, earnings, and relative-to-sector signals.
+Stock-level features: returns, momentum, volatility, trend, and relative-to-sector signals.
 
 All features are lagged at least 1 day.
 """
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 from src.config import load_config
-from src.data.earnings import load_earnings_panel
 from src.features.base import (
-    compute_beta,
-    lag_series,
-    momentum_stability,
-    rolling_downside_vol,
-    rolling_kurt,
     rolling_max_drawdown,
-    rolling_return,
-    rolling_sharpe,
-    rolling_skew,
     rolling_vol,
-    zscore_cross_sectional,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,7 +37,7 @@ class StockFeatureBuilder:
         volume_matrix: pd.DataFrame | None,  # date × ticker (INR crore)
         sector_map: dict[str, str],          # ticker → sector
         benchmark_prices: pd.Series | None = None,
-        earnings_panel: pd.DataFrame | None = None,  # optional; loaded from disk if None
+        earnings_panel: pd.DataFrame | None = None,  # ignored; kept for API compatibility
     ) -> pd.DataFrame:
         """
         Returns long-format DataFrame indexed by (date, ticker).
@@ -193,32 +181,6 @@ class StockFeatureBuilder:
                 for t in tickers if t in sector_map
             })
             feat_dict[f"{feat_name}_vs_sector"] = feat_dict[feat_name] - sec_mean_df
-
-        # ── Earnings / fundamental features (Screener.in, NaN-safe) ─────────
-        # Features are pre-aligned to available_from_date in the panel —
-        # no additional lag needed here (unlike price features above).
-        _SCREENER_FEATS = [
-            "rev_growth_yoy", "profit_growth_yoy", "opm_level",
-            "opm_change_yoy", "eps_growth_yoy",
-            "rev_vs_trend", "profit_vs_trend",
-        ]
-        ep = earnings_panel
-        if ep is None:
-            ep_path = Path(self.cfg["paths"]["processed_data"]) / "screener_panel.parquet"
-            ep = load_earnings_panel(ep_path)
-
-        if ep is not None and not ep.empty and isinstance(ep.columns, pd.MultiIndex):
-            available_feats = ep.columns.get_level_values(0).unique()
-            for feat_name in _SCREENER_FEATS:
-                if feat_name not in available_feats:
-                    continue
-                feat_wide = ep[feat_name].reindex(index=prices.index)
-                avail_tickers = [t for t in tickers if t in feat_wide.columns]
-                if avail_tickers:
-                    # Do NOT shift — temporal alignment already done in panel builder
-                    feat_dict[feat_name] = feat_wide[avail_tickers].reindex(
-                        columns=prices.columns
-                    )
 
         # ── Assemble into long format ─────────────────────────────────────────
         all_dfs = []
