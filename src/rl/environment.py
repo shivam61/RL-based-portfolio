@@ -45,8 +45,9 @@ ACTION_DIM = N_SECTORS + 3
 MACRO_DIM = 12          # macro features
 SECTOR_DIM = N_SECTORS * 4  # per-sector: mom_1m, mom_3m, rel_str_1m, breadth_3m
 PORT_DIM = 10           # portfolio state features
-REALIZED_SECTOR_DIM = N_SECTORS  # actual post-optimizer sector weights from prior rebalance
-STATE_DIM = MACRO_DIM + SECTOR_DIM + PORT_DIM + REALIZED_SECTOR_DIM  # 12+60+10+15 = 97
+# REALIZED_SECTOR_DIM kept here for future use when more live experience exists
+REALIZED_SECTOR_DIM = N_SECTORS  # not added to STATE_DIM until RL has 500+ training steps
+STATE_DIM = MACRO_DIM + SECTOR_DIM + PORT_DIM  # 12+60+10 = 82
 
 
 _GymBase = gym.Env if HAS_GYM else object
@@ -140,7 +141,7 @@ class SectorAllocationEnv(_GymBase):
             "vix_level", "usdinr_ret_1m", "crude_ret_1m", "sp500_ret_1m",
             "gold_ret_1m", "risk_on_score", "macro_stress_score",
             "rbi_rate", "rate_cutting_cycle", "election_window",
-            "fii_flow_zscore", "fii_sell_regime",
+            "nifty_ret_1m", "nifty_above_200ma",
         ]
         for i, k in enumerate(macro_keys[:MACRO_DIM]):
             v = macro.get(k, 0.0)
@@ -167,18 +168,8 @@ class SectorAllocationEnv(_GymBase):
         for i, k in enumerate(port_keys[:PORT_DIM]):
             v = port.get(k, 0.0)
             state_vec[offset + i] = 0.0 if (v is None or np.isnan(v)) else float(v)
-        offset += PORT_DIM
-
-        # realized sector weights from previous step's outcome
-        # gives RL feedback on what the optimizer actually produced vs intended tilts
-        if idx > 0:
-            prev_realized = self.experience[idx - 1].get("outcome", {}).get(
-                "realized_sector_weights", {}
-            )
-        else:
-            prev_realized = {}
-        for j, sec in enumerate(SECTORS):
-            state_vec[offset + j] = float(prev_realized.get(sec, 0.0))
+        # NOTE: REALIZED_SECTOR_DIM block intentionally omitted until RL has
+        # sufficient live experience (500+ steps) to learn from constraint feedback.
 
         # clip and normalize
         state_vec = np.clip(state_vec, -10, 10)

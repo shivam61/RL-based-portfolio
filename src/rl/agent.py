@@ -104,22 +104,13 @@ class RLSectorAgent:
         macro_state: dict,
         sector_state: dict,
         portfolio_state: dict,
-        prev_realized_sector_weights: dict | None = None,
+        prev_realized_sector_weights: dict | None = None,  # reserved for future use
     ) -> dict:
-        """
-        Given current state, return sector allocation decisions.
-        Falls back to neutral if not trained.
-
-        prev_realized_sector_weights: actual post-optimizer sector weights from the
-        previous rebalance (closes the constraint feedback loop for the RL).
-        """
+        """Given current state, return sector allocation decisions."""
         if not self.is_trained or self.model is None:
             return SectorAllocationEnv.neutral_action()
 
-        obs = self._build_obs(
-            macro_state, sector_state, portfolio_state,
-            prev_realized_sector_weights=prev_realized_sector_weights,
-        )
+        obs = self._build_obs(macro_state, sector_state, portfolio_state)
         obs_tensor = np.array(obs, dtype=np.float32).reshape(1, -1)
 
         try:
@@ -134,25 +125,16 @@ class RLSectorAgent:
         macro_state: dict,
         sector_state: dict,
         portfolio_state: dict,
-        prev_realized_sector_weights: dict | None = None,
     ) -> np.ndarray:
         """Build observation vector matching environment spec."""
-        # Two-element buffer: element 0 carries prev realized weights in its outcome;
-        # element 1 is the current step. _get_obs(1) reads [0].outcome for realized weights.
-        prev_exp = {
-            "macro_state": {},
-            "sector_state": {},
-            "portfolio_state": {},
-            "outcome": {"realized_sector_weights": prev_realized_sector_weights or {}},
-        }
-        curr_exp = {
+        fake_exp = {
             "macro_state": macro_state,
             "sector_state": sector_state,
             "portfolio_state": portfolio_state,
             "outcome": {},
         }
-        env = SectorAllocationEnv([prev_exp, curr_exp], self.cfg)
-        return env._get_obs(1)
+        env = SectorAllocationEnv([fake_exp], self.cfg)
+        return env._get_obs(0)
 
     # ── Persistence ───────────────────────────────────────────────────────────
 
