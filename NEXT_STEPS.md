@@ -2,6 +2,7 @@
 
 Each item is implemented one at a time, backtested, committed, and measured before moving on.
 Best known result: **run_018 — 22.96% CAGR, Sharpe 0.83, ₹51.2L final NAV** (corrected trading-day calendar, benchmark ffill fix, accumulated RL buffer from run_017b)
+Stable ceiling on corrected data: **~22–23% CAGR** (run_018/019 converged — further buffer passes won't help)
 
 ---
 
@@ -28,6 +29,7 @@ Best known result: **run_018 — 22.96% CAGR, Sharpe 0.83, ₹51.2L final NAV** 
 | run_017 | Trading-day calendar + benchmark ffill (stale RL model) | 15.10% | 0.61 | -29.75% | ₹24.3L | discard — stale RL |
 | run_017b | Trading-day calendar + benchmark ffill (fresh RL) | 15.74% | 0.63 | -28.73% | ₹25.9L | -8.0% vs run_016 ❌ new data baseline |
 | **run_018** | **Accumulated buffer on corrected data (new best)** | **22.96%** | **0.83** | **-30.75%** | **₹51.2L** | **+7.2% vs run_017b** ✅ |
+| run_019 | Accumulated buffer pass 2 — converged | 22.13% | 0.84 | -30.13% | ₹47.4L | flat vs run_018 — buffer converged |
 
 ### Ablation: Retrain Frequency × Event Triggers (run from run_009 state)
 
