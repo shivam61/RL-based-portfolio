@@ -23,6 +23,7 @@ Best known result: **run_010 — 23.57% CAGR, Sharpe 0.93, ₹54.1L final NAV** 
 | run_012 | TASK-2: real 44-col technical feature set (ffill fix + new signals) | 19.88% | 0.74 | -31.03% | ₹38.5L | -3.7% vs run_010 ❌ |
 | run_013 | Pruned: dropped ret_2w + reversal_1w (42 features) | 17.94% | 0.76 | -29.34% | ₹32.0L | -5.6% vs run_010 ❌ |
 | run_014 | Fix: full-portfolio turnover constraint (liquidation + cash) | 20.88% | 0.75 | -30.95% | ₹42.2L | -2.7% vs run_010 |
+| run_015 | Revert to 36-feat set + infeasibility-retry fix (TO: 45%→29%) | 18.16% | 0.80 | -24.72% | ₹32.7L | -5.4% vs run_010 |
 
 ### Ablation: Retrain Frequency × Event Triggers (run from run_009 state)
 
@@ -53,6 +54,8 @@ experience buffer will grow and performance should converge back to run_004 leve
 
 1. **Data quality beats model complexity.** The biggest win (+6.5% CAGR) was a bug fix
    (sector dedup), not a new feature. Every complexity addition since has hurt.
+
+7. **Buffer reset explains the run_010 gap more than features.** run_015 (36-feat set, same as run_010) gives 18.16% CAGR vs run_010's 23.57%. Gap is ~5.4% with fresh buffer. run_010 had accumulated experience from prior runs; fresh-buffer runs consistently land 18-21%. The 42-feature set (run_014 at 20.88%) actually helps slightly vs 36-feature set once the optimizer is properly fixed.
 
 6. **Turnover constraint had three bugs.** Liquidated tickers (removed from candidate set) were not counted in turnover; cash changes were unconstrained; first-rebalance from all-cash was infeasible, causing a silent rank fallback with zero constraints. Fixing all three recovered +3% CAGR vs run_013 (17.94%→20.88%). Avg turnover 45.76% — slightly over 40% budget due to effective_max_to relaxation when liquidation is forced.
 

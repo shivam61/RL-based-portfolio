@@ -92,6 +92,9 @@ class StockFeatureBuilder:
         feat_dict["price_to_52w_high"] = prices / prices.rolling(252).max()
         feat_dict["price_to_52w_low"] = prices / prices.rolling(252).min()
 
+        # ── Reversal ──────────────────────────────────────────────────────────
+        feat_dict["reversal_1w"] = -feat_dict.get("ret_1w", pd.DataFrame())
+
         # ── Mean-reversion ────────────────────────────────────────────────────
         feat_dict["zscore_6m"] = (
             (prices - prices.rolling(int(self.medium * 2)).mean())
@@ -131,34 +134,9 @@ class StockFeatureBuilder:
                 returns[vol_tickers].abs() / vols.replace(0, np.nan)
             ).rolling(self.short).mean()
 
-        # ── Additional momentum / trend features ─────────────────────────────
-        # MA crossover as continuous ratio (richer signal than binary above/below)
-        feat_dict["ma_50_200_ratio"] = (
-            prices.rolling(50).mean() / prices.rolling(200).mean().replace(0, np.nan) - 1
-        )
-
-        # Price percentile in 1-year range: 0 = at 52w low, 1 = at 52w high
-        roll_high = prices.rolling(self.long).max()
-        roll_low  = prices.rolling(self.long).min()
-        feat_dict["price_pctile_1y"] = (
-            (prices - roll_low) / (roll_high - roll_low).replace(0, np.nan)
-        )
-
-        # Volume spike: today's volume vs 20-day average (momentum confirmation)
-        if volume_matrix is not None and "avg_vol_1m" in feat_dict:
-            vol_tickers = [t for t in tickers if t in volume_matrix.columns]
-            vols = volume_matrix[vol_tickers]
-            vol_20d = vols.rolling(20).mean().replace(0, np.nan)
-            feat_dict["vol_spike"] = (vols / vol_20d).reindex(columns=prices.columns)
-
-        # RSI-14: gain/loss asymmetry — orthogonal to ret_1m level
-        gain = returns.clip(lower=0).rolling(14).mean()
-        loss = (-returns.clip(upper=0)).rolling(14).mean().replace(0, np.nan)
-        feat_dict["rsi_14"] = 100 - (100 / (1 + gain / loss))
-
         # ── Sector-relative features ──────────────────────────────────────────
         sectors = sorted(set(sector_map.values()))
-        for feat_name in ["ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_12m", "vol_3m"]:
+        for feat_name in ["ret_1m", "ret_3m", "vol_3m"]:
             if feat_name not in feat_dict:
                 continue
             sector_means: dict[str, pd.Series] = {}

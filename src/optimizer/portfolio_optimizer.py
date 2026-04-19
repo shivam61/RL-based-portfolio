@@ -187,28 +187,51 @@ class PortfolioOptimizer:
         # Full-portfolio turnover constraint:
         #   (equity changes) + (cash change) <= remaining_budget
         # where remaining_budget = effective_max_to - liquidation_cost (already spent).
+        to_constraint = None
         if current_weights:
-            constraints.append(equity_to + cash_to <= remaining_budget)
+            to_constraint = equity_to + cash_to <= remaining_budget
+            constraints.append(to_constraint)
             if effective_max_to > max_to:
                 logger.debug(
                     "Turnover budget relaxed %.2f→%.2f (liquidation_cost=%.2f)",
                     max_to, effective_max_to, liquidation_cost,
                 )
 
-        prob = cp.Problem(objective, constraints)
-        try:
-            solver = opt_cfg.get("solver", "CLARABEL")
-            prob.solve(solver=solver, verbose=False)
-            if prob.status not in ("optimal", "optimal_inaccurate"):
-                raise ValueError(f"Solver status: {prob.status}")
+        solver = opt_cfg.get("solver", "CLARABEL")
+
+        def _solve(constrs):
+            p = cp.Problem(objective, constrs)
+            p.solve(solver=solver, verbose=False)
+            if p.status not in ("optimal", "optimal_inaccurate"):
+                raise ValueError(f"Solver status: {p.status}")
             if w.value is None:
                 raise ValueError("Solver returned None solution")
+
+        try:
+            _solve(constraints)
         except Exception as e:
-            logger.warning("CVXPY solver failed (%s); using rank fallback", e)
-            return self._rank_based_weights(
-                alpha, tickers, sector_map, n,
-                max_stock, max_sector, cash_target or cash_min
-            )
+            # If infeasible and a turnover constraint exists, retry without it.
+            # This can happen when sector/weight constraints force more equity
+            # turnover than remaining_budget allows (not captured by min_feasible).
+            if to_constraint is not None and "infeasible" in str(e).lower():
+                logger.warning(
+                    "CVXPY infeasible with turnover constraint; retrying without it"
+                )
+                constraints_no_to = [c for c in constraints if c is not to_constraint]
+                try:
+                    _solve(constraints_no_to)
+                except Exception as e2:
+                    logger.warning("CVXPY retry also failed (%s); using rank fallback", e2)
+                    return self._rank_based_weights(
+                        alpha, tickers, sector_map, n,
+                        max_stock, max_sector, cash_target or cash_min
+                    )
+            else:
+                logger.warning("CVXPY solver failed (%s); using rank fallback", e)
+                return self._rank_based_weights(
+                    alpha, tickers, sector_map, n,
+                    max_stock, max_sector, cash_target or cash_min
+                )
 
         w_val = np.array(w.value).clip(0)
         cash_val = float(cash.value) if cash.value is not None else cash_min
