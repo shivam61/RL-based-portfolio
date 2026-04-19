@@ -108,13 +108,6 @@ class StockFeatureBuilder:
                     bm_h = (1 + bm_rets).rolling(h).apply(lambda x: x.prod() - 1, raw=True)
                     feat_dict[f"alpha_{col}"] = feat_dict[col].sub(bm_h, axis=0)
 
-            # beta
-            cov = returns.rolling(self.medium).apply(
-                lambda x: pd.Series(x).cov(
-                    bm_rets.reindex(prices.index).iloc[-self.medium:]
-                ), raw=False
-            )
-            # Approximate beta
             bm_var = bm_rets.rolling(self.medium).var()
             feat_dict["beta_3m"] = returns.rolling(self.medium).corr(
                 bm_rets
@@ -177,7 +170,6 @@ class StockFeatureBuilder:
         all_dfs = []
         for feat_name, df in feat_dict.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
-                # shift for lag
                 shifted = df.shift(self.lag)
                 melted = shifted.stack(future_stack=True).rename(feat_name)
                 all_dfs.append(melted)

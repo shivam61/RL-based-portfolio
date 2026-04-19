@@ -111,6 +111,82 @@ experience buffer will grow and performance should converge back to run_004 leve
 
 ---
 
+## Feature Experiment Series — Stock Ranker (runs 020–025)
+
+**Goal**: Improve cross-sectional stock ranking signal quality through targeted,
+one-at-a-time feature additions. Each step is tested independently; only winning
+changes are carried forward.
+
+**Baseline**: run_019 — 22.13% CAGR, Sharpe 0.84 (accumulated RL buffer on clean data)
+**RL policy**: carry forward between all steps — do NOT wipe between runs
+**Retrain frequency**: TBD pending ablation results (currently 8-week)
+
+### Decision rule
+Each run must beat the previous run's CAGR by ≥0.5% to be kept.
+If it doesn't, revert `stock_features.py` and move to the next step.
+
+---
+
+| Run | Step | Change | Status | CAGR | Sharpe | Delta | Decision |
+|-----|------|--------|--------|------|--------|-------|----------|
+| run_020 | Step 0 | Drop `above_50ma` + `above_200ma` (0% importance) | ⏳ PENDING | — | — | — | — |
+| run_021 | Step 1 | Add Sharpe features: `sharpe_1m/3m/12m`, `calmar_3m` | ⏳ PENDING | — | — | — | — |
+| run_022 | Step 2 | Add CS ranks: `ret_1m/3m/12m_rank` (percentile across universe) | ⏳ PENDING | — | — | — | — |
+| run_023 | Step 3 | Fix sector z-score: `ret_vs_sector = (ret-mean)/std` | ⏳ PENDING | — | — | — | — |
+| run_024 | Step 4 | Add momentum acceleration: `mom_accel_1m`, `mom_accel_3m` | ⏳ PENDING | — | — | — | — |
+| run_025 | Step 5 | Combine all winning steps; prune back to ≤42 features | ⏳ PENDING | — | — | — | — |
+
+### Feature detail
+
+**Step 0 — Drop dead features**
+- `above_50ma`: 0.1% importance — binary, redundant vs continuous `ma_50_200_ratio`
+- `above_200ma`: 0.0% importance — same problem
+
+**Step 1 — Volatility-adjusted returns**
+```python
+sharpe_1m  = ret_1m  / (vol_1m  + 1e-6)
+sharpe_3m  = ret_3m  / (vol_3m  + 1e-6)
+sharpe_12m = ret_12m / (vol_12m + 1e-6)
+calmar_3m  = ret_3m  / (abs(max_dd_3m) + 1e-6)
+```
+Hypothesis: LightGBM can't natively divide two columns. Giving it ret/vol directly
+promotes momentum signal over pure vol signal. The ranker is currently dominated by
+vol features (vol_12m 5.9%, skew_3m 4.2%); raw returns rank near the bottom.
+
+**Step 2 — Cross-sectional percentile ranks**
+```python
+ret_1m_rank  = ret_1m.rank(axis=1, pct=True)   # 0=worst, 1=best across all tickers
+ret_3m_rank  = ret_3m.rank(axis=1, pct=True)
+ret_12m_rank = ret_12m.rank(axis=1, pct=True)
+```
+Hypothesis: Ranks are regime-invariant. Raw returns conflate absolute level with
+relative strength — a +5% 1m return means different things in a +10% vs −5% market.
+A 90th-percentile stock is always a strong buy signal.
+
+**Step 3 — Within-sector z-score (fix existing vs_sector features)**
+```python
+# Replace: ret_Xm_vs_sector = ret - sector_mean
+# With:    ret_Xm_vs_sector = (ret - sector_mean) / sector_std
+```
+Hypothesis: A 3% excess return in IT (sector vol ~30%) is weaker signal than 3%
+in FMCG (sector vol ~12%). Division by sector_std makes the 6 sector features
+comparable across sectors. Same column names — no schema change needed.
+
+**Step 4 — Momentum acceleration**
+```python
+mom_accel_1m = ret_1m - ret_1m.shift(21)   # 1m momentum improving or fading?
+mom_accel_3m = ret_3m - ret_3m.shift(21)   # 3m momentum improving or fading?
+```
+Hypothesis: A stock up 10% this month after being flat last month is different from
+one that's been up 10% consistently. Acceleration often precedes trend continuation;
+deceleration often precedes reversal.
+
+**Step 5 — Combination**
+Keep only steps that individually passed the ≥0.5% CAGR threshold.
+Prune weakest features by importance back to ≤42 total if needed.
+
+---
+
 ## Open Tasks (prioritised)
 
 ### TASK-1 — Get real FII/DII data [BLOCKED on data source]
