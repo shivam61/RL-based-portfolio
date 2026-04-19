@@ -10,8 +10,16 @@ Subject to:
     w >= 0
     w_i <= max_stock_weight
     sector_w_j <= max_sector_weight
-    ||w - w_prev||_1 <= max_turnover
+    ||w - w_prev||_1 + liquidation_cost + |cash - cash_prev| <= effective_max_to
     cash in [min_cash, max_cash]
+
+Turnover accounting (full-portfolio, not equity-only):
+  - w_prev covers only the tickers in the current candidate set.
+  - Positions being fully liquidated (in prev portfolio but NOT in candidates)
+    contribute a fixed constant `liquidation_cost` to the turnover budget.
+  - Cash changes are included via |cash - cash_prev| (modeled as cp.abs).
+  - effective_max_to = max(max_to, minimum_feasible_to) so the problem
+    is never made infeasible by the turnover constraint alone.
 """
 from __future__ import annotations
 
@@ -102,6 +110,17 @@ class PortfolioOptimizer:
         ])
         w_prev_cash = (current_weights or {}).get("CASH", 0.0)
 
+        # Fixed turnover from positions being fully liquidated:
+        # tickers in the prev portfolio that are NOT in the current candidate set.
+        # Their sale is predetermined — subtract from the remaining budget.
+        if current_weights:
+            liquidation_cost = sum(
+                v for k, v in current_weights.items()
+                if k != "CASH" and k not in set(tickers)
+            )
+        else:
+            liquidation_cost = 0.0
+
         # Constraints config
         max_stock = opt_cfg["max_stock_weight"]
         max_sector = opt_cfg["max_sector_weight"] * aggressiveness
@@ -131,10 +150,24 @@ class PortfolioOptimizer:
             -0.5 * cp.sum_squares(w),            # concentration penalty
         ]
 
-        # turnover penalty
+        # Build full-portfolio turnover expression once; reuse in objective + constraint.
+        # effective_max_to: floored so the constraint is never infeasible by itself.
         if current_weights:
-            turnover = cp.norm1(w - w_prev)
-            objective_terms.append(-opt_cfg.get("turnover_cost", 0.3) * turnover)
+            equity_to = cp.norm1(w - w_prev)
+            cash_to   = cp.abs(cash - w_prev_cash)
+            min_feasible = (
+                liquidation_cost
+                + abs(w_prev_cash - (cash_target or cash_min))
+                + 0.02   # small solver headroom
+            )
+            effective_max_to = max(max_to, min_feasible)
+            remaining_budget = max(effective_max_to - liquidation_cost, 0.0)
+
+            objective_terms.append(
+                -opt_cfg.get("turnover_cost", 0.3) * (equity_to + cash_to)
+            )
+        else:
+            effective_max_to = max_to  # no previous portfolio → no constraint
 
         objective = cp.Maximize(sum(objective_terms))
 
@@ -151,9 +184,16 @@ class PortfolioOptimizer:
         )
         constraints.extend(sector_constraints)
 
-        # turnover constraint
+        # Full-portfolio turnover constraint:
+        #   (equity changes) + (cash change) <= remaining_budget
+        # where remaining_budget = effective_max_to - liquidation_cost (already spent).
         if current_weights:
-            constraints.append(cp.norm1(w - w_prev) <= max_to)
+            constraints.append(equity_to + cash_to <= remaining_budget)
+            if effective_max_to > max_to:
+                logger.debug(
+                    "Turnover budget relaxed %.2f→%.2f (liquidation_cost=%.2f)",
+                    max_to, effective_max_to, liquidation_cost,
+                )
 
         prob = cp.Problem(objective, constraints)
         try:
@@ -161,6 +201,8 @@ class PortfolioOptimizer:
             prob.solve(solver=solver, verbose=False)
             if prob.status not in ("optimal", "optimal_inaccurate"):
                 raise ValueError(f"Solver status: {prob.status}")
+            if w.value is None:
+                raise ValueError("Solver returned None solution")
         except Exception as e:
             logger.warning("CVXPY solver failed (%s); using rank fallback", e)
             return self._rank_based_weights(
@@ -170,6 +212,20 @@ class PortfolioOptimizer:
 
         w_val = np.array(w.value).clip(0)
         cash_val = float(cash.value) if cash.value is not None else cash_min
+
+        # Verify the turnover constraint was actually satisfied (guards against
+        # optimal_inaccurate solutions that violate it meaningfully).
+        if current_weights:
+            actual_equity_to = float(np.sum(np.abs(w_val - w_prev)))
+            actual_cash_to   = abs(cash_val - w_prev_cash)
+            actual_total_to  = actual_equity_to + actual_cash_to + liquidation_cost
+            if actual_total_to > effective_max_to * 1.10:   # 10% tolerance
+                logger.warning(
+                    "Turnover constraint violated after solve: actual=%.2f budget=%.2f "
+                    "(equity=%.2f cash=%.2f liquidation=%.2f); accepting anyway",
+                    actual_total_to, effective_max_to,
+                    actual_equity_to, actual_cash_to, liquidation_cost,
+                )
 
         # apply no-trade band
         band = opt_cfg.get("no_trade_band", 0.005)
