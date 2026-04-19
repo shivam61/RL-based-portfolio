@@ -1,7 +1,7 @@
 # Next Steps — Improvement Backlog
 
 Each item is implemented one at a time, backtested, committed, and measured before moving on.
-Best known result: **run_010 — 23.57% CAGR, Sharpe 0.93, ₹54.1L final NAV** (8-week retrain, no triggers, 36-feature set)
+Best known result: **run_016 — 23.78% CAGR, Sharpe 0.98, ₹55.2L final NAV** (8-week retrain, 42-feature set, optimizer turnover fix + infeasibility retry)
 
 ---
 
@@ -24,6 +24,7 @@ Best known result: **run_010 — 23.57% CAGR, Sharpe 0.93, ₹54.1L final NAV** 
 | run_013 | Pruned: dropped ret_2w + reversal_1w (42 features) | 17.94% | 0.76 | -29.34% | ₹32.0L | -5.6% vs run_010 ❌ |
 | run_014 | Fix: full-portfolio turnover constraint (liquidation + cash) | 20.88% | 0.75 | -30.95% | ₹42.2L | -2.7% vs run_010 |
 | run_015 | Revert to 36-feat set + infeasibility-retry fix (TO: 45%→29%) | 18.16% | 0.80 | -24.72% | ₹32.7L | -5.4% vs run_010 |
+| **run_016** | **42-feat set + infeasibility retry (new best)** | **23.78%** | **0.98** | **-26.15%** | **₹55.2L** | **+0.2% vs run_010** ✅ |
 
 ### Ablation: Retrain Frequency × Event Triggers (run from run_009 state)
 
