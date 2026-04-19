@@ -1,93 +1,202 @@
 # RL-Based Indian Equity Portfolio System
 
-A production-grade hierarchical AI portfolio management system for Indian equities.
+A hierarchical AI portfolio management system for Indian equities, combining LightGBM supervised
+ranking, PPO reinforcement learning sector overlay, and CVXPY constrained optimization.
 
-## What it does
+**Current best result (run_020):** 22.19% CAGR | Sharpe 0.96 | MaxDD −23.5% | 2013–2026
 
-Simulates a **10+ year walk-forward backtest** (2013→2026) of an Indian equity portfolio:
+---
 
-- Starts with **INR 5,00,000** initial capital
-- Rebalances every **4 weeks** using only information available at that date
-- Uses **supervised ML** (LightGBM) for sector scoring and stock ranking
-- Uses a **PPO RL agent** for dynamic sector tilting, cash management, and risk scaling
-- Uses **CVXPY** for constrained mean-variance portfolio optimization
-- Enforces **realistic transaction costs** (25 bps) + slippage (10 bps)
-- Outputs full performance metrics, attribution, and a current portfolio recommendation
+## What it builds
 
-## Answering the key questions
+A walk-forward portfolio that:
+- Rebalances every **4 weeks** using only information available at that date (no lookahead)
+- Uses **LightGBM LambdaRank** to cross-sectionally rank stocks within each of 15 NSE sectors
+- Uses a **PPO RL agent** to dynamically tilt sector weights, manage cash, and scale risk
+- Uses **CVXPY mean-variance optimization** with realistic constraints (turnover, concentration, liquidity)
+- Enforces transaction costs (25 bps one-way) + slippage (10 bps one-way)
+- Outputs full performance metrics, attribution, and current portfolio recommendation
 
-| Question | Answer source |
-|----------|---------------|
-| What CAGR? | `metrics["cagr"]` in artifacts/reports/metrics.json |
-| Max drawdown? | `metrics["max_drawdown"]` |
-| Which sectors created value? | `artifacts/reports/sector_attribution.png` |
-| Did RL help? | Compare `run_backtest.py` vs `run_backtest.py --no-rl` |
-| Current portfolio? | `artifacts/reports/current_portfolio.json` |
+Backtest period: **2013-01-01 → 2026-04-17** | Initial capital: **INR 5,00,000**
+
+---
 
 ## Quick Start
 
 ```bash
-# Install
+# 1. Install dependencies
 pip install -r requirements.txt
 
-# Download data (30-60 min, downloads 100 NSE stocks + global proxies)
+# 2. Download 10+ years of NSE data (~30-60 min)
 python scripts/download_data.py
 
-# Run full backtest with RL
+# 3. Run full walk-forward backtest with RL
 python scripts/run_backtest.py
 
-# Run without RL overlay (rule-based baseline)
+# 4. Compare without RL overlay
 python scripts/run_backtest.py --no-rl
 
-# Run unit + integration tests
+# 5. Run tests
 pytest tests/ -v
 ```
+
+---
+
+## Performance History
+
+| Run | Description | CAGR | Sharpe | MaxDD |
+|-----|-------------|------|--------|-------|
+| Benchmark (Nifty 50 B&H) | Buy-and-hold | 9.68% | — | — |
+| run_002 | True baseline (all bugs fixed) | 16.47% | 0.65 | -24.79% |
+| run_004 | Fix: sector feature dedup (all 15 sectors) | 23.71% | 0.92 | -31.29% |
+| run_016 | 42 features + infeasibility retry | 23.78% | 0.98 | -26.15% |
+| run_017b | Trading-day calendar + benchmark ffill fix | 15.74% | 0.63 | -28.73% |
+| run_018 | Accumulated RL buffer on corrected data | 22.96% | 0.83 | -30.75% |
+| run_019 | Buffer pass 2 (converged) | 22.13% | 0.84 | -30.13% |
+| **run_020** | **12w retrain + no triggers + pruned features** | **22.19%** | **0.96** | **-23.49%** |
+
+---
 
 ## System Architecture
 
 ```
-Data → Features → Sector Scorer → RL Agent → Stock Ranker → Optimizer → Risk Engine → Execution
+┌──────────────────────────────────────────────────────────────┐
+│  DATA LAYER                                                  │
+│  yfinance → parquet → price/volume/macro matrices            │
+│  Trading-day filter: drops NSE holidays (208 rows removed)   │
+├──────────────────────────────────────────────────────────────┤
+│  FEATURE LAYER                                               │
+│  Macro (60+ cols) │ Sector (30 cols) │ Stock (40 cols)       │
+│  All features lagged ≥1 day • Benchmark ffilled              │
+├──────────────────────────────────────────────────────────────┤
+│  SECTOR SCORER  (LightGBM regression)                        │
+│  Predicts 4-week forward sector returns                      │
+├──────────────────────────────────────────────────────────────┤
+│  RL OVERLAY  (PPO — stable-baselines3)                       │
+│  State: 82-dim [macro(12) + sector(60) + portfolio(10)]      │
+│  Action: sector tilts ×15 + cash + aggressiveness            │
+│  Retrained every 12 weeks (Ablation 2 optimal)               │
+│  Event triggers: DISABLED (hurt performance on clean data)   │
+├──────────────────────────────────────────────────────────────┤
+│  STOCK RANKER  (LightGBM LambdaRank, per-sector)             │
+│  Cross-sectional ranking within each of 15 sectors           │
+│  Top-5 stocks per sector selected                            │
+├──────────────────────────────────────────────────────────────┤
+│  PORTFOLIO OPTIMIZER  (CVXPY mean-variance)                  │
+│  Max stock: 8% │ Max sector: 35% │ Turnover: 40% │ Cash: 30% │
+│  Ledoit-Wolf shrinkage covariance                            │
+├──────────────────────────────────────────────────────────────┤
+│  RISK ENGINE                                                 │
+│  Drawdown monitor │ Vol regime │ Liquidity stress            │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full details.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full design details including all ablation results.
 
-## Outputs
+---
 
-All outputs saved to `artifacts/reports/`:
-- `metrics.json` — full performance statistics
-- `nav_series.parquet` — daily NAV for all strategies
-- `rebalance_log.parquet` / `.csv` — per-rebalance decision log
-- `attribution.json` — sector/stock/regime attribution
-- `current_portfolio.json` — latest portfolio recommendation
-- `nav_chart.png` — NAV vs benchmark
-- `drawdown_chart.png` — drawdown periods
-- `year_returns.png` — annual return bar chart
-- `sector_attribution.png` — sector contribution chart
-- `rolling_returns.png` — rolling 1Y Sharpe
+## Key Research Findings
+
+### 1. Data quality beats model complexity
+The biggest CAGR jump (+7%) came from fixing a sector feature deduplication bug, not from any model change. Every complexity addition without a data fix hurt performance.
+
+### 2. RL retrain frequency matters — less is more
+Tested 7 configurations (4w / 6w / 8w / 12w / 26w / triggers). Results on clean data:
+
+| Freq | CAGR | Sharpe |
+|------|------|--------|
+| 4w | 20.78% | 0.82 |
+| 6w | 21.12% | 0.83 |
+| **12w** | **24.98%** | **1.01** |
+| 4w + triggers | 15.04% | 0.65 |
+
+More frequent retraining causes RL overfitting. Event triggers fired 300+ times per run and destroyed performance in down years (2018: +20% → −10%). **12w, no triggers is the current config.**
+
+### 3. Trading-day calendar matters
+NSE has ~15 holidays/year not in standard calendars. Holiday rows caused `beta_3m` and `rel_str_1m` to be near-zero (NaN→0 in rolling windows), making the RL exploit artificial signals. Filtering rows where <50% of tickers have data removed 208 rows and corrected both features to 99%+ coverage.
+
+### 4. Buffer accumulation is real but bounded
+A fresh RL pass yields ~15-16% CAGR. After 2-3 accumulated walk-forward passes: 22-23% CAGR. Further passes don't compound. The ceiling is the quality of features, not buffer size.
+
+---
 
 ## Configuration
 
-All parameters in `config/base.yaml`:
-- Backtest period, initial capital, rebalance frequency
-- Transaction costs, slippage
-- Optimizer constraints (max stock weight, max sector weight, max turnover)
-- Risk engine thresholds (drawdown limits, vol regime)
-- RL hyperparameters (PPO, reward weights)
+All parameters in `config/base.yaml`. Key values:
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Rebalance frequency | 4 weeks | Fixed |
+| RL retrain frequency | 12 weeks | Ablation 2 optimal |
+| Event triggers | disabled | Hurts on clean data |
+| Max stock weight | 8% | Per CVXPY constraint |
+| Max sector weight | 35% | Per CVXPY constraint |
+| Max turnover/rebalance | 40% | Controls trading costs |
+| Cash range | 0%–30% | RL-managed |
+| Transaction cost | 25 bps one-way | |
+| Slippage | 10 bps one-way | |
+
+---
 
 ## Universe
 
-~100 NSE stocks across 15 sectors defined in `config/universe.yaml`:
-IT, Banking, FinancialServices, FMCG, Automobiles, Pharma, Energy, Metals,
-Telecom, Cement, CapitalGoods, ConsumerDiscretionary, Healthcare, RealEstate, Chemicals
+~100 NSE stocks across 15 sectors (`config/universe.yaml`):
+
+IT · Banking · FinancialServices · FMCG · Automobiles · Pharma · Energy · Metals ·
+Telecom · Cement · CapitalGoods · ConsumerDiscretionary · Healthcare · RealEstate · Chemicals
+
+---
+
+## Outputs
+
+All saved to `artifacts/reports/`:
+
+| File | Contents |
+|------|----------|
+| `metrics.json` | Full performance statistics |
+| `current_portfolio.json` | Latest portfolio recommendation |
+| `nav_series.parquet` | Daily NAV for all strategies |
+| `rebalance_log.csv` | Per-rebalance decision log |
+| `attribution.json` | Sector/stock/regime attribution |
+| `nav_chart.png` | NAV vs benchmark |
+| `drawdown_chart.png` | Drawdown periods |
+| `year_returns.png` | Annual return bar chart |
+
+---
+
+## Documentation
+
+| Doc | Contents |
+|-----|----------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Full system design, RL state/action/reward, ablation results |
+| [docs/feature_experiment_plan.md](docs/feature_experiment_plan.md) | Step-by-step stock feature improvement plan (runs 021–025) |
+| [docs/feature_update_flow.md](docs/feature_update_flow.md) | How the feature store cache and schema invalidation works |
+| [NEXT_STEPS.md](NEXT_STEPS.md) | Full run history, ablation tables, lessons learned |
+
+---
 
 ## Tech Stack
 
 | Component | Library |
 |-----------|---------|
-| Data | yfinance + pandas + pyarrow |
+| Data download | yfinance |
+| Data processing | pandas, pyarrow |
 | ML models | lightgbm |
 | RL agent | stable-baselines3 (PPO) |
-| Optimizer | cvxpy |
+| Portfolio optimizer | cvxpy |
 | Data contracts | pydantic v2 |
 | CLI | click |
 | Testing | pytest |
+
+---
+
+## Committed Artifacts
+
+| Artifact | Status | Notes |
+|----------|--------|-------|
+| `artifacts/models/sector_scorer.pkl` | ✅ committed | run_020 trained model |
+| `artifacts/models/stock_ranker.pkl` | ✅ committed | run_020 trained model |
+| `artifacts/models/rl_agent/experience_buffer.pkl` | ✅ committed | Accumulated walk-forward experience |
+| `artifacts/models/rl_agent/meta.pkl` | ✅ committed | PPO training metadata |
+| `artifacts/models/rl_agent/ppo_model.zip` | ❌ gitignored | Large binary — regenerate with `run_backtest.py` |
+| `artifacts/run_history/` | ✅ committed | Metrics + charts for all named runs |
