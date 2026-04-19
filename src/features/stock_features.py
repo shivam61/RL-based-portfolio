@@ -89,8 +89,8 @@ class StockFeatureBuilder:
         feat_dict["kurt_3m"] = returns.rolling(self.medium).kurt()
 
         # ── Trend ─────────────────────────────────────────────────────────────
-        feat_dict["above_50ma"] = (prices > prices.rolling(50).mean()).astype(float)
-        feat_dict["above_200ma"] = (prices > prices.rolling(200).mean()).astype(float)
+        # above_50ma / above_200ma dropped (run_020): 0% feature importance,
+        # redundant vs continuous ma_50_200_ratio
         feat_dict["price_to_52w_high"] = prices / prices.rolling(252).max()
         feat_dict["price_to_52w_low"] = prices / prices.rolling(252).min()
 

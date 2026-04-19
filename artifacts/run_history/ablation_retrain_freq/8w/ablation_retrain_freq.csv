@@ -1,0 +1,7 @@
+Config,Description,CAGR %,Sharpe,MaxDD %,Final NAV ₹L,Retrains (sched),Events fired,Event retrains
+A,4-week retrain (no triggers),15.15,0.61,-36.35,24.4,29,0,0
+B,8-week retrain (no triggers),23.57,0.93,-32.06,54.1,15,0,0
+C,12-week retrain (no triggers) ← baseline,14.88,0.58,-29.59,23.8,10,0,0
+D,26-week retrain (no triggers),14.50,0.55,-33.29,22.9,4,0,0
+E,26-week retrain + event triggers,19.54,0.76,-27.23,37.2,44,229,229
+F,8-week retrain + event triggers,23.96,0.88,-32.57,56.0,56,233,233

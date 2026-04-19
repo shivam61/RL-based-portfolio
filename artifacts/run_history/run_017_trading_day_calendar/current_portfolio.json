@@ -1,0 +1,37 @@
+{
+  "as_of": "2026-03-12",
+  "weights": {
+    "SHREECEM.NS": 0.08133422931050538,
+    "ACC.NS": 0.0787819604318794,
+    "AMBUJACEM.NS": 0.077904628736977,
+    "ULTRACEMCO.NS": 0.021504803484837985,
+    "DABUR.NS": 0.08133422942755161,
+    "GODREJCP.NS": 0.06756140722735121,
+    "COLPAL.NS": 0.005426400101589682,
+    "MPHASIS.NS": 0.07878934084840016,
+    "COFORGE.NS": 0.049979458164951175,
+    "TCS.NS": 0.07788270079325642,
+    "CIPLA.NS": 0.0505491520218764,
+    "BRIGADE.NS": 0.07974586128531465,
+    "CASH": 0.249205828165509
+  },
+  "sector_tilts": {
+    "IT": 2.0,
+    "Banking": 0.30000001192092896,
+    "FinancialServices": 0.30000001192092896,
+    "FMCG": 2.0,
+    "Automobiles": 0.30000001192092896,
+    "Pharma": 2.0,
+    "Energy": 0.30000001192092896,
+    "Metals": 0.30000001192092896,
+    "Telecom": 0.30000001192092896,
+    "Cement": 2.0,
+    "CapitalGoods": 0.30000001192092896,
+    "ConsumerDiscretionary": 0.30000001192092896,
+    "Healthcare": 0.30000001192092896,
+    "RealEstate": 1.4506040811538696,
+    "Chemicals": 0.30000001192092896
+  },
+  "cash": 0.30000001192092896,
+  "note": "Latest walk-forward portfolio recommendation"
+}

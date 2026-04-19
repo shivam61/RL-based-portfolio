@@ -1,0 +1,272 @@
+{
+  "total_return": 2.964164998193713,
+  "sector_allocation_effect": {
+    "Automobiles": 0.0,
+    "Banking": 0.0,
+    "CapitalGoods": 0.0,
+    "Cement": 0.0,
+    "ConsumerDiscretionary": 0.0,
+    "Energy": 0.0,
+    "FMCG": 0.0,
+    "FinancialServices": 0.0,
+    "IT": 0.0,
+    "Metals": 0.0,
+    "Pharma": 0.0,
+    "Chemicals": 0.0,
+    "RealEstate": 0.0,
+    "Healthcare": 0.0,
+    "Telecom": 0.0
+  },
+  "stock_selection_effect": {
+    "Automobiles": 0.15993704483048973,
+    "Banking": 0.11661283936555486,
+    "CapitalGoods": 0.20689322340238925,
+    "Cement": 0.21532686003722296,
+    "ConsumerDiscretionary": 0.36382388214390077,
+    "Energy": 0.09922083300338283,
+    "FMCG": 0.15830764590124533,
+    "FinancialServices": 0.15767733962417257,
+    "IT": 0.24650906401687556,
+    "Metals": -0.04889501880729298,
+    "Pharma": 0.24783354767770843,
+    "Chemicals": 0.035118405936690196,
+    "RealEstate": 0.07563904987860663,
+    "Healthcare": 0.22678999065616118,
+    "Telecom": 0.010499838216764932
+  },
+  "interaction_effect": {
+    "Automobiles": -0.06733910767869593,
+    "Banking": 0.017591984517235197,
+    "CapitalGoods": -0.03188969052553454,
+    "Cement": -0.08376730439043181,
+    "ConsumerDiscretionary": -0.08368016216898173,
+    "Energy": -0.021826647185885097,
+    "FMCG": -0.06504396182291663,
+    "FinancialServices": -0.03322609700172479,
+    "IT": -0.11757860760585824,
+    "Metals": -0.04035058152443204,
+    "Pharma": -0.12074087233466416,
+    "Chemicals": 0.02385515806502518,
+    "RealEstate": -0.02934720637101272,
+    "Healthcare": -0.08441953788831386,
+    "Telecom": 0.0036160374872477767
+  },
+  "macro_regime_returns": {
+    "high_vix_return": -0.17649592052069918,
+    "low_vix_return": 3.813777001202306,
+    "rate_cutting_return": 1.1510970858521743,
+    "rate_hiking_return": 0.8428573141891771,
+    "election_window_return": 0.04075759778221988
+  },
+  "year_returns": {
+    "2015": 0.14350251239185896,
+    "2016": 0.2555962333500561,
+    "2017": 0.4540308332097802,
+    "2018": -0.06523216815975452,
+    "2019": 0.018800143494803523,
+    "2020": 0.21122060210754356,
+    "2021": 0.28778754194196576,
+    "2022": -0.04550319704022088,
+    "2023": 0.24686724130206872,
+    "2024": 0.07512642706332917,
+    "2025": 0.0718348035535783,
+    "2026": -0.06792970039126611
+  },
+  "drawdown_episodes": [
+    {
+      "start": "2015-03-26",
+      "end": "2015-05-29",
+      "max_drawdown": -0.06705344809446577,
+      "duration_days": 64,
+      "top_overweight_sectors": [
+        [
+          "Chemicals",
+          3.8804251137323873
+        ],
+        [
+          "ConsumerDiscretionary",
+          3.8563789202751075
+        ],
+        [
+          "Cement",
+          3.2372025200069325
+        ]
+      ],
+      "probable_cause": "unknown"
+    },
+    {
+      "start": "2015-06-11",
+      "end": "2015-06-19",
+      "max_drawdown": -0.05491490979777137,
+      "duration_days": 8,
+      "top_overweight_sectors": [
+        [
+          "IT",
+          1.2481884235691887
+        ],
+        [
+          "Metals",
+          1.2141414029402289
+        ],
+        [
+          "FinancialServices",
+          1.2006122506970287
+        ]
+      ],
+      "probable_cause": "unknown"
+    },
+    {
+      "start": "2015-08-24",
+      "end": "2016-05-27",
+      "max_drawdown": -0.17863811971496887,
+      "duration_days": 277,
+      "top_overweight_sectors": [
+        [
+          "IT",
+          11.272754797138896
+        ],
+        [
+          "Metals",
+          11.017191490398183
+        ],
+        [
+          "Pharma",
+          10.531880488842317
+        ]
+      ],
+      "probable_cause": "unknown"
+    },
+    {
+      "start": "2016-11-15",
+      "end": "2016-12-08",
+      "max_drawdown": -0.10381858455786182,
+      "duration_days": 23,
+      "top_overweight_sectors": [
+        [
+          "ConsumerDiscretionary",
+          1.3785689461963178
+        ],
+        [
+          "Cement",
+          1.2970005526870516
+        ],
+        [
+          "FinancialServices",
+          1.095406622888792
+        ]
+      ],
+      "probable_cause": "unknown"
+    },
+    {
+      "start": "2016-12-26",
+      "end": "2017-01-02",
+      "max_drawdown": -0.05353347080227368,
+      "duration_days": 7,
+      "top_overweight_sectors": [
+        [
+          "RealEstate",
+          1.2804329817487492
+        ],
+        [
+          "FinancialServices",
+          1.279025980080729
+        ],
+        [
+          "Automobiles",
+          1.195730775676639
+        ]
+      ],
+      "probable_cause": "unknown"
+    },
+    {
+      "start": "2018-02-06",
+      "end": "2020-08-20",
+      "max_drawdown": -0.32034821305785705,
+      "duration_days": 926,
+      "top_overweight_sectors": [
+        [
+          "Automobiles",
+          52.007269620895386
+        ],
+        [
+          "FinancialServices",
+          50.848813623189926
+        ],
+        [
+          "Cement",
+          44.96146500110626
+        ]
+      ],
+      "probable_cause": "unknown"
+    },
+    {
+      "start": "2021-11-29",
+      "end": "2023-05-29",
+      "max_drawdown": -0.15123151116245417,
+      "duration_days": 546,
+      "top_overweight_sectors": [
+        [
+          "IT",
+          38.0
+        ],
+        [
+          "Banking",
+          38.0
+        ],
+        [
+          "FinancialServices",
+          38.0
+        ]
+      ],
+      "probable_cause": "unknown"
+    },
+    {
+      "start": "2023-10-26",
+      "end": "2023-11-16",
+      "max_drawdown": -0.0557652626224392,
+      "duration_days": 21,
+      "top_overweight_sectors": [
+        [
+          "IT",
+          2.0
+        ],
+        [
+          "Banking",
+          2.0
+        ],
+        [
+          "FinancialServices",
+          2.0
+        ]
+      ],
+      "probable_cause": "unknown"
+    }
+  ],
+  "feature_importance": {
+    "sector__max_dd_3m": 146.0,
+    "sector__vol_3m": 93.0,
+    "sector__mom_12m_rank": 76.0,
+    "sector__zscore_1y": 72.0,
+    "sector__beta_3m": 71.0,
+    "sector__mom_12m": 43.0,
+    "sector__breadth_3m": 42.0,
+    "sector__mom_6m": 41.0,
+    "sector__mom_12m_ex1m": 40.0,
+    "sector__mom_1m": 36.0,
+    "stock_Energy__vol_12m": 40.0,
+    "stock_Energy__avg_vol_3m": 37.0,
+    "stock_Energy__ret_12m_vs_sector": 35.0,
+    "stock_Energy__avg_vol_1m": 34.0,
+    "stock_Energy__max_dd_12m": 33.0,
+    "stock_IT__vol_12m": 51.0,
+    "stock_IT__avg_vol_3m": 42.0,
+    "stock_IT__skew_3m": 37.0,
+    "stock_IT__max_dd_12m": 36.0,
+    "stock_IT__max_dd_3m": 33.0,
+    "stock_Automobiles__vol_3m": 40.0,
+    "stock_Automobiles__max_dd_3m": 38.0,
+    "stock_Automobiles__vol_12m": 34.0,
+    "stock_Automobiles__ret_12m_vs_sector": 33.0,
+    "stock_Automobiles__kurt_3m": 29.0
+  }
+}

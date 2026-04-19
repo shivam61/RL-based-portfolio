@@ -1,0 +1,37 @@
+{
+  "as_of": "2026-03-12",
+  "weights": {
+    "SIEMENS.NS": 0.078982831415249,
+    "ABB.NS": 0.018247008515401487,
+    "NAVINFLUOR.NS": 0.07898283100962757,
+    "DEEPAKNTR.NS": 0.059631476580678626,
+    "WHIRLPOOL.NS": 0.056281096860661586,
+    "ASIANPAINT.NS": 0.03982362847970148,
+    "HAVELLS.NS": 0.07898283181020757,
+    "BPCL.NS": 0.06342048528699551,
+    "GAIL.NS": 0.0805968918106036,
+    "MPHASIS.NS": 0.07971249446702622,
+    "TCS.NS": 0.028060205313710267,
+    "BRIGADE.NS": 0.08004002646375313,
+    "CASH": 0.25723819198638403
+  },
+  "sector_tilts": {
+    "IT": 2.0,
+    "Banking": 0.30000001192092896,
+    "FinancialServices": 0.4133218228816986,
+    "FMCG": 0.30000001192092896,
+    "Automobiles": 0.30000001192092896,
+    "Pharma": 0.30000001192092896,
+    "Energy": 2.0,
+    "Metals": 0.648923933506012,
+    "Telecom": 2.0,
+    "Cement": 0.30000001192092896,
+    "CapitalGoods": 2.0,
+    "ConsumerDiscretionary": 2.0,
+    "Healthcare": 0.30000001192092896,
+    "RealEstate": 1.1578432321548462,
+    "Chemicals": 2.0
+  },
+  "cash": 0.30000001192092896,
+  "note": "Latest walk-forward portfolio recommendation"
+}

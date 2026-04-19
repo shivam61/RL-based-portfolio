@@ -1,8 +1,8 @@
 # Next Steps — Improvement Backlog
 
 Each item is implemented one at a time, backtested, committed, and measured before moving on.
-Best known result: **run_018 — 22.96% CAGR, Sharpe 0.83, ₹51.2L final NAV** (corrected trading-day calendar, benchmark ffill fix, accumulated RL buffer from run_017b)
-Stable ceiling on corrected data: **~22–23% CAGR** (run_018/019 converged — further buffer passes won't help)
+Best known result: **run_020 — 22.19% CAGR, Sharpe 0.96, MaxDD −23.5%** (12w retrain, no triggers, dropped zero-importance binary features)
+Stable ceiling on corrected data: **~22–25% CAGR** (12w retrain config — ablation D2 showed 24.98% single-pass; run_020 is 22.19% accumulated)
 
 ---
 
@@ -30,24 +30,30 @@ Stable ceiling on corrected data: **~22–23% CAGR** (run_018/019 converged — 
 | run_017b | Trading-day calendar + benchmark ffill (fresh RL) | 15.74% | 0.63 | -28.73% | ₹25.9L | -8.0% vs run_016 ❌ new data baseline |
 | **run_018** | **Accumulated buffer on corrected data (new best)** | **22.96%** | **0.83** | **-30.75%** | **₹51.2L** | **+7.2% vs run_017b** ✅ |
 | run_019 | Accumulated buffer pass 2 — converged | 22.13% | 0.84 | -30.13% | ₹47.4L | flat vs run_018 — buffer converged |
+| **run_020** | **12w retrain + no triggers + drop above_50/200ma** | **22.19%** | **0.96** | **-23.49%** | **—** | **+0.06% CAGR, +0.12 Sharpe, MaxDD −6.6pp** ✅ |
 
 ### Ablation 2: Retrain Frequency × Event Triggers (run from run_019 state, clean data)
 
-| Config | Description | CAGR | Sharpe | MaxDD | Turnover | Status |
-|--------|-------------|------|--------|-------|----------|--------|
-| A2 | 4-week (no triggers) | 20.78% | 0.82 | -24.34% | 29.5% | ✅ done |
-| B2 | 6-week (no triggers) | 21.12% | 0.83 | -33.81% | 24.7% | ✅ done |
-| C2 | 8-week (no triggers) — was prev best | 15.79% | 0.64 | -22.23% | 21.9% | ✅ done |
-| D2 | 12-week (no triggers) | — | — | — | — | 🔄 running |
-| E2 | 26-week (no triggers) | — | — | — | — | ⏳ queued |
-| F2 | 4-week + event triggers | — | — | — | — | ⏳ queued after E2 |
-| G2 | 6-week + event triggers | — | — | — | — | ⏳ queued after F2 |
+| Config | Description | CAGR | Sharpe | Sortino | MaxDD | Turnover | Status |
+|--------|-------------|------|--------|---------|-------|----------|--------|
+| A2 | 4-week (no triggers) | 20.78% | 0.82 | 1.15 | -24.34% | 29.5% | ✅ done |
+| B2 | 6-week (no triggers) | 21.12% | 0.83 | 1.12 | -33.81% | 24.7% | ✅ done |
+| C2 | 8-week (no triggers) — was prev best | 15.79% | 0.64 | 0.85 | -22.23% | 21.9% | ✅ done |
+| **D2** | **12-week (no triggers)** | **24.98%** | **1.01** | **1.41** | **-24.58%** | **22.2%** | **✅ done** |
+| **E2** | **26-week (no triggers)** | **28.37%** | **1.17** | **1.64** | **-23.56%** | **36.9%** | **✅ done** |
+| F2 | 4-week + event triggers | 15.04% | 0.65 | 0.86 | -27.36% | 18.72% | ✅ done |
+| G2 | 6-week + event triggers | 13.00% | 0.46 | 0.58 | -32.03% | 20.40% | ✅ done |
 
-**Early findings (3/7 done):**
-- Optimal frequency has FLIPPED vs corrupted-data ablation (8w was best, now 4w/6w lead)
-- Why: `rel_str_1m` is now a real, fast-changing signal — RL needs to update more frequently
-- 8w dropped to 15.79% (was 23.57%) — the old winner is now the worst so far
-- Event triggers expected to add lift on top of 4w/6w (pattern from prior ablation: +3–5% CAGR)
+**Complete findings (7/7 done):**
+- **Monotonic no-trigger trend**: 4w (20.78%) < 6w (21.12%) < 12w (24.98%) < 26w (28.37%)
+- **Triggers HURT on clean data**: F2 (4w+triggers: 15.04%) < A2 (4w: 20.78%); G2 (6w+triggers: 13.00%) < B2 (6w: 21.12%)
+  - F2 fired 305 events, G2 fired 345 events — massive RL churn caused by over-retraining
+  - Key damage: 2018 and 2019 go deeply negative or near-flat when triggers are on
+- **8w C2 (15.79%) is a stochastic outlier** — not meaningful
+- **Winner: 26w no-triggers** (28.37% CAGR, Sharpe 1.17, Calmar 1.20) — but 36.9% turnover is anomalously high
+- **Conservative winner: 12w no-triggers** (24.98% CAGR, Sharpe 1.01, Calmar 1.02, 22.2% turnover)
+- **Root cause of Ablation 1 being wrong**: on corrupted data, `rel_str_1m ≈ 0` → RL couldn't use it → frequent retrain made no difference. On clean data, `rel_str_1m` is a real signal — over-retraining causes the RL to chase noise instead of letting the signal compound.
+- **Decision: set `retrain_freq_weeks: 12`, `rl_triggers.enabled: false`** — start feature experiment series from this config
 
 ### Ablation 1: Retrain Frequency × Event Triggers (run from run_009 state, corrupted data)
 
@@ -137,7 +143,8 @@ changes are carried forward.
 
 **Baseline**: run_019 — 22.13% CAGR, Sharpe 0.84 (accumulated RL buffer on clean data)
 **RL policy**: carry forward between all steps — do NOT wipe between runs
-**Retrain frequency**: TBD pending ablation results (currently 8-week)
+**Retrain frequency**: 12-week (Ablation 2 winner), triggers disabled
+**Full plan**: `docs/feature_experiment_plan.md`
 
 ### Decision rule
 Each run must beat the previous run's CAGR by ≥0.5% to be kept.
@@ -147,7 +154,7 @@ If it doesn't, revert `stock_features.py` and move to the next step.
 
 | Run | Step | Change | Status | CAGR | Sharpe | Delta | Decision |
 |-----|------|--------|--------|------|--------|-------|----------|
-| run_020 | Step 0 | Drop `above_50ma` + `above_200ma` (0% importance) | ⏳ PENDING | — | — | — | — |
+| run_020 | Step 0 | Drop `above_50ma` + `above_200ma` (0% importance) | ✅ KEEP | 22.19% | 0.96 | +0.06% CAGR / +0.12 Sharpe / MaxDD −6.6pp | KEEP — neutral CAGR but Sharpe 0.84→0.96, MaxDD −30%→−23.5% |
 | run_021 | Step 1 | Add Sharpe features: `sharpe_1m/3m/12m`, `calmar_3m` | ⏳ PENDING | — | — | — | — |
 | run_022 | Step 2 | Add CS ranks: `ret_1m/3m/12m_rank` (percentile across universe) | ⏳ PENDING | — | — | — | — |
 | run_023 | Step 3 | Fix sector z-score: `ret_vs_sector = (ret-mean)/std` | ⏳ PENDING | — | — | — | — |

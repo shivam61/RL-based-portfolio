@@ -52,7 +52,7 @@ sector_model:
   subsample: 0.8
   colsample_bytree: 0.8
   min_child_samples: 20
-  retrain_freq_weeks: 12         # retrain every quarter (much faster than every 4w)
+  retrain_freq_weeks: 12        # Ablation 2 optimal: 12w beats 4/6/8/26w on clean data
   target: "fwd_4w_return_rank"  # cross-sectional rank of 4-week forward return
 
 # ── Stock ranking model ───────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ stock_model:
   subsample: 0.8
   colsample_bytree: 0.8
   min_child_samples: 30
-  retrain_freq_weeks: 12         # retrain every quarter
+  retrain_freq_weeks: 12        # Ablation 2 optimal: 12w beats 4/6/8/26w on clean data
   top_k_per_sector: 5           # stocks selected per sector
 
 # ── Portfolio optimizer ───────────────────────────────────────────────────────
@@ -108,7 +108,7 @@ rl:
   reward_lambda_to: 0.5         # turnover penalty weight
   reward_lambda_conc: 0.3       # concentration penalty
   reward_lambda_liq: 0.2        # liquidity penalty
-  retrain_freq_weeks: 8         # ablation Config B: optimal frequency (8w beats 4/12/26w)
+  retrain_freq_weeks: 12        # Ablation 2 optimal: 12w beats 4/6/8/26w on clean data
   use_rl: true                  # set false to disable RL overlay
 
 # ── Adaptive retrain triggers ─────────────────────────────────────────────────

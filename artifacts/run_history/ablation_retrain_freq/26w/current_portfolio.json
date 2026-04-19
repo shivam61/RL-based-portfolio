@@ -1,0 +1,32 @@
+{
+  "as_of": "2026-03-12",
+  "weights": {
+    "BHEL.NS": 0.14285714285714285,
+    "NTPC.NS": 0.14285714285714285,
+    "DEEPAKNTR.NS": 0.14285714285714285,
+    "ALKYLAMINE.NS": 0.14285714285714285,
+    "BAJAJFINSV.NS": 0.14285714285714285,
+    "FORTIS.NS": 0.14285714285714285,
+    "MAXHEALTH.NS": 0.14285714285714285,
+    "CASH": 0.0
+  },
+  "sector_tilts": {
+    "IT": 0.30000001192092896,
+    "Banking": 0.30000001192092896,
+    "FinancialServices": 0.8602015972137451,
+    "FMCG": 0.30000001192092896,
+    "Automobiles": 0.30000001192092896,
+    "Pharma": 0.30000001192092896,
+    "Energy": 0.30000001192092896,
+    "Metals": 0.30000001192092896,
+    "Telecom": 0.30000001192092896,
+    "Cement": 0.30000001192092896,
+    "CapitalGoods": 1.0676565170288086,
+    "ConsumerDiscretionary": 0.30000001192092896,
+    "Healthcare": 2.0,
+    "RealEstate": 0.30000001192092896,
+    "Chemicals": 1.5876761674880981
+  },
+  "cash": 0.0,
+  "note": "Latest walk-forward portfolio recommendation"
+}

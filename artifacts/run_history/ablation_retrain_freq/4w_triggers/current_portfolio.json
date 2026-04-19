@@ -1,0 +1,42 @@
+{
+  "as_of": "2026-03-12",
+  "weights": {
+    "TVSMOTOR.NS": 0.014349405162687985,
+    "FEDERALBNK.NS": 0.07741241210581583,
+    "SIEMENS.NS": 0.07896939948405886,
+    "ABB.NS": 0.02902594890996022,
+    "SHREECEM.NS": 0.048167735960553286,
+    "ACC.NS": 0.016445530451193954,
+    "AMBUJACEM.NS": 0.026261762412507567,
+    "DABUR.NS": 0.05042282504813614,
+    "GODREJCP.NS": 0.04606538658282726,
+    "COLPAL.NS": 0.07833612068156076,
+    "FORTIS.NS": 0.011067325496101565,
+    "CIPLA.NS": 0.07896939977611599,
+    "BRIGADE.NS": 0.07991969480056096,
+    "DLF.NS": 0.059547564188129586,
+    "PRESTIGE.NS": 0.023678401451670623,
+    "GODREJPROP.NS": 0.012682487153094044,
+    "BHARTIARTL.NS": 0.010020522996582747,
+    "CASH": 0.25865807733844265
+  },
+  "sector_tilts": {
+    "IT": 0.30000001192092896,
+    "Banking": 2.0,
+    "FinancialServices": 0.30000001192092896,
+    "FMCG": 2.0,
+    "Automobiles": 2.0,
+    "Pharma": 2.0,
+    "Energy": 0.30000001192092896,
+    "Metals": 2.0,
+    "Telecom": 2.0,
+    "Cement": 2.0,
+    "CapitalGoods": 2.0,
+    "ConsumerDiscretionary": 0.30000001192092896,
+    "Healthcare": 2.0,
+    "RealEstate": 2.0,
+    "Chemicals": 0.30000001192092896
+  },
+  "cash": 0.30000001192092896,
+  "note": "Latest walk-forward portfolio recommendation"
+}

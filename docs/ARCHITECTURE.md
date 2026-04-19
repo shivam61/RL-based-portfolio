@@ -46,7 +46,8 @@ and an RL overlay for sector allocation decisions.
 ├─────────────────────────────────────────────────────────────────────┤
 │                   WALK-FORWARD ENGINE                               │
 │  4-week rebalance loop • Rolling 3-year training window             │
-│  Models retrained every 4 weeks • RL retrained every 12 weeks       │
+│  LightGBM retrained every 4 weeks • RL retrained every 12 weeks     │
+│  Event triggers: DISABLED (Ablation 2: triggers degrade on clean data)│
 ├─────────────────────────────────────────────────────────────────────┤
 │                  ATTRIBUTION ENGINE                                 │
 │  Brinson-Hood-Beebower • Sector/stock/interaction effects           │
@@ -178,8 +179,23 @@ rl-portfolio/
 - **Action**: 18-dimensional continuous [sector_tilts(15) + cash + agg + rebalance]
 - **Reward**: `return − 2.0×dd − 0.5×turnover − 0.3×hhi − 0.2×liquidity`
 - **Training**: offline from walk-forward experience buffer
-- **Retraining**: every 12 rebalances (~48 weeks)
+- **Retraining**: every 12 weeks (~3 rebalances) — Ablation 2 optimal
+- **Event triggers**: disabled — on clean data, 300+ trigger events/run cause RL overfit and destroy 2018/2019 performance
 - **Fallback**: rule-based allocation if RL not trained (safe default)
+
+### RL Retrain Frequency Ablation (Ablation 2 — clean data, 2013–2026)
+
+| Freq | CAGR | Sharpe | MaxDD | Note |
+|------|------|--------|-------|------|
+| 4w | 20.78% | 0.82 | -24.34% | Over-retrains; RL can't build conviction |
+| 6w | 21.12% | 0.83 | -33.81% | Marginal improvement; high MaxDD |
+| 8w | 15.79% | 0.64 | -22.23% | Stochastic outlier; discard |
+| **12w** | **24.98%** | **1.01** | **-24.58%** | **Recommended: best risk-adjusted** |
+| 26w | 28.37% | 1.17 | -23.56% | Best raw CAGR; anomalous 36.9% turnover |
+| 4w + triggers | 15.04% | 0.65 | -27.36% | Triggers fire 305×; severe overfit |
+| 6w + triggers | 13.00% | 0.46 | -32.03% | Triggers fire 345×; worst config |
+
+**Key lesson**: More frequent RL retraining hurts on clean, informative features because the RL overfits to short-term noise rather than compounding the sector signal. Ablation 1 (corrupted `rel_str_1m` data) incorrectly identified 8w as optimal — that result was an artifact.
 
 ---
 
