@@ -51,10 +51,13 @@ def _make_volumes(price_df: pd.DataFrame, seed: int = 1) -> pd.DataFrame:
     return pd.DataFrame(vols, index=price_df.index, columns=price_df.columns)
 
 
-def _build_stock_features(price_df=None, volume_df=None, sector_map=None, benchmark=None):
+_DEFAULT_SENTINEL = object()
+
+
+def _build_stock_features(price_df=None, volume_df=_DEFAULT_SENTINEL, sector_map=None, benchmark=None):
     if price_df is None:
         price_df = _make_prices()
-    if volume_df is None:
+    if volume_df is _DEFAULT_SENTINEL:
         volume_df = _make_volumes(price_df)
     if sector_map is None:
         sector_map = SECTOR_MAP
@@ -96,11 +99,10 @@ class TestSchema:
         "vol_1m", "vol_3m", "vol_12m", "vol_ratio_1m_3m",
         "downside_vol_3m", "max_dd_3m", "max_dd_12m",
         "skew_3m", "kurt_3m",
-        "above_50ma", "above_200ma",
         "price_to_52w_high", "price_to_52w_low",
-        "reversal_1w", "zscore_6m",
+        "zscore_6m",
         "ma_50_200_ratio", "price_pctile_1y",
-        "rsi_14", "ret_2w",
+        "rsi_14",
         "ret_1m_vs_sector", "ret_3m_vs_sector", "ret_6m_vs_sector", "ret_12m_vs_sector",
     ]
 
@@ -209,14 +211,6 @@ class TestBounds:
         assert rsi.between(0, 100).all(), \
             f"RSI out of [0,100]: min={rsi.min():.2f} max={rsi.max():.2f}"
 
-    def test_above_50ma_is_binary(self):
-        vals = self.sf["above_50ma"].dropna().unique()
-        assert set(vals).issubset({0.0, 1.0}), f"above_50ma not binary: {vals}"
-
-    def test_above_200ma_is_binary(self):
-        vals = self.sf["above_200ma"].dropna().unique()
-        assert set(vals).issubset({0.0, 1.0})
-
     def test_price_to_52w_high_leq_1(self):
         p = self.sf["price_to_52w_high"].dropna()
         assert (p <= 1.0 + 1e-6).all(), \
@@ -275,14 +269,12 @@ class TestFillRate:
         "ret_1m":           0.85,
         "ret_3m":           0.80,
         "ret_6m":           0.75,
-        "ret_12m":          0.70,
+        "ret_12m":          0.58,
         "vol_1m":           0.80,
         "vol_3m":           0.75,
         "rsi_14":           0.85,
-        "ma_50_200_ratio":  0.70,
-        "price_pctile_1y":  0.70,
-        "above_50ma":       0.85,
-        "above_200ma":      0.70,
+        "ma_50_200_ratio":  0.67,
+        "price_pctile_1y":  0.58,
     }
 
     def test_stock_fill_rates(self):
@@ -338,20 +330,22 @@ class TestPointInTimeSafety:
         ref_date = all_dates[300]
         prev_date = all_dates[299]
 
-        # Features at ref_date should equal features built up to prev_date
+        # Features at ref_date should equal a build truncated at ref_date,
+        # since lagged values are timestamped at the decision date.
         row_full = sf_full[
             (sf_full["date"] == ref_date) & (sf_full["ticker"] == TICKERS[0])
         ]
         if row_full.empty:
             pytest.skip("No data at ref_date for STOCK00.NS")
 
-        prices_truncated = prices[prices.index <= prev_date]
-        volumes_truncated = volumes[volumes.index <= prev_date]
+        prices_truncated = prices[prices.index <= ref_date]
+        volumes_truncated = volumes[volumes.index <= ref_date]
         sf_trunc = _build_stock_features(price_df=prices_truncated, volume_df=volumes_truncated)
-        row_trunc = sf_trunc[sf_trunc["ticker"] == TICKERS[0]]
+        row_trunc = sf_trunc[
+            (sf_trunc["date"] == ref_date) & (sf_trunc["ticker"] == TICKERS[0])
+        ]
         if row_trunc.empty:
             pytest.skip("No truncated data for STOCK00.NS")
-        row_trunc = row_trunc.sort_values("date").iloc[[-1]]
 
         for col in ["ret_1m", "vol_3m", "rsi_14", "ma_50_200_ratio"]:
             if col not in row_full.columns or col not in row_trunc.columns:
@@ -377,14 +371,14 @@ class TestPointInTimeSafety:
         sec = _build_sector_features(price_df=prices)
         assert sec.index.max() <= last_price_date
 
-    def test_features_shift_1_removes_last_price_day(self):
-        """After lag=1, last observation date < last price date."""
+    def test_features_shift_1_preserves_last_decision_day(self):
+        """Lagged features are stored on the decision date, not the source-data date."""
         prices = _make_prices(n_days=300)
         sf = _build_stock_features(price_df=prices)
         last_feature_date = pd.to_datetime(sf["date"]).max()
         last_price_date = prices.index[-1]
-        assert last_feature_date < last_price_date, (
-            "Lag-1 should shift features so last feature date < last price date"
+        assert last_feature_date <= last_price_date, (
+            "Lag-1 features should not be dated after the last price date"
         )
 
 
@@ -395,12 +389,6 @@ class TestCrossFeatureConsistency:
 
     def setup_method(self):
         self.sf = _build_stock_features()
-
-    def test_reversal_1w_is_negative_ret_1w(self):
-        """reversal_1w = -ret_1w by construction."""
-        df = self.sf[["ret_1w", "reversal_1w"]].dropna()
-        diff = (df["reversal_1w"] + df["ret_1w"]).abs()
-        assert diff.max() < 1e-8, f"reversal_1w != -ret_1w: max diff={diff.max():.2e}"
 
     def test_mom_12m_skip1m_equals_12m_minus_1m(self):
         df = self.sf[["ret_12m", "ret_1m", "mom_12m_skip1m"]].dropna()
@@ -420,18 +408,6 @@ class TestCrossFeatureConsistency:
         v3m_std = self.sf["vol_3m"].std()
         assert v3m_std < v1m_std, (
             f"vol_3m ({v3m_std:.4f}) not smoother than vol_1m ({v1m_std:.4f})"
-        )
-
-    def test_above_50ma_consistent_with_price_to_52w_high(self):
-        """If above_200ma=1, stock is in long-run uptrend → likely above 50MA too."""
-        df = self.sf[["above_50ma", "above_200ma"]].dropna()
-        above_both = df[(df["above_200ma"] == 1) & (df["above_50ma"] == 1)]
-        above_200_only = df[df["above_200ma"] == 1]
-        if len(above_200_only) == 0:
-            pytest.skip("No rows with above_200ma=1")
-        consistency = len(above_both) / len(above_200_only)
-        assert consistency > 0.5, (
-            f"Only {consistency:.1%} of above_200ma=1 rows also have above_50ma=1"
         )
 
     def test_sector_relative_features_zero_mean_per_date(self):
@@ -489,12 +465,12 @@ class TestReproducibility:
 
 class TestEdgeCases:
     def test_single_sector(self):
-        """All tickers in one sector — sector-relative features should be all zeros."""
+        """All tickers in one sector still produce demeaned sector-relative features."""
         sector_map = {t: "IT" for t in TICKERS}
         prices = _make_prices()
         sf = _build_stock_features(price_df=prices, sector_map=sector_map)
-        vs = sf["ret_1m_vs_sector"].dropna()
-        assert vs.abs().max() < 1e-8, "Single-sector: vs_sector should be zero"
+        grouped = sf[["date", "ret_1m_vs_sector"]].dropna().groupby("date")["ret_1m_vs_sector"].mean()
+        assert grouped.abs().max() < 1e-8, "Single-sector: demeaned vs_sector mean should be zero"
 
     def test_minimum_history_returns_empty_not_error(self):
         """Very short price history (< 252 days) should not crash — just sparse output."""

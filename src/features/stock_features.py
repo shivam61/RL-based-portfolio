@@ -14,6 +14,7 @@ import pandas as pd
 
 from src.config import load_config
 from src.features.base import (
+    fill_price_gaps,
     rolling_max_drawdown,
     rolling_vol,
 )
@@ -23,6 +24,8 @@ logger = logging.getLogger(__name__)
 
 class StockFeatureBuilder:
     """Compute stock-level features from price and volume matrices."""
+
+    LOGIC_VERSION = "stock_features_v3_pit_membership"
 
     def __init__(self, cfg: dict | None = None):
         self.cfg = cfg or load_config()
@@ -45,10 +48,10 @@ class StockFeatureBuilder:
         All features lag-adjusted.
         """
         tickers = [t for t in price_matrix.columns if t in sector_map]
-        prices = price_matrix[tickers].ffill()  # fill holiday NaNs so rolling windows work
+        prices = fill_price_gaps(price_matrix[tickers], limit=5)
         if benchmark_prices is not None:
-            benchmark_prices = benchmark_prices.ffill()
-        returns = prices.pct_change()
+            benchmark_prices = fill_price_gaps(benchmark_prices, limit=5)
+        returns = prices.pct_change(fill_method=None)
 
         feat_dict: dict[str, pd.DataFrame] = {}
 
@@ -102,7 +105,7 @@ class StockFeatureBuilder:
 
         # ── Relative to benchmark ─────────────────────────────────────────────
         if benchmark_prices is not None:
-            bm_rets = benchmark_prices.pct_change()
+            bm_rets = benchmark_prices.pct_change(fill_method=None)
             for col, h in [("ret_1m", self.short), ("ret_3m", self.medium)]:
                 if col in feat_dict:
                     bm_h = (1 + bm_rets).rolling(h).apply(lambda x: x.prod() - 1, raw=True)

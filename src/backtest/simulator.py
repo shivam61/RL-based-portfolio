@@ -77,60 +77,75 @@ class PortfolioSimulator:
             raw_shares = target_value / prices[ticker]
             target_holdings[ticker] = raw_shares
 
-        # Determine sells and buys
         current_holdings = dict(current_state.holdings)
-        all_tickers = set(list(current_holdings.keys()) + list(target_holdings.keys()))
+        all_tickers = sorted(set(list(current_holdings.keys()) + list(target_holdings.keys())))
+        sell_orders: list[tuple[str, float]] = []
+        buy_orders: list[tuple[str, float]] = []
 
         for ticker in all_tickers:
-            if ticker == "CASH":
-                continue
             current_shares = current_holdings.get(ticker, 0.0)
             target_shares = target_holdings.get(ticker, 0.0)
             delta_shares = target_shares - current_shares
-
             if abs(delta_shares) < 1e-6:
                 continue
-
-            if ticker not in prices.index or pd.isna(prices[ticker]):
+            if ticker not in prices.index or pd.isna(prices[ticker]) or prices[ticker] <= 0:
                 continue
-
-            base_price = prices[ticker]
-            direction = "buy" if delta_shares > 0 else "sell"
-
-            # apply slippage (adverse for both buy and sell)
-            slippage_factor = self.slippage_bps / 10000
-            if direction == "buy":
-                exec_price = base_price * (1 + slippage_factor)
+            if delta_shares < 0:
+                sell_orders.append((ticker, abs(delta_shares)))
             else:
-                exec_price = base_price * (1 - slippage_factor)
-
-            gross_value = abs(delta_shares) * exec_price
-            tc = gross_value * (self.tc_bps / 10000)
-            net_value = gross_value + tc if direction == "buy" else gross_value - tc
-            total_cost += tc
-
-            trades.append(Trade(
-                ticker=ticker,
-                date=exec_date,
-                direction=direction,
-                shares=abs(delta_shares),
-                price=exec_price,
-                gross_value=gross_value,
-                transaction_cost=tc,
-                net_value=net_value,
-            ))
+                buy_orders.append((ticker, delta_shares))
 
         # Compute new holdings and cash
         new_holdings = dict(current_holdings)
         cash = current_state.cash
 
-        for trade in trades:
-            if trade.direction == "buy":
-                new_holdings[trade.ticker] = new_holdings.get(trade.ticker, 0) + trade.shares
-                cash -= trade.net_value
-            else:
-                new_holdings[trade.ticker] = new_holdings.get(trade.ticker, 0) - trade.shares
-                cash += trade.net_value
+        def _build_trade(ticker: str, shares: float, direction: str) -> Trade:
+            base_price = float(prices[ticker])
+            slippage_factor = self.slippage_bps / 10000
+            exec_price = base_price * (1 + slippage_factor) if direction == "buy" else base_price * (1 - slippage_factor)
+            gross_value = shares * exec_price
+            tc = gross_value * (self.tc_bps / 10000)
+            net_value = gross_value + tc if direction == "buy" else gross_value - tc
+            return Trade(
+                ticker=ticker,
+                date=exec_date,
+                direction=direction,
+                shares=shares,
+                price=exec_price,
+                gross_value=gross_value,
+                transaction_cost=tc,
+                net_value=net_value,
+            )
+
+        # Execute sells first so buy capacity reflects realized proceeds.
+        for ticker, shares in sell_orders:
+            trade = _build_trade(ticker, shares, "sell")
+            trades.append(trade)
+            total_cost += trade.transaction_cost
+            new_holdings[trade.ticker] = new_holdings.get(trade.ticker, 0.0) - trade.shares
+            cash += trade.net_value
+
+        # Scale buys to the cash actually available after sells and costs.
+        buy_requirements: list[tuple[str, float, float]] = []
+        total_buy_cash_needed = 0.0
+        for ticker, shares in buy_orders:
+            preview = _build_trade(ticker, shares, "buy")
+            buy_requirements.append((ticker, shares, preview.net_value))
+            total_buy_cash_needed += preview.net_value
+
+        buy_scale = min(1.0, cash / total_buy_cash_needed) if total_buy_cash_needed > 0 else 1.0
+
+        for ticker, shares, _ in buy_requirements:
+            exec_shares = shares * buy_scale
+            if exec_shares < 1e-6:
+                continue
+            trade = _build_trade(ticker, exec_shares, "buy")
+            if trade.net_value > cash + 1e-8:
+                continue
+            trades.append(trade)
+            total_cost += trade.transaction_cost
+            new_holdings[trade.ticker] = new_holdings.get(trade.ticker, 0.0) + trade.shares
+            cash -= trade.net_value
 
         # Remove near-zero holdings
         new_holdings = {t: s for t, s in new_holdings.items() if s > 1e-6}
@@ -156,6 +171,7 @@ class PortfolioSimulator:
             if p > 0 and new_nav > 0:
                 new_weights[t] = shares * p / new_nav
 
+        cash = max(cash, 0.0)
         if new_nav > 0:
             new_weights["CASH"] = cash / new_nav
 
@@ -163,7 +179,7 @@ class PortfolioSimulator:
         sector_map = {t: "unknown" for t in new_holdings}  # will be filled by caller
         new_state = PortfolioState(
             date=exec_date,
-            cash=max(cash, 0),
+            cash=cash,
             holdings=new_holdings,
             weights=new_weights,
             nav=new_nav,

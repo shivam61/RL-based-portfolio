@@ -10,10 +10,10 @@ Subject to:
     w >= 0
     w_i <= max_stock_weight
     sector_w_j <= max_sector_weight
-    ||w - w_prev||_1 + liquidation_cost + |cash - cash_prev| <= effective_max_to
+    0.5 * (||w - w_prev||_1 + liquidation_cost + |cash - cash_prev|) <= effective_max_to
     cash in [min_cash, max_cash]
 
-Turnover accounting (full-portfolio, not equity-only):
+Turnover accounting (full-portfolio, one-way):
   - w_prev covers only the tickers in the current candidate set.
   - Positions being fully liquidated (in prev portfolio but NOT in candidates)
     contribute a fixed constant `liquidation_cost` to the turnover budget.
@@ -155,16 +155,16 @@ class PortfolioOptimizer:
         if current_weights:
             equity_to = cp.norm1(w - w_prev)
             cash_to   = cp.abs(cash - w_prev_cash)
+            one_way_turnover = 0.5 * (equity_to + cash_to + liquidation_cost)
             min_feasible = (
-                liquidation_cost
-                + abs(w_prev_cash - (cash_target or cash_min))
+                0.5 * liquidation_cost
+                + 0.5 * abs(w_prev_cash - (cash_target or cash_min))
                 + 0.02   # small solver headroom
             )
             effective_max_to = max(max_to, min_feasible)
-            remaining_budget = max(effective_max_to - liquidation_cost, 0.0)
 
             objective_terms.append(
-                -opt_cfg.get("turnover_cost", 0.3) * (equity_to + cash_to)
+                -opt_cfg.get("turnover_cost", 0.3) * one_way_turnover
             )
         else:
             effective_max_to = max_to  # no previous portfolio → no constraint
@@ -184,12 +184,10 @@ class PortfolioOptimizer:
         )
         constraints.extend(sector_constraints)
 
-        # Full-portfolio turnover constraint:
-        #   (equity changes) + (cash change) <= remaining_budget
-        # where remaining_budget = effective_max_to - liquidation_cost (already spent).
+        # Full-portfolio one-way turnover constraint.
         to_constraint = None
         if current_weights:
-            to_constraint = equity_to + cash_to <= remaining_budget
+            to_constraint = one_way_turnover <= effective_max_to
             constraints.append(to_constraint)
             if effective_max_to > max_to:
                 logger.debug(
@@ -211,8 +209,8 @@ class PortfolioOptimizer:
             _solve(constraints)
         except Exception as e:
             # If infeasible and a turnover constraint exists, retry without it.
-            # This can happen when sector/weight constraints force more equity
-            # turnover than remaining_budget allows (not captured by min_feasible).
+            # This can happen when sector/weight constraints force more turnover
+            # than the budget allows (not captured by min_feasible).
             if to_constraint is not None and "infeasible" in str(e).lower():
                 logger.warning(
                     "CVXPY infeasible with turnover constraint; retrying without it"
@@ -239,15 +237,30 @@ class PortfolioOptimizer:
         # Verify the turnover constraint was actually satisfied (guards against
         # optimal_inaccurate solutions that violate it meaningfully).
         if current_weights:
-            actual_equity_to = float(np.sum(np.abs(w_val - w_prev)))
-            actual_cash_to   = abs(cash_val - w_prev_cash)
-            actual_total_to  = actual_equity_to + actual_cash_to + liquidation_cost
+            actual_total_to = self._compute_one_way_turnover(
+                w_val, w_prev, cash_val, w_prev_cash, liquidation_cost
+            )
             if actual_total_to > effective_max_to * 1.10:   # 10% tolerance
+                repaired = self._repair_turnover_violation(
+                    w_val=w_val,
+                    cash_val=cash_val,
+                    w_prev=w_prev,
+                    w_prev_cash=w_prev_cash,
+                    liquidation_cost=liquidation_cost,
+                    max_turnover=effective_max_to,
+                    max_stock=max_stock,
+                    tickers=tickers,
+                    sector_map=sector_map,
+                    max_sector=max_sector,
+                )
+                if repaired is not None:
+                    w_val, cash_val = repaired
+                    actual_total_to = self._compute_one_way_turnover(
+                        w_val, w_prev, cash_val, w_prev_cash, liquidation_cost
+                    )
                 logger.warning(
-                    "Turnover constraint violated after solve: actual=%.2f budget=%.2f "
-                    "(equity=%.2f cash=%.2f liquidation=%.2f); accepting anyway",
+                    "Turnover constraint violated after solve: actual=%.2f budget=%.2f",
                     actual_total_to, effective_max_to,
-                    actual_equity_to, actual_cash_to, liquidation_cost,
                 )
 
         # apply no-trade band
@@ -265,6 +278,69 @@ class PortfolioOptimizer:
         result = {t: float(w) for t, w in zip(tickers, w_val) if w > 1e-5}
         result["CASH"] = float(max(cash_val, 0))
         return result
+
+    @staticmethod
+    def _compute_one_way_turnover(
+        w_val: np.ndarray,
+        w_prev: np.ndarray,
+        cash_val: float,
+        w_prev_cash: float,
+        liquidation_cost: float,
+    ) -> float:
+        equity_to = float(np.sum(np.abs(w_val - w_prev)))
+        cash_to = abs(float(cash_val) - float(w_prev_cash))
+        return 0.5 * (equity_to + cash_to + float(liquidation_cost))
+
+    def _repair_turnover_violation(
+        self,
+        w_val: np.ndarray,
+        cash_val: float,
+        w_prev: np.ndarray,
+        w_prev_cash: float,
+        liquidation_cost: float,
+        max_turnover: float,
+        max_stock: float,
+        tickers: list[str],
+        sector_map: dict[str, str],
+        max_sector: float,
+    ) -> tuple[np.ndarray, float] | None:
+        """
+        Blend toward previous weights until one-way turnover fits the budget.
+        """
+        actual = self._compute_one_way_turnover(
+            w_val, w_prev, cash_val, w_prev_cash, liquidation_cost
+        )
+        if actual <= max_turnover:
+            return w_val, cash_val
+
+        baseline = 0.5 * float(liquidation_cost)
+        if actual <= baseline + 1e-9 or max_turnover <= baseline:
+            return None
+
+        blend = (max_turnover - baseline) / (actual - baseline)
+        blend = float(np.clip(blend, 0.0, 1.0))
+
+        repaired_w = w_prev + blend * (w_val - w_prev)
+        repaired_cash = w_prev_cash + blend * (cash_val - w_prev_cash)
+
+        repaired_w = np.clip(repaired_w, 0.0, max_stock)
+        repaired_cash = max(float(repaired_cash), 0.0)
+
+        for sec in set(sector_map.values()):
+            idx = np.array([i for i, t in enumerate(tickers) if sector_map.get(t) == sec], dtype=int)
+            if len(idx) == 0:
+                continue
+            sec_total = repaired_w[idx].sum()
+            if sec_total > max_sector and sec_total > 0:
+                repaired_w[idx] *= max_sector / sec_total
+
+        total = repaired_w.sum() + repaired_cash
+        if total <= 0:
+            return None
+
+        repaired_w /= total
+        repaired_cash /= total
+        return repaired_w, repaired_cash
 
     def _build_sector_constraints(
         self,
@@ -294,7 +370,11 @@ class PortfolioOptimizer:
         max_sector: float,
         cash: float,
     ) -> dict[str, float]:
-        """Simple rank-based weight assignment as fallback."""
+        """Simple rank-based weight assignment as fallback.
+
+        This path is intentionally conservative: it keeps leftover capital in
+        cash rather than scaling holdings back up and violating hard caps.
+        """
         ranks = alpha.argsort()[::-1]
         top_k = max(5, int(n * 0.4))  # top 40% or at least 5
         selected = ranks[:top_k]
@@ -314,14 +394,15 @@ class PortfolioOptimizer:
                 scale = max_sector / sec_total
                 w[np.array(idx)] *= scale
 
-        # scale to leave room for cash
         equity_budget = 1.0 - cash
         total = w.sum()
-        if total > 0:
+        if total > equity_budget and total > 0:
             w = w * equity_budget / total
 
+        # Preserve hard caps in fallback mode; leave any residual uninvested.
+        realized_cash = max(cash, 1.0 - float(w.sum()))
         result = {t: float(v) for t, v in zip(tickers, w) if v > 1e-5}
-        result["CASH"] = float(cash)
+        result["CASH"] = float(realized_cash)
         return result
 
     @staticmethod

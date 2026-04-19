@@ -97,6 +97,26 @@ class FeatureStore:
     def _stored_schema_hash(self, ft: FeatureType) -> str | None:
         return self._meta.get(ft, {}).get("schema_hash")
 
+    def _stored_logic_hash(self, ft: FeatureType) -> str | None:
+        return self._meta.get(ft, {}).get("logic_hash")
+
+    def _current_logic_hash(self, ft: FeatureType, sector_fb=None, stock_fb=None) -> str:
+        versions = {
+            "macro": "macro_features_v2_store_logic_hash",
+            "sector": getattr(sector_fb, "LOGIC_VERSION", "sector_features"),
+            "stock": getattr(stock_fb, "LOGIC_VERSION", "stock_features"),
+        }
+        payload = {
+            "ft": ft,
+            "logic_version": versions[ft],
+            "features_cfg": self.cfg.get("features", {}),
+            "benchmark_ticker": self.cfg.get("backtest", {}).get("benchmark_ticker", "^NSEI"),
+            "min_avg_volume_cr": self.cfg.get("universe", {}).get("min_avg_volume_cr", 1.0),
+        }
+        return hashlib.md5(
+            json.dumps(payload, sort_keys=True, default=str).encode()
+        ).hexdigest()[:8]
+
     def _latest_shard_columns(self, ft: FeatureType) -> list[str] | None:
         """Read column list from the most recent shard on disk, or None."""
         try:
@@ -228,7 +248,20 @@ class FeatureStore:
         Safe to call repeatedly; already-computed ranges are skipped.
         """
         for ft in ("macro", "sector", "stock"):
+            logic_hash = self._current_logic_hash(ft, sector_fb=sector_fb, stock_fb=stock_fb)
+            if self._stored_logic_hash(ft) != logic_hash:
+                logger.info(
+                    "FeatureStore[%s] logic changed (stored=%s current=%s) — rebuilding",
+                    ft,
+                    self._stored_logic_hash(ft),
+                    logic_hash,
+                )
+                self.invalidate(ft)
+
             last = self.last_computed_date(ft)
+            if last is not None and self.is_fresh(ft, end_date):
+                logger.info("FeatureStore[%s] up-to-date through %s — skipping", ft, last)
+                continue
             ft_start = (last + pd.Timedelta(days=1)) if last else start_date
             if ft_start > end_date:
                 logger.info("FeatureStore[%s] up-to-date through %s — skipping", ft, last)
@@ -241,7 +274,7 @@ class FeatureStore:
                 self._append_macro(macro_features_df, ft_start, end_date)
             elif ft == "sector":
                 self._append_sector(
-                    price_matrix, universe_mgr, sector_fb, ft_start, end_date
+                    price_matrix, volume_matrix, universe_mgr, sector_fb, ft_start, end_date
                 )
             else:
                 self._append_stock(
@@ -267,13 +300,41 @@ class FeatureStore:
         cols = self._latest_shard_columns("macro") or []
         self._meta.setdefault("macro", {})["last_date"] = str(end.date())
         self._meta["macro"]["schema_hash"] = self._col_hash(cols)
+        self._meta["macro"]["logic_hash"] = self._current_logic_hash("macro")
         self._save_meta()
         logger.info("FeatureStore[macro] persisted %d rows (schema=%s)",
                     len(new_rows), self._meta["macro"]["schema_hash"])
 
+    def _candidate_sector_map(self, universe_mgr, price_matrix: pd.DataFrame) -> dict[str, str]:
+        return {
+            sm.ticker: sm.sector
+            for sm in universe_mgr._stock_meta
+            if not sm.blacklisted and sm.ticker in price_matrix.columns
+        }
+
+    @staticmethod
+    def _filter_rows_by_membership(
+        rows: pd.DataFrame,
+        membership: pd.DataFrame,
+        entity_col: str,
+    ) -> pd.DataFrame:
+        if rows.empty or membership.empty:
+            return rows.iloc[0:0].copy()
+
+        mask = (
+            membership.stack(future_stack=True)
+            .rename("_eligible")
+            .reset_index()
+            .rename(columns={"level_0": "date", "level_1": entity_col})
+        )
+        mask["date"] = pd.to_datetime(mask["date"])
+        merged = rows.merge(mask, on=["date", entity_col], how="left")
+        return merged[merged["_eligible"].fillna(False)].drop(columns="_eligible")
+
     def _append_sector(
         self,
         price_matrix: pd.DataFrame,
+        volume_matrix: pd.DataFrame,
         universe_mgr,
         sector_fb,
         start: pd.Timestamp,
@@ -281,8 +342,10 @@ class FeatureStore:
     ) -> None:
         bm_ticker = self.cfg["backtest"].get("benchmark_ticker", "^NSEI")
         price_window = price_matrix.loc[:end]
-        snapshot = universe_mgr.get_universe(end.date(), price_matrix=price_window)
-        sector_map = universe_mgr.get_sector_map(snapshot)
+        volume_window = volume_matrix.loc[:end] if volume_matrix is not None and not volume_matrix.empty else None
+        sector_map = self._candidate_sector_map(universe_mgr, price_window)
+        if not sector_map:
+            return
         bm_prices = price_window[bm_ticker] if bm_ticker in price_window.columns else None
 
         full = sector_fb.build(price_window, sector_map, None, bm_prices)
@@ -295,11 +358,18 @@ class FeatureStore:
             full["date"] = pd.to_datetime(full["date"])
             full = full.set_index("date")
 
-        new_rows = full.loc[
-            (full.index >= start) & (full.index <= end)
-        ]
+        membership = universe_mgr.membership_mask(price_window, volume_window)
+        sector_membership = pd.DataFrame({
+            sector: membership[[t for t, s in sector_map.items() if s == sector]].any(axis=1)
+            for sector in sorted(set(sector_map.values()))
+        }, index=membership.index)
+
+        new_rows = full.loc[(full.index >= start) & (full.index <= end)].reset_index()
+        new_rows["date"] = pd.to_datetime(new_rows["date"])
+        new_rows = self._filter_rows_by_membership(new_rows, sector_membership, "sector")
         if new_rows.empty:
             return
+        new_rows = new_rows.set_index("date").sort_index()
 
         for year, grp in new_rows.groupby(new_rows.index.year):
             path = self._sector_path(year)
@@ -322,6 +392,7 @@ class FeatureStore:
         cols = self._latest_shard_columns("sector") or []
         self._meta.setdefault("sector", {})["last_date"] = str(end.date())
         self._meta["sector"]["schema_hash"] = self._col_hash(cols)
+        self._meta["sector"]["logic_hash"] = self._current_logic_hash("sector", sector_fb=sector_fb)
         self._save_meta()
         logger.info("FeatureStore[sector] persisted %d rows (schema=%s)",
                     len(new_rows), self._meta["sector"]["schema_hash"])
@@ -337,8 +408,9 @@ class FeatureStore:
     ) -> None:
         bm_ticker = self.cfg["backtest"].get("benchmark_ticker", "^NSEI")
         price_window = price_matrix.loc[:end]
-        snapshot = universe_mgr.get_universe(end.date(), price_matrix=price_window)
-        sector_map = universe_mgr.get_sector_map(snapshot)
+        sector_map = self._candidate_sector_map(universe_mgr, price_window)
+        if not sector_map:
+            return
         bm_prices = price_window[bm_ticker] if bm_ticker in price_window.columns else None
         vol_window = volume_matrix.loc[:end] if not volume_matrix.empty else None
 
@@ -348,6 +420,8 @@ class FeatureStore:
 
         full["date"] = pd.to_datetime(full["date"])
         new_rows = full[(full["date"] >= start) & (full["date"] <= end)]
+        membership = universe_mgr.membership_mask(price_window, vol_window)
+        new_rows = self._filter_rows_by_membership(new_rows, membership, "ticker")
         if new_rows.empty:
             return
 
@@ -361,6 +435,7 @@ class FeatureStore:
         cols = self._latest_shard_columns("stock") or []
         self._meta.setdefault("stock", {})["last_date"] = str(end.date())
         self._meta["stock"]["schema_hash"] = self._col_hash(cols)
+        self._meta["stock"]["logic_hash"] = self._current_logic_hash("stock", stock_fb=stock_fb)
         self._save_meta()
         logger.info("FeatureStore[stock] persisted %d rows (schema=%s)",
                     len(new_rows), self._meta["stock"]["schema_hash"])
@@ -473,7 +548,8 @@ class FeatureStore:
         * macro  → single latest row   (reads 1 yearly shard)
         """
         # Window: go back far enough that every entity has at least one row.
-        lookback = as_of - pd.DateOffset(months=2)
+        lookback_months = 15 if ft in {"stock", "sector"} else 3
+        lookback = as_of - pd.DateOffset(months=lookback_months)
         df = self.load(ft, lookback, as_of)
         if df.empty:
             return df

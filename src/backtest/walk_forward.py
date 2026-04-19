@@ -34,6 +34,7 @@ from src.data.contracts import PortfolioState, RebalanceRecord
 from src.data.macro import MacroDataManager
 from src.data.universe import UniverseManager
 from src.features.feature_store import FeatureStore
+from src.features.base import fill_price_gaps
 from src.features.macro_features import MacroFeatureBuilder
 from src.features.portfolio_features import compute_portfolio_features
 from src.features.sector_features import SectorFeatureBuilder
@@ -299,8 +300,11 @@ class WalkForwardEngine:
                 if t in prices_today.index and np.isfinite(float(prices_today.get(t, 0) or 0))
             ) + portfolio.cash
             pre_nav = max(mtm_value, portfolio.nav) if np.isfinite(mtm_value) and mtm_value > 0 else portfolio.nav
+            portfolio_mtm = self.simulator.value_portfolio(
+                portfolio, prices_today, current_date.date()
+            )
             exec_result = self.simulator.execute_rebalance(
-                target_weights, portfolio, prices_today, current_date.date()
+                target_weights, portfolio_mtm, prices_today, current_date.date()
             )
             portfolio = exec_result.new_portfolio
 
@@ -581,8 +585,24 @@ class WalkForwardEngine:
             (self.price_matrix.index >= train_start) &
             (self.price_matrix.index < as_of)
         ]
-        snapshot = self.universe_mgr.get_universe(as_of.date(), price_matrix=train_prices)
-        sector_map = self.universe_mgr.get_sector_map(snapshot)
+        train_volumes = self.volume_matrix.loc[
+            (self.volume_matrix.index >= train_start) &
+            (self.volume_matrix.index < as_of)
+        ]
+        membership = self.universe_mgr.membership_mask(
+            train_prices,
+            train_volumes if not train_volumes.empty else None,
+        )
+        sector_map = {
+            sm.ticker: sm.sector
+            for sm in self.universe_mgr._stock_meta
+            if not sm.blacklisted and sm.ticker in membership.columns
+        }
+        snapshot = self.universe_mgr.get_universe(
+            as_of.date(),
+            price_matrix=train_prices,
+            volume_matrix=train_volumes if not train_volumes.empty else None,
+        )
 
         # sector return matrix for labels
         # NOTE: extend price window by fwd_window to allow label computation,
@@ -593,8 +613,13 @@ class WalkForwardEngine:
             (self.price_matrix.index >= train_start) &
             (self.price_matrix.index < as_of)
         ]
+        extended_membership = membership.reindex(extended_prices.index, fill_value=False)
+        clean_prices = fill_price_gaps(extended_prices[list(sector_map)], limit=5)
+        clean_returns = clean_prices.pct_change(fill_method=None)
         sec_returns = pd.DataFrame({
-            sec: extended_prices[[t for t, s in sector_map.items() if s == sec and t in extended_prices.columns]].mean(axis=1).pct_change()
+            sec: clean_returns[[t for t, s in sector_map.items() if s == sec]].where(
+                extended_membership[[t for t, s in sector_map.items() if s == sec]]
+            ).mean(axis=1)
             for sec in snapshot.sectors
         })
 
@@ -673,7 +698,7 @@ class WalkForwardEngine:
         if avail.empty:
             return pd.Series(dtype=float)
         # ffill so holiday/sparse rows use the last known price for each ticker
-        return avail.ffill().iloc[-1].dropna()
+        return avail.ffill(limit=5).iloc[-1].dropna()
 
     def _get_macro_features(self, date: pd.Timestamp) -> pd.Series:
         avail = self.macro_features[self.macro_features.index <= date]

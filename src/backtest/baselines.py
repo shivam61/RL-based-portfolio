@@ -88,6 +88,7 @@ def equal_weight_backtest(
         total = sum(target.values())
         target = {k: v / total for k, v in target.items()}
 
+        portfolio = simulator.value_portfolio(portfolio, prices, current.date())
         result = simulator.execute_rebalance(target, portfolio, prices, current.date())
         portfolio = result.new_portfolio
 
@@ -163,6 +164,7 @@ def sector_momentum_backtest(
         total = sum(target.values())
         target = {k: v / total for k, v in target.items()}
 
+        portfolio = simulator.value_portfolio(portfolio, prices, current.date())
         result = simulator.execute_rebalance(target, portfolio, prices, current.date())
         portfolio = result.new_portfolio
 

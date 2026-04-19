@@ -13,7 +13,9 @@ import pandas as pd
 
 from src.config import load_config
 from src.features.base import (
+    fill_price_gaps,
     lag_series,
+    normalized_equal_weight_index,
     rolling_max_drawdown,
     rolling_return,
     rolling_vol,
@@ -24,6 +26,8 @@ logger = logging.getLogger(__name__)
 
 class SectorFeatureBuilder:
     """Compute sector features from price matrix + macro features."""
+
+    LOGIC_VERSION = "sector_features_v3_normalized_index"
 
     def __init__(self, cfg: dict | None = None):
         self.cfg = cfg or load_config()
@@ -45,10 +49,10 @@ class SectorFeatureBuilder:
         """
         sectors = sorted(set(sector_map.values()))
         # ffill to fill holiday NaNs before rolling calculations
-        price_matrix = price_matrix.ffill()
+        price_matrix = fill_price_gaps(price_matrix, limit=5)
         if benchmark_prices is not None:
-            benchmark_prices = benchmark_prices.ffill()
-        daily_returns = price_matrix.pct_change()
+            benchmark_prices = fill_price_gaps(benchmark_prices, limit=5)
+        daily_returns = price_matrix.pct_change(fill_method=None)
 
         all_rows = []
         for sector in sectors:
@@ -56,7 +60,7 @@ class SectorFeatureBuilder:
             if not tickers:
                 continue
 
-            sec_prices = price_matrix[tickers].mean(axis=1)  # equal-weight sector index
+            sec_prices = normalized_equal_weight_index(price_matrix[tickers], max_gap=5)
             sec_rets = daily_returns[tickers].mean(axis=1)
 
             feat: dict[str, pd.Series] = {}
@@ -81,7 +85,7 @@ class SectorFeatureBuilder:
 
             # ── Relative strength vs benchmark ────────────────────────────────
             if benchmark_prices is not None:
-                bm_rets = benchmark_prices.pct_change()
+                bm_rets = benchmark_prices.pct_change(fill_method=None)
                 feat["rel_str_1m"] = feat["mom_1m"] - rolling_return(benchmark_prices, self.short)
                 feat["rel_str_3m"] = feat["mom_3m"] - rolling_return(benchmark_prices, self.medium)
                 feat["beta_3m"] = (
@@ -90,9 +94,9 @@ class SectorFeatureBuilder:
                 )
 
             # ── Breadth ───────────────────────────────────────────────────────
-            rets_1m = price_matrix[tickers].pct_change(self.short)
+            rets_1m = price_matrix[tickers].pct_change(self.short, fill_method=None)
             feat["breadth_1m"] = (rets_1m > 0).sum(axis=1) / len(tickers)
-            rets_3m = price_matrix[tickers].pct_change(self.medium)
+            rets_3m = price_matrix[tickers].pct_change(self.medium, fill_method=None)
             feat["breadth_3m"] = (rets_3m > 0).sum(axis=1) / len(tickers)
 
             # % stocks in sector above 50 DMA (validates sector trend quality)
@@ -109,7 +113,7 @@ class SectorFeatureBuilder:
 
             # ── Dispersion (cross-sectional vol within sector) ────────────────
             feat["dispersion_1m"] = (
-                price_matrix[tickers].pct_change(self.short).std(axis=1)
+                price_matrix[tickers].pct_change(self.short, fill_method=None).std(axis=1)
             )
 
             # ── Macro sensitivity proxies (from sector metadata) ──────────────

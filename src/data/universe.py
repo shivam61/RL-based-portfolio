@@ -151,6 +151,56 @@ class UniverseManager:
     def get_global_proxies(self) -> dict[str, str]:
         return self._uni_cfg.get("global_proxies", {})
 
+    def membership_mask(
+        self,
+        price_matrix: pd.DataFrame,
+        volume_matrix: pd.DataFrame | None = None,
+        cap_filter: list[str] | None = None,
+        min_history_days: int = 252,
+        liquidity_lookback_days: int = 63,
+        min_avg_vol_cr: float | None = None,
+    ) -> pd.DataFrame:
+        """
+        Return a date x ticker boolean mask for point-in-time universe membership.
+
+        This is the vectorized form of get_universe(...) and is used by the
+        feature store / training paths to avoid survivorship bias.
+        """
+        if price_matrix.empty:
+            return pd.DataFrame(dtype=bool)
+
+        prices = price_matrix.sort_index()
+        tickers = [
+            sm.ticker
+            for sm in self._stock_meta
+            if not sm.blacklisted
+            and sm.ticker in prices.columns
+            and (cap_filter is None or sm.cap in cap_filter)
+        ]
+        if not tickers:
+            return pd.DataFrame(index=prices.index, dtype=bool)
+
+        prices = prices[tickers]
+        membership = prices.notna().cumsum().ge(min_history_days)
+
+        if volume_matrix is not None and not volume_matrix.empty:
+            if min_avg_vol_cr is None:
+                min_avg_vol_cr = self.cfg["universe"].get("min_avg_volume_cr", 1.0)
+            volumes = volume_matrix.reindex(index=prices.index, columns=tickers)
+            avg_vol = volumes.rolling(liquidity_lookback_days, min_periods=1).mean()
+            liquid = avg_vol.isna() | avg_vol.ge(min_avg_vol_cr)
+            membership &= liquid
+
+        for sm in self._stock_meta:
+            if sm.ticker not in membership.columns:
+                continue
+            if sm.listed_since:
+                membership.loc[membership.index < pd.Timestamp(sm.listed_since), sm.ticker] = False
+            if sm.delisted_on:
+                membership.loc[membership.index >= pd.Timestamp(sm.delisted_on), sm.ticker] = False
+
+        return membership.fillna(False)
+
 
 # ── Standalone helper ─────────────────────────────────────────────────────────
 
