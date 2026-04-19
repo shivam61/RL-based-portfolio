@@ -25,6 +25,8 @@ Best known result: **run_016 — 23.78% CAGR, Sharpe 0.98, ₹55.2L final NAV** 
 | run_014 | Fix: full-portfolio turnover constraint (liquidation + cash) | 20.88% | 0.75 | -30.95% | ₹42.2L | -2.7% vs run_010 |
 | run_015 | Revert to 36-feat set + infeasibility-retry fix (TO: 45%→29%) | 18.16% | 0.80 | -24.72% | ₹32.7L | -5.4% vs run_010 |
 | **run_016** | **42-feat set + infeasibility retry (new best)** | **23.78%** | **0.98** | **-26.15%** | **₹55.2L** | **+0.2% vs run_010** ✅ |
+| run_017 | Trading-day calendar + benchmark ffill (stale RL model) | 15.10% | 0.61 | -29.75% | ₹24.3L | discard — stale RL |
+| run_017b | Trading-day calendar + benchmark ffill (fresh RL) | 15.74% | 0.63 | -28.73% | ₹25.9L | -8.0% vs run_016 ❌ new data baseline |
 
 ### Ablation: Retrain Frequency × Event Triggers (run from run_009 state)
 
@@ -76,13 +78,28 @@ experience buffer will grow and performance should converge back to run_004 leve
 4. **The constraint.** RL sector cap increase (0.35→0.50) consistently hurts. At 147 steps,
    wider freedom = more variance the policy gradient can't model.
 
+8. **Trading-day calendar fix reset the baseline (run_017b = 15.74%).** Three bugs fixed:
+   (a) price matrix now excludes 208 NSE holiday rows (3,731→3,523); (b) `beta_3m` in stock
+   features was 0/365k non-null (now 99%) due to unffilled benchmark in rolling.cov();
+   (c) `rel_str_1m/3m` in sector features was ~88% non-null (now 99%) same cause.
+   `rel_str_1m` is in the RL state vector — the old RL was trained with it ≈ 0 on holiday
+   dates. Fresh RL on corrected data still lands at 15.74%, consistent with the buffer-reset
+   pattern (~18-21% range). run_016's 23.78% was partly inflated by the RL exploiting
+   corrupted (zero-padded) `rel_str_1m` values. The corrected data is the right baseline
+   going forward — run_017b is the new true baseline, not a regression.
+   **Down years improved**: 2018 +11.2% (vs +4.9%), 2019 +15.4% (vs +9.5%), 2022 +0.8%
+   (vs -1.4%). Up years weaker: 2021 +22.6% (vs +36%), 2023 +18.6% (vs +31.5%).
+
 ---
 
-## Current Working State (run_009 config)
+## Current Working State (run_017b config)
 
 - `config/base.yaml`: `max_sector_weight: 0.35`, `total_timesteps: 20000`, `n_epochs: 10`
 - `src/rl/environment.py`: STATE_DIM=82, macro keys use `nifty_ret_1m/nifty_above_200ma`
 - `src/features/feature_store.py`: sector dedup fixed (15 sectors per snapshot)
+- `src/data/ingestion.py`: trading-day filter (≥50% tickers present) in build_price_matrix/build_volume_matrix
+- `src/features/sector_features.py`: benchmark_prices ffilled before rolling cov/rel_str
+- `src/features/stock_features.py`: benchmark_prices ffilled before rolling cov/beta
 - `src/data/macro.py`: India VIX + Nifty IT added to macro data
 - FII proxy code exists in `src/data/fii_proxy.py` — computed into feature store but **not
   wired into RL state** until real FII data is available
