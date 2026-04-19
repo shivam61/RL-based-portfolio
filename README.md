@@ -198,5 +198,5 @@ All saved to `artifacts/reports/`:
 | `artifacts/models/stock_ranker.pkl` | ✅ committed | run_020 trained model |
 | `artifacts/models/rl_agent/experience_buffer.pkl` | ✅ committed | Accumulated walk-forward experience |
 | `artifacts/models/rl_agent/meta.pkl` | ✅ committed | PPO training metadata |
-| `artifacts/models/rl_agent/ppo_model.zip` | ❌ gitignored | Large binary — regenerate with `run_backtest.py` |
+| `artifacts/models/rl_agent/ppo_model.zip` | ✅ committed | PPO network weights — 269KB, tracked directly |
 | `artifacts/run_history/` | ✅ committed | Metrics + charts for all named runs |
