@@ -22,6 +22,7 @@ Best known result: **run_010 — 23.57% CAGR, Sharpe 0.93, ₹54.1L final NAV** 
 | run_011 | INVALID — stale 36-col feature store served old data | 20.14% | 0.82 | -38.32% | ₹39.4L | discard |
 | run_012 | TASK-2: real 44-col technical feature set (ffill fix + new signals) | 19.88% | 0.74 | -31.03% | ₹38.5L | -3.7% vs run_010 ❌ |
 | run_013 | Pruned: dropped ret_2w + reversal_1w (42 features) | 17.94% | 0.76 | -29.34% | ₹32.0L | -5.6% vs run_010 ❌ |
+| run_014 | Fix: full-portfolio turnover constraint (liquidation + cash) | 20.88% | 0.75 | -30.95% | ₹42.2L | -2.7% vs run_010 |
 
 ### Ablation: Retrain Frequency × Event Triggers (run from run_009 state)
 
@@ -52,6 +53,8 @@ experience buffer will grow and performance should converge back to run_004 leve
 
 1. **Data quality beats model complexity.** The biggest win (+6.5% CAGR) was a bug fix
    (sector dedup), not a new feature. Every complexity addition since has hurt.
+
+6. **Turnover constraint had three bugs.** Liquidated tickers (removed from candidate set) were not counted in turnover; cash changes were unconstrained; first-rebalance from all-cash was infeasible, causing a silent rank fallback with zero constraints. Fixing all three recovered +3% CAGR vs run_013 (17.94%→20.88%). Avg turnover 45.76% — slightly over 40% budget due to effective_max_to relaxation when liquidation is forced.
 
 5. **run_012/013 could not beat run_010.** Adding new technical features (44 cols) and then
    pruning redundant ones (42 cols) both underperformed the original 36-feature baseline.
