@@ -366,6 +366,7 @@ class WalkForwardEngine:
                 roll_sharpe = 0.0
             dd = self.risk_engine.current_drawdown() if hasattr(self.risk_engine, "current_drawdown") else 0.0
             cash_pct = portfolio.weights.get("CASH", 0.0) * 100
+            free_cash_inr = portfolio.cash
             n_stocks = len([t for t in portfolio.holdings if portfolio.holdings[t] > 1e-6])
             turnover_pct = exec_result.total_turnover * 100
             cost_inr = exec_result.total_cost
@@ -422,7 +423,7 @@ class WalkForwardEngine:
                 flush=True,
             )
             print(
-                f"  Stocks: {n_stocks}  |  Cash: {cash_pct:.1f}%  |  "
+                f"  Stocks: {n_stocks}  |  Cash: {cash_pct:.1f}%  (₹{free_cash_inr:,.0f})  |  "
                 f"Turnover: {turnover_pct:.1f}%  |  TC: ₹{cost_inr:,.0f}",
                 flush=True,
             )
