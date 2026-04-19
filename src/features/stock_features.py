@@ -46,6 +46,8 @@ class StockFeatureBuilder:
         """
         tickers = [t for t in price_matrix.columns if t in sector_map]
         prices = price_matrix[tickers].ffill()  # fill holiday NaNs so rolling windows work
+        if benchmark_prices is not None:
+            benchmark_prices = benchmark_prices.ffill()
         returns = prices.pct_change()
 
         feat_dict: dict[str, pd.DataFrame] = {}

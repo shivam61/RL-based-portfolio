@@ -204,6 +204,15 @@ def build_price_matrix(
     price_matrix.sort_index(inplace=True)
     price_matrix.index.name = "date"
 
+    # Drop non-trading rows: weekends and exchange holidays where <50% of tickers
+    # have data.  This removes ~208 NSE holiday rows and weekend data artifacts
+    # so rolling windows operate on trading days only.
+    trading_mask = price_matrix.notna().mean(axis=1) >= 0.5
+    n_dropped = (~trading_mask).sum()
+    price_matrix = price_matrix[trading_mask]
+    if n_dropped:
+        logger.info("Price matrix: dropped %d non-trading rows (holidays/weekends)", n_dropped)
+
     out_path = Path(cfg["paths"]["processed_data"]) / "price_matrix.parquet"
     price_matrix.to_parquet(out_path, engine="pyarrow")
     logger.info("Price matrix: %s → %s", price_matrix.shape, out_path)
@@ -228,6 +237,10 @@ def build_volume_matrix(
     volume_matrix.index = pd.to_datetime(volume_matrix.index).normalize()
     volume_matrix.sort_index(inplace=True)
     volume_matrix.index.name = "date"
+
+    # Mirror the price matrix trading-day filter so both matrices share the same index.
+    trading_mask = volume_matrix.notna().mean(axis=1) >= 0.5
+    volume_matrix = volume_matrix[trading_mask]
 
     out_path = Path(cfg["paths"]["processed_data"]) / "volume_matrix.parquet"
     volume_matrix.to_parquet(out_path, engine="pyarrow")
