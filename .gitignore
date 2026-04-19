@@ -15,8 +15,8 @@ artifacts/reports/
 *.h5
 
 # Track model artifacts in git for RL state persistence + easy rollback
-# pkl files are tracked (small); ppo_model.zip excluded (large binary)
-artifacts/models/rl_agent/ppo_model.zip
+# ppo_model.zip is 269KB — committed directly (not large; no LFS needed)
+# Full RL state = ppo_model.zip + experience_buffer.pkl + meta.pkl
 
 # Logs
 *.log
