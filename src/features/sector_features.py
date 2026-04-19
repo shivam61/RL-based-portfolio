@@ -46,6 +46,8 @@ class SectorFeatureBuilder:
         sectors = sorted(set(sector_map.values()))
         # ffill to fill holiday NaNs before rolling calculations
         price_matrix = price_matrix.ffill()
+        if benchmark_prices is not None:
+            benchmark_prices = benchmark_prices.ffill()
         daily_returns = price_matrix.pct_change()
 
         all_rows = []
