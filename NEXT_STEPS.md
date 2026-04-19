@@ -31,7 +31,25 @@ Stable ceiling on corrected data: **~22–23% CAGR** (run_018/019 converged — 
 | **run_018** | **Accumulated buffer on corrected data (new best)** | **22.96%** | **0.83** | **-30.75%** | **₹51.2L** | **+7.2% vs run_017b** ✅ |
 | run_019 | Accumulated buffer pass 2 — converged | 22.13% | 0.84 | -30.13% | ₹47.4L | flat vs run_018 — buffer converged |
 
-### Ablation: Retrain Frequency × Event Triggers (run from run_009 state)
+### Ablation 2: Retrain Frequency × Event Triggers (run from run_019 state, clean data)
+
+| Config | Description | CAGR | Sharpe | MaxDD | Turnover | Status |
+|--------|-------------|------|--------|-------|----------|--------|
+| A2 | 4-week (no triggers) | 20.78% | 0.82 | -24.34% | 29.5% | ✅ done |
+| B2 | 6-week (no triggers) | 21.12% | 0.83 | -33.81% | 24.7% | ✅ done |
+| C2 | 8-week (no triggers) — was prev best | 15.79% | 0.64 | -22.23% | 21.9% | ✅ done |
+| D2 | 12-week (no triggers) | — | — | — | — | 🔄 running |
+| E2 | 26-week (no triggers) | — | — | — | — | ⏳ queued |
+| F2 | 4-week + event triggers | — | — | — | — | ⏳ queued after E2 |
+| G2 | 6-week + event triggers | — | — | — | — | ⏳ queued after F2 |
+
+**Early findings (3/7 done):**
+- Optimal frequency has FLIPPED vs corrupted-data ablation (8w was best, now 4w/6w lead)
+- Why: `rel_str_1m` is now a real, fast-changing signal — RL needs to update more frequently
+- 8w dropped to 15.79% (was 23.57%) — the old winner is now the worst so far
+- Event triggers expected to add lift on top of 4w/6w (pattern from prior ablation: +3–5% CAGR)
+
+### Ablation 1: Retrain Frequency × Event Triggers (run from run_009 state, corrupted data)
 
 | Config | Description | CAGR | Sharpe | MaxDD | Final NAV | RL Retrains | Events Fired |
 |--------|-------------|------|--------|-------|-----------|-------------|--------------|
