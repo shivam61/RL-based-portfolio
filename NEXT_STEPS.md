@@ -157,7 +157,7 @@ If it doesn't, revert `stock_features.py` and move to the next step.
 | run_020 | Step 0 | Drop `above_50ma` + `above_200ma` (0% importance) | ✅ KEEP | 22.19% | 0.96 | +0.06% CAGR / +0.12 Sharpe / MaxDD −6.6pp | KEEP — neutral CAGR but Sharpe 0.84→0.96, MaxDD −30%→−23.5% |
 | run_021 | Step 1 | Add Sharpe features: `sharpe_1m/3m/12m`, `calmar_3m` | ❌ REJECT | 10.00% | 0.31 | -8.94% CAGR / -0.63 Sharpe vs branch baseline | REJECT — cash-heavy RL regime and major performance collapse |
 | run_022 | Step 2 | Add CS ranks: `ret_1m/3m/12m_rank` (percentile across universe) | ❌ REJECT | 12.20% | 0.43 | -6.74% CAGR / -0.51 Sharpe vs branch baseline | REJECT — higher turnover, deeper drawdown, weaker risk-adjusted returns |
-| run_023 | Step 3 | Fix sector z-score: `ret_vs_sector = (ret-mean)/std` | ⏳ PENDING | — | — | — | — |
+| run_023 | Step 3 | Fix sector z-score: `ret_vs_sector = (ret-mean)/std` | ❌ REJECT | 11.73% | 0.39 | -7.21% CAGR / -0.55 Sharpe vs branch baseline | REJECT — materially worse CAGR, Sharpe, MaxDD, and turnover |
 | run_024 | Step 4 | Add momentum acceleration: `mom_accel_1m`, `mom_accel_3m` | ⏳ PENDING | — | — | — | — |
 | run_025 | Step 5 | Combine all winning steps; prune back to ≤42 features | ⏳ PENDING | — | — | — | — |
 

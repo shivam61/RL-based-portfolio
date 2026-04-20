@@ -79,3 +79,17 @@ Each task should record:
 - Learning:
   - Regime-invariant rank features did not help the current stack; they increased turnover and deepened drawdown while reducing both CAGR and Sharpe.
   - The branch baseline remains the optimizer-fixed state (`18.94% CAGR`, `0.94 Sharpe`) before `run_023`.
+
+### Task: run_023 — Sector-relative z-score
+- Scope:
+  - replaced sector-relative raw spreads with within-sector z-scores for `ret_1w`, `ret_1m`, `ret_3m`, `ret_6m`, `ret_12m`, and `vol_3m`
+  - added a direct validation test that checks `ret_1m_vs_sector` against the expected within-sector z-score formula
+- Validation:
+  - `./.venv/bin/pytest tests/test_feature_validation.py -q` -> `43 passed`
+  - `./.venv/bin/pytest tests -q` -> `92 passed`
+  - full backtest -> `11.73% CAGR`, `0.39 Sharpe`, `-34.98% MaxDD`, `30.79% avg turnover`
+- Decision:
+  - reject and revert
+- Learning:
+  - Making sector-relative features variance-scaled did not improve comparability in practice; it destabilized the ranker path and materially worsened turnover and drawdown.
+  - Three consecutive stock-feature experiments failed against the optimizer-fixed baseline, which is a signal to pause feature churn and move back to data/foundation work.

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class StockFeatureBuilder:
     """Compute stock-level features from price and volume matrices."""
 
-    LOGIC_VERSION = "stock_features_v6_sector_zscore"
+    LOGIC_VERSION = "stock_features_v3_pit_membership"
 
     def __init__(self, cfg: dict | None = None):
         self.cfg = cfg or load_config()
@@ -156,27 +156,18 @@ class StockFeatureBuilder:
             if feat_name not in feat_dict:
                 continue
             sector_means: dict[str, pd.Series] = {}
-            sector_stds: dict[str, pd.Series] = {}
             for sec in sectors:
                 sec_tickers = [t for t in tickers if sector_map.get(t) == sec]
                 if not sec_tickers:
                     continue
                 avail = [t for t in sec_tickers if t in feat_dict[feat_name].columns]
                 if avail:
-                    sector_slice = feat_dict[feat_name][avail]
-                    sector_means[sec] = sector_slice.mean(axis=1)
-                    sector_stds[sec] = sector_slice.std(axis=1).replace(0, np.nan)
+                    sector_means[sec] = feat_dict[feat_name][avail].mean(axis=1)
             sec_mean_df = pd.DataFrame({
                 t: sector_means.get(sector_map[t], pd.Series(np.nan, index=prices.index))
                 for t in tickers if t in sector_map
             })
-            sec_std_df = pd.DataFrame({
-                t: sector_stds.get(sector_map[t], pd.Series(np.nan, index=prices.index))
-                for t in tickers if t in sector_map
-            })
-            feat_dict[f"{feat_name}_vs_sector"] = (
-                feat_dict[feat_name] - sec_mean_df
-            ) / sec_std_df
+            feat_dict[f"{feat_name}_vs_sector"] = feat_dict[feat_name] - sec_mean_df
 
         # ── Assemble into long format ─────────────────────────────────────────
         all_dfs = []
