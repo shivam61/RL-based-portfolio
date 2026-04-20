@@ -40,3 +40,28 @@ Each task should record:
   - expand point-in-time coverage beyond the current fixed config names
   - preserve date-valid listing, sector, and investability logic
   - measure impact against the current branch baseline before proceeding further
+
+### Investigation: Historical universe expansion
+- Outcome:
+  - Local-only universe expansion was not selected for implementation in this cycle.
+- Evidence:
+  - `price_matrix.parquet` already matches the configured NSE roster except for one missing ticker data hole (`TATAMOTORS.NS`).
+  - Current PIT logic already delays post-2013 listings via price-coverage plus 252-day history gating.
+  - Official Nifty archive files appear to be the right long-term source for date-effective roster reconstruction, but they were not harvestable reliably enough from this environment for a measured overnight change.
+- Learning:
+  - A meaningful historical-universe upgrade likely needs an external monthly constituent source, not just more logic on top of the current local cache.
+  - The next best measured branch task was `run_021` rather than forcing a low-impact metadata-only universe change.
+
+### Task: run_021 — Sharpe / Calmar stock features
+- Scope:
+  - added `sharpe_1m`, `sharpe_3m`, `sharpe_12m`, and `calmar_3m` to the stock feature set
+  - extended feature validation with schema, fill-rate, and construction-consistency checks
+- Validation:
+  - `./.venv/bin/pytest tests/test_feature_validation.py -q` -> `44 passed`
+  - `./.venv/bin/pytest tests -q` -> `93 passed`
+  - full backtest -> `10.00% CAGR`, `0.31 Sharpe`, `-22.67% MaxDD`, `27.27% avg turnover`
+- Decision:
+  - reject and revert
+- Learning:
+  - Explicit return-over-volatility features pushed the system toward cash-heavy, concentrated RL behavior and materially degraded the stock ranker path.
+  - The branch baseline remains the optimizer-fixed state (`18.94% CAGR`, `0.94 Sharpe`) until the next stock-feature experiment is measured.
