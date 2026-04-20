@@ -422,6 +422,20 @@ class TestCrossFeatureConsistency:
             )
             break  # checking one (date, sector) pair is sufficient here
 
+    def test_sector_relative_features_use_sector_zscore(self):
+        sector_map = {ticker: "IT" for ticker in TICKERS}
+        sf = _build_stock_features(price_df=_make_prices(), sector_map=sector_map)
+        panel = sf[["date", "ticker", "ret_1m", "ret_1m_vs_sector"]].dropna()
+        sample_dates = list(panel["date"].drop_duplicates().sort_values().iloc[::40])[:5]
+        for date in sample_dates:
+            day = panel[panel["date"] == date].copy()
+            if len(day) < 5:
+                continue
+            expected = (day["ret_1m"] - day["ret_1m"].mean()) / day["ret_1m"].std()
+            diff = (day["ret_1m_vs_sector"].reset_index(drop=True) - expected.reset_index(drop=True)).abs()
+            assert diff.max() < 1e-8, f"ret_1m_vs_sector z-score mismatch: max diff={diff.max():.2e}"
+            break
+
     def test_price_pctile_at_52w_high_is_1(self):
         """A stock at its 52-week high should have price_pctile_1y ≈ 1."""
         prices = _make_prices()
