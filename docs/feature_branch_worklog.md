@@ -65,3 +65,17 @@ Each task should record:
 - Learning:
   - Explicit return-over-volatility features pushed the system toward cash-heavy, concentrated RL behavior and materially degraded the stock ranker path.
   - The branch baseline remains the optimizer-fixed state (`18.94% CAGR`, `0.94 Sharpe`) until the next stock-feature experiment is measured.
+
+### Task: run_022 — Cross-sectional return ranks
+- Scope:
+  - added `ret_1m_rank`, `ret_3m_rank`, and `ret_12m_rank` as percentile ranks across the investable stock universe
+  - extended feature validation with schema, bounds, fill-rate, and cross-sectional consistency checks
+- Validation:
+  - `./.venv/bin/pytest tests/test_feature_validation.py -q` -> `44 passed`
+  - `./.venv/bin/pytest tests -q` -> `93 passed`
+  - full backtest -> `12.20% CAGR`, `0.43 Sharpe`, `-33.01% MaxDD`, `31.47% avg turnover`
+- Decision:
+  - reject and revert
+- Learning:
+  - Regime-invariant rank features did not help the current stack; they increased turnover and deepened drawdown while reducing both CAGR and Sharpe.
+  - The branch baseline remains the optimizer-fixed state (`18.94% CAGR`, `0.94 Sharpe`) before `run_023`.
