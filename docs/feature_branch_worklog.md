@@ -93,3 +93,19 @@ Each task should record:
 - Learning:
   - Making sector-relative features variance-scaled did not improve comparability in practice; it destabilized the ranker path and materially worsened turnover and drawdown.
   - Three consecutive stock-feature experiments failed against the optimizer-fixed baseline, which is a signal to pause feature churn and move back to data/foundation work.
+
+### Task: Stage A universe hardening (inferred listing dates + large/mid focus)
+- Scope:
+  - inferred `listed_since` from first valid trade date in local price history when config metadata is absent
+  - added optional inferred delisting support for long disappearances
+  - applied a default `active_caps: [large, mid]` universe filter
+  - added targeted universe tests for inferred listing dates and default cap filtering
+- Validation:
+  - `./.venv/bin/pytest tests/test_data.py::TestUniverseManager -q` -> `8 passed`
+  - `./.venv/bin/pytest tests -q` -> `93 passed`
+  - full backtest -> `16.67% CAGR`, `0.69 Sharpe`, `-30.69% MaxDD`, `24.34% avg turnover`
+- Decision:
+  - reject and revert
+- Learning:
+  - Tightening realism on the current ~100-stock roster without expanding historical breadth reduced both return and risk-adjusted quality.
+  - This suggests the next useful universe project is broader historical coverage, not a stricter version of the current narrow roster.
