@@ -164,8 +164,11 @@ If it doesn't, revert `stock_features.py` and move to the next step.
 | Task | Description | CAGR | Sharpe | MaxDD | Turnover | Decision |
 |------|-------------|------|--------|-------|----------|----------|
 | Stage A | Infer `listed_since` from price history + default large/mid-only active caps | 16.67% | 0.69 | -30.69% | 24.34% | ❌ REJECT — more realistic but clearly worse than branch baseline |
-| run_024 | Step 4 | Add momentum acceleration: `mom_accel_1m`, `mom_accel_3m` | ⏳ PENDING | — | — | — | — |
-| run_025 | Step 5 | Combine all winning steps; prune back to ≤42 features | ⏳ PENDING | — | — | — | — |
+| Stage B | Broaden to generated current Nifty 200 large/mid roster (199 names) | 17.64% | 0.75 | -33.50% | 33.71% | ❌ REJECT — initial read was invalid due to stale feature-store shards; corrected run still worse than branch baseline and much higher turnover |
+| Stage C | Expand curated roster to 150 names and re-measure stock-selection only | 4.13% / 8.53% | -0.11 / 0.21 | -10.32% / -6.72% | 72.85% / 51.45% | ❌ REJECT — no improvement over the smaller isolated baseline; keep the branch roster unchanged |
+| Stage D | Re-map the current roster into the proposed 18-sector taxonomy and test `selection_only` | 5.67% | -0.02 | -10.47% | 72.80% | ❌ REJECT — small ranking edge (`top-k vs universe +0.17%`, `rank IC 0.193`) and thin selection (`19.5` names, `26.17%` stability); do not proceed to optimizer/full-RL on this branch |
+| run_024 | Step 4 | Add momentum acceleration: `mom_accel_1m`, `mom_accel_3m` | ❌ REJECT | 4.13% / 7.80% | -0.11 / 0.14 | - | REJECT — closed, do not revisit on this branch |
+| run_025 | Step 5 | Combine all winning steps; prune back to ≤42 features | ⏳ PENDING | — | — | — | pending after remaining winners are identified |
 
 ### Feature detail
 
@@ -265,6 +268,55 @@ More timesteps = more overfitting to the same thin buffer. 20k stays.
 ### TASK-5 — Sector cap revisit [DEFERRED — needs more live data]
 Re-enable P0-A (cap 0.35→0.50) only after TASK-3 unlocks (500+ live steps).
 The constraint feedback loop (realized weights in state) must be active first.
+
+### TASK-6 — Cross-sectional ranking features [IN PROGRESS]
+Goal: improve stock-selection separability without changing taxonomy or universe breadth.
+Added features:
+- sector-relative momentum
+- per-date z-scores
+- cross-sectional rank transforms
+- volatility-adjusted momentum
+
+Validation:
+- rebuild feature store after logic hash change
+- run `selection_only` before `optimizer_only`
+- compare:
+  - top-k vs universe
+  - top-k vs sector median
+  - rank IC
+  - precision@k
+  - stability
+  - top-bottom spread
+  - intra-sector dispersion
+
+Decision rule:
+- keep only if ranking diagnostics improve materially on the frozen universe
+- do not change taxonomy again for this track
+
+Current direction:
+- prune the ranker further to the six raw canonical features only:
+  - `ret_3m`
+  - `mom_12m_skip1m`
+  - `mom_accel_3m_6m`
+  - `vol_3m`
+  - `amihud_1m`
+  - `ma_50_200_ratio`
+- retire the transform-heavy feature variants if the raw-minimal run improves local ranking diagnostics
+
+### TASK-7 — Local-sector diagnostics [IN PROGRESS]
+Goal: decide whether the stock ranker is acting as a true sector-local ranker.
+Add and track:
+- within-sector IC
+- within-sector top-bottom spread
+- sector-median separation
+
+Reporting:
+- equal-weighted across sectors
+- weighted by candidate count
+
+Decision rule:
+- require positive local metrics and non-collapsing stability before calling the feature layer useful
+- if local metrics are weak too, the feature layer needs redesign rather than more universe or taxonomy changes
 
 ---
 

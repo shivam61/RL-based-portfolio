@@ -100,7 +100,30 @@ class FeatureStore:
     def _stored_logic_hash(self, ft: FeatureType) -> str | None:
         return self._meta.get(ft, {}).get("logic_hash")
 
-    def _current_logic_hash(self, ft: FeatureType, sector_fb=None, stock_fb=None) -> str:
+    @staticmethod
+    def _universe_hash(universe_mgr) -> str | None:
+        if universe_mgr is None:
+            return None
+        stocks = universe_mgr._uni_cfg.get("stocks", [])
+        normalized = sorted(
+            [
+                {
+                    "ticker": row.get("ticker"),
+                    "sector": row.get("sector"),
+                    "cap": row.get("cap"),
+                    "listed_since": str(row.get("listed_since") or ""),
+                    "delisted_on": str(row.get("delisted_on") or ""),
+                    "blacklisted": bool(row.get("blacklisted", False)),
+                }
+                for row in stocks
+            ],
+            key=lambda row: row["ticker"] or "",
+        )
+        return hashlib.md5(
+            json.dumps(normalized, sort_keys=True, default=str).encode()
+        ).hexdigest()[:8]
+
+    def _current_logic_hash(self, ft: FeatureType, sector_fb=None, stock_fb=None, universe_mgr=None) -> str:
         versions = {
             "macro": "macro_features_v2_store_logic_hash",
             "sector": getattr(sector_fb, "LOGIC_VERSION", "sector_features"),
@@ -113,6 +136,8 @@ class FeatureStore:
             "benchmark_ticker": self.cfg.get("backtest", {}).get("benchmark_ticker", "^NSEI"),
             "min_avg_volume_cr": self.cfg.get("universe", {}).get("min_avg_volume_cr", 1.0),
         }
+        if ft in {"sector", "stock"}:
+            payload["universe_hash"] = self._universe_hash(universe_mgr)
         return hashlib.md5(
             json.dumps(payload, sort_keys=True, default=str).encode()
         ).hexdigest()[:8]
@@ -248,7 +273,12 @@ class FeatureStore:
         Safe to call repeatedly; already-computed ranges are skipped.
         """
         for ft in ("macro", "sector", "stock"):
-            logic_hash = self._current_logic_hash(ft, sector_fb=sector_fb, stock_fb=stock_fb)
+            logic_hash = self._current_logic_hash(
+                ft,
+                sector_fb=sector_fb,
+                stock_fb=stock_fb,
+                universe_mgr=universe_mgr,
+            )
             if self._stored_logic_hash(ft) != logic_hash:
                 logger.info(
                     "FeatureStore[%s] logic changed (stored=%s current=%s) — rebuilding",
@@ -392,7 +422,9 @@ class FeatureStore:
         cols = self._latest_shard_columns("sector") or []
         self._meta.setdefault("sector", {})["last_date"] = str(end.date())
         self._meta["sector"]["schema_hash"] = self._col_hash(cols)
-        self._meta["sector"]["logic_hash"] = self._current_logic_hash("sector", sector_fb=sector_fb)
+        self._meta["sector"]["logic_hash"] = self._current_logic_hash(
+            "sector", sector_fb=sector_fb, universe_mgr=universe_mgr
+        )
         self._save_meta()
         logger.info("FeatureStore[sector] persisted %d rows (schema=%s)",
                     len(new_rows), self._meta["sector"]["schema_hash"])
@@ -435,7 +467,9 @@ class FeatureStore:
         cols = self._latest_shard_columns("stock") or []
         self._meta.setdefault("stock", {})["last_date"] = str(end.date())
         self._meta["stock"]["schema_hash"] = self._col_hash(cols)
-        self._meta["stock"]["logic_hash"] = self._current_logic_hash("stock", stock_fb=stock_fb)
+        self._meta["stock"]["logic_hash"] = self._current_logic_hash(
+            "stock", stock_fb=stock_fb, universe_mgr=universe_mgr
+        )
         self._save_meta()
         logger.info("FeatureStore[stock] persisted %d rows (schema=%s)",
                     len(new_rows), self._meta["stock"]["schema_hash"])

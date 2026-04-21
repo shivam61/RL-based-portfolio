@@ -94,16 +94,8 @@ class TestSchema:
 
     REQUIRED_STOCK_COLS = [
         "date", "ticker", "sector",
-        "ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_12m",
-        "mom_12m_skip1m", "mom_stab_3m", "mom_stab_12m",
-        "vol_1m", "vol_3m", "vol_12m", "vol_ratio_1m_3m",
-        "downside_vol_3m", "max_dd_3m", "max_dd_12m",
-        "skew_3m", "kurt_3m",
-        "price_to_52w_high", "price_to_52w_low",
-        "zscore_6m",
-        "ma_50_200_ratio", "price_pctile_1y",
-        "rsi_14",
-        "ret_1m_vs_sector", "ret_3m_vs_sector", "ret_6m_vs_sector", "ret_12m_vs_sector",
+        "ret_3m", "mom_12m_skip1m", "mom_accel_3m_6m",
+        "vol_3m", "amihud_1m", "ma_50_200_ratio",
     ]
 
     REQUIRED_SECTOR_COLS = [
@@ -131,16 +123,14 @@ class TestSchema:
 
     def test_stock_volume_features_present_when_volume_given(self):
         sf = _build_stock_features()
-        for col in ["avg_vol_1m", "avg_vol_3m", "vol_trend", "amihud_1m", "vol_spike"]:
-            assert col in sf.columns, f"Volume feature missing: {col}"
+        assert "amihud_1m" in sf.columns, "Volume feature missing: amihud_1m"
 
-    def test_stock_alpha_beta_present_with_benchmark(self):
+    def test_stock_benchmark_input_is_ignored(self):
         prices = _make_prices()
         bench = prices.iloc[:, 0].rename("BENCH")
         sf = _build_stock_features(price_df=prices, benchmark=bench)
-        assert "alpha_ret_1m" in sf.columns
-        assert "alpha_ret_3m" in sf.columns
-        assert "beta_3m" in sf.columns
+        assert "alpha_ret_3m" not in sf.columns
+        assert "beta_3m" not in sf.columns
 
     def test_sector_output_not_empty(self):
         sec = _build_sector_features()
@@ -178,17 +168,17 @@ class TestGapRobustness:
         nn = sf["ma_50_200_ratio"].notna().mean()
         assert nn > 0.5, f"ma_50_200_ratio fill rate too low: {nn:.1%}"
 
-    def test_ret_12m_non_null_with_gaps(self):
+    def test_mom_12m_skip1m_non_null_with_gaps(self):
         prices = _make_prices_with_gaps()
         sf = _build_stock_features(price_df=prices)
-        nn = sf["ret_12m"].notna().mean()
-        assert nn > 0.5, f"ret_12m fill rate too low: {nn:.1%}"
+        nn = sf["mom_12m_skip1m"].notna().mean()
+        assert nn > 0.5, f"mom_12m_skip1m fill rate too low: {nn:.1%}"
 
     def test_price_pctile_non_null_with_gaps(self):
         prices = _make_prices_with_gaps()
         sf = _build_stock_features(price_df=prices)
-        nn = sf["price_pctile_1y"].notna().mean()
-        assert nn > 0.5, f"price_pctile_1y fill rate too low: {nn:.1%}"
+        nn = sf["ma_50_200_ratio"].notna().mean()
+        assert nn > 0.5, f"ma_50_200_ratio fill rate too low: {nn:.1%}"
 
     def test_sector_breadth_non_null_with_gaps(self):
         prices = _make_prices_with_gaps()
@@ -207,34 +197,26 @@ class TestBounds:
         self.sec = _build_sector_features()
 
     def test_rsi_bounded_0_100(self):
-        rsi = self.sf["rsi_14"].dropna()
-        assert rsi.between(0, 100).all(), \
-            f"RSI out of [0,100]: min={rsi.min():.2f} max={rsi.max():.2f}"
+        # No RSI in the pruned v1 stock feature set.
+        assert "rsi_14" not in self.sf.columns
 
-    def test_price_to_52w_high_leq_1(self):
-        p = self.sf["price_to_52w_high"].dropna()
-        assert (p <= 1.0 + 1e-6).all(), \
-            f"price_to_52w_high > 1: max={p.max():.4f}"
-
-    def test_price_pctile_bounded_0_1(self):
-        p = self.sf["price_pctile_1y"].dropna()
-        assert p.between(-1e-6, 1 + 1e-6).all(), \
-            f"price_pctile_1y out of [0,1]: min={p.min():.4f} max={p.max():.4f}"
+    def test_pruned_transform_columns_absent(self):
+        for col in [
+            "price_to_52w_high", "avg_vol_3m", "max_dd_3m",
+            "mom_3m_vol_adj", "ret_3m_z", "mom_accel_3m_6m_z",
+            "vol_3m_z", "max_dd_3m_z", "amihud_1m_z", "ma_50_200_ratio_z",
+            "alpha_ret_3m", "beta_3m",
+        ]:
+            assert col not in self.sf.columns
 
     def test_vol_features_non_negative(self):
-        for col in ["vol_1m", "vol_3m", "vol_12m", "downside_vol_3m"]:
+        for col in ["vol_3m"]:
             v = self.sf[col].dropna()
             assert (v >= 0).all(), f"{col} has negative values"
 
-    def test_max_drawdown_non_positive(self):
-        for col in ["max_dd_3m", "max_dd_12m"]:
-            v = self.sf[col].dropna()
-            assert (v <= 1e-9).all(), f"{col} has positive values (should be ≤ 0)"
-
     def test_mom_stab_bounded_0_1(self):
-        for col in ["mom_stab_3m", "mom_stab_12m"]:
-            v = self.sf[col].dropna()
-            assert v.between(0, 1).all(), f"{col} out of [0,1]"
+        assert "mom_stab_3m" not in self.sf.columns
+        assert "mom_stab_12m" not in self.sf.columns
 
     def test_sector_breadth_bounded_0_1(self):
         for col in ["breadth_1m", "breadth_3m", "pct_above_50ma", "new_high_ratio"]:
@@ -244,7 +226,7 @@ class TestBounds:
 
     def test_returns_not_extreme(self):
         """Period returns shouldn't exceed ±200% for synthetic GBM data."""
-        for col in ["ret_1w", "ret_1m", "ret_3m"]:
+        for col in ["ret_3m", "mom_12m_skip1m", "mom_accel_3m_6m"]:
             v = self.sf[col].dropna()
             assert v.abs().max() < 2.0, f"{col} has extreme value: {v.abs().max():.2f}"
 
@@ -265,16 +247,10 @@ class TestFillRate:
     """Features with sufficient history must achieve minimum fill rates."""
 
     MIN_FILL = {
-        "ret_1w":           0.85,
-        "ret_1m":           0.85,
         "ret_3m":           0.80,
-        "ret_6m":           0.75,
-        "ret_12m":          0.58,
-        "vol_1m":           0.80,
         "vol_3m":           0.75,
-        "rsi_14":           0.85,
         "ma_50_200_ratio":  0.67,
-        "price_pctile_1y":  0.58,
+        "amihud_1m":        0.75,
     }
 
     def test_stock_fill_rates(self):
@@ -347,7 +323,7 @@ class TestPointInTimeSafety:
         if row_trunc.empty:
             pytest.skip("No truncated data for STOCK00.NS")
 
-        for col in ["ret_1m", "vol_3m", "rsi_14", "ma_50_200_ratio"]:
+        for col in ["ret_3m", "vol_3m", "ma_50_200_ratio"]:
             if col not in row_full.columns or col not in row_trunc.columns:
                 continue
             v_full  = row_full[col].values[0]
@@ -390,50 +366,32 @@ class TestCrossFeatureConsistency:
     def setup_method(self):
         self.sf = _build_stock_features()
 
-    def test_mom_12m_skip1m_equals_12m_minus_1m(self):
-        df = self.sf[["ret_12m", "ret_1m", "mom_12m_skip1m"]].dropna()
-        expected = df["ret_12m"] - df["ret_1m"]
-        diff = (df["mom_12m_skip1m"] - expected).abs()
-        assert diff.max() < 1e-8, f"mom_12m_skip1m != ret_12m - ret_1m: max diff={diff.max():.2e}"
-
-    def test_vol_ratio_equals_vol1m_over_vol3m(self):
-        df = self.sf[["vol_1m", "vol_3m", "vol_ratio_1m_3m"]].dropna()
-        expected = df["vol_1m"] / df["vol_3m"].replace(0, np.nan)
-        diff = (df["vol_ratio_1m_3m"] - expected).abs().dropna()
-        assert diff.max() < 1e-6, f"vol_ratio inconsistent: max diff={diff.max():.2e}"
-
-    def test_longer_vol_less_variable_than_shorter(self):
-        """vol_3m should be smoother (lower std) than vol_1m across the panel."""
-        v1m_std = self.sf["vol_1m"].std()
-        v3m_std = self.sf["vol_3m"].std()
-        assert v3m_std < v1m_std, (
-            f"vol_3m ({v3m_std:.4f}) not smoother than vol_1m ({v1m_std:.4f})"
-        )
-
-    def test_sector_relative_features_zero_mean_per_date(self):
-        """ret_Xm_vs_sector should average to ~0 across stocks within a sector on any date."""
-        sf = self.sf[["date", "ticker", "sector", "ret_1m_vs_sector"]].dropna()
-        for (date, sector), grp in sf.groupby(["date", "sector"]):
-            if len(grp) < 3:
-                continue
-            mean_val = grp["ret_1m_vs_sector"].mean()
-            assert abs(mean_val) < 1e-8, (
-                f"ret_1m_vs_sector mean non-zero in {sector} on {date}: {mean_val:.2e}"
-            )
-            break  # checking one (date, sector) pair is sufficient here
-
-    def test_price_pctile_at_52w_high_is_1(self):
-        """A stock at its 52-week high should have price_pctile_1y ≈ 1."""
+    def test_mom_12m_skip1m_matches_price_formula(self):
         prices = _make_prices()
-        # Force last price of STOCK00 to be its rolling max
-        prices.iloc[-1, 0] = prices.iloc[:, 0].rolling(252).max().iloc[-1]
-        sf = _build_stock_features(price_df=prices)
-        row = sf[(sf["ticker"] == TICKERS[0])].sort_values("date").dropna(subset=["price_pctile_1y"])
-        if row.empty:
-            pytest.skip("No valid price_pctile_1y for STOCK00")
-        # Value should be close to 1 for recent dates (after lag-1 shift)
-        last_val = row["price_pctile_1y"].iloc[-1]
-        assert last_val > 0.9, f"price_pctile_1y at 52w high = {last_val:.4f}, expected ≈ 1"
+        expected = prices.pct_change(252) - prices.pct_change(21)
+        expected = expected.shift(1)
+        snap = self.sf[["date", "ticker", "mom_12m_skip1m"]].copy()
+        snap["date"] = pd.to_datetime(snap["date"])
+        merged = snap.merge(
+            expected.stack().rename("expected").reset_index().rename(columns={"level_0": "date", "level_1": "ticker"}),
+            on=["date", "ticker"],
+            how="inner",
+        ).dropna()
+        assert not merged.empty
+        diff = (merged["mom_12m_skip1m"] - merged["expected"]).abs()
+        assert diff.max() < 1e-8, f"mom_12m_skip1m formula mismatch: max diff={diff.max():.2e}"
+
+    def test_pruned_feature_contract(self):
+        expected = {
+            "ret_3m",
+            "mom_12m_skip1m",
+            "mom_accel_3m_6m",
+            "vol_3m",
+            "amihud_1m",
+            "ma_50_200_ratio",
+        }
+        feat_cols = {c for c in self.sf.columns if c not in {"date", "ticker", "sector"}}
+        assert feat_cols == expected, f"Unexpected stock features: {sorted(feat_cols ^ expected)}"
 
 
 # ── Reproducibility tests ────────────────────────────────────────────────────
@@ -465,12 +423,11 @@ class TestReproducibility:
 
 class TestEdgeCases:
     def test_single_sector(self):
-        """All tickers in one sector still produce demeaned sector-relative features."""
+        """All tickers in one sector should still produce a valid stock feature frame."""
         sector_map = {t: "IT" for t in TICKERS}
         prices = _make_prices()
         sf = _build_stock_features(price_df=prices, sector_map=sector_map)
-        grouped = sf[["date", "ret_1m_vs_sector"]].dropna().groupby("date")["ret_1m_vs_sector"].mean()
-        assert grouped.abs().max() < 1e-8, "Single-sector: demeaned vs_sector mean should be zero"
+        assert not sf.empty
 
     def test_minimum_history_returns_empty_not_error(self):
         """Very short price history (< 252 days) should not crash — just sparse output."""
@@ -482,8 +439,7 @@ class TestEdgeCases:
     def test_missing_volume_matrix_skips_volume_features(self):
         prices = _make_prices()
         sf = _build_stock_features(price_df=prices, volume_df=None)
-        assert "avg_vol_1m" not in sf.columns
-        assert "vol_spike" not in sf.columns
+        assert "amihud_1m" not in sf.columns
 
     def test_tickers_not_in_sector_map_are_excluded(self):
         prices = _make_prices()
@@ -496,6 +452,6 @@ class TestEdgeCases:
         prices = _make_prices()
         prices.iloc[:, 0] = 100.0  # flat stock
         sf = _build_stock_features(price_df=prices)
-        vol = sf[sf["ticker"] == TICKERS[0]]["vol_1m"].dropna()
+        vol = sf[sf["ticker"] == TICKERS[0]]["vol_3m"].dropna()
         if not vol.empty:
-            assert vol.abs().max() < 1e-6, f"Flat price vol_1m non-zero: {vol.max():.6f}"
+            assert vol.abs().max() < 1e-6, f"Flat price vol_3m non-zero: {vol.max():.6f}"

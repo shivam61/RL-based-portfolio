@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import load_config
+from src.data.ingestion import load_price_matrix, load_volume_matrix
 from src.data.contracts import (
     DailyBar, PortfolioState, StockMeta, UniverseSnapshot
 )
@@ -18,7 +19,9 @@ from src.data.universe import UniverseManager
 
 @pytest.fixture
 def cfg():
-    return load_config()
+    cfg = load_config()
+    cfg["universe"]["mode"] = "static"
+    return cfg
 
 
 @pytest.fixture
@@ -182,13 +185,119 @@ class TestFeatures:
 
         lo = feats_lo[feats_lo["sector"] == "IT"]
         hi = feats_hi[feats_hi["sector"] == "IT"]
-        cols = ["mom_3m", "mom_12m", "price_to_52w_high", "max_dd_3m"]
+        cols = ["mom_3m", "mom_12m"]
 
         for col in cols:
             left = lo[col].dropna()
             right = hi[col].dropna()
             common = left.index.intersection(right.index)
             assert np.allclose(left.loc[common], right.loc[common], atol=1e-9, equal_nan=True)
+
+    def test_taxonomy_additions_have_price_and_feature_coverage(self):
+        from src.features.stock_features import StockFeatureBuilder
+
+        cfg = load_config()
+        price_matrix = load_price_matrix(cfg)
+        volume_matrix = load_volume_matrix(cfg)
+        added = [
+            "TATAELXSI.NS",
+            "LTTS.NS",
+            "AUBANK.NS",
+            "HDFCAMC.NS",
+            "NAM-INDIA.NS",
+            "LUPIN.NS",
+            "ZYDUSLIFE.NS",
+            "GLENMARK.NS",
+            "ADANIGREEN.NS",
+            "FLUOROCHEM.NS",
+            "BALAMINES.NS",
+            "VINATIORGA.NS",
+            "NTPC.NS",
+            "POWERGRID.NS",
+            "RELAXO.NS",
+            "LALPATHLAB.NS",
+            "RAMCOCEM.NS",
+            "AIAENG.NS",
+            "JINDALSTEL.NS",
+        ]
+
+        present = [t for t in added if t in price_matrix.columns]
+        assert present == added
+        for ticker in added:
+            assert price_matrix[ticker].notna().sum() > 0, ticker
+
+        # Validate feature generation on a subset with actual local history.
+        long_hist = [t for t in added if price_matrix[t].notna().sum() >= 252]
+        assert long_hist
+        sample_prices = price_matrix[long_hist].copy()
+        sample_volume = volume_matrix[long_hist].copy()
+        sector_map = {
+            "TATAELXSI.NS": "IT",
+            "LTTS.NS": "IT",
+            "AUBANK.NS": "Banking",
+            "HDFCAMC.NS": "FinancialServices",
+            "NAM-INDIA.NS": "FinancialServices",
+            "LUPIN.NS": "Pharma",
+            "ZYDUSLIFE.NS": "Pharma",
+            "GLENMARK.NS": "Pharma",
+            "ADANIGREEN.NS": "Energy",
+            "FLUOROCHEM.NS": "Chemicals",
+            "BALAMINES.NS": "Chemicals",
+            "VINATIORGA.NS": "Chemicals",
+            "NTPC.NS": "Utilities",
+            "POWERGRID.NS": "Utilities",
+            "RELAXO.NS": "ConsumerDiscretionary",
+            "LALPATHLAB.NS": "Healthcare",
+            "RAMCOCEM.NS": "Cement",
+            "AIAENG.NS": "CapitalGoods",
+            "JINDALSTEL.NS": "Metals",
+        }
+
+        builder = StockFeatureBuilder(cfg)
+        feats = builder.build(sample_prices, sample_volume, sector_map)
+        assert not feats.empty
+        assert set(long_hist).issubset(set(feats["ticker"].unique()))
+        for col in [
+            "ret_3m",
+            "vol_3m",
+            "mom_accel_3m_6m",
+            "ma_50_200_ratio",
+            "amihud_1m",
+        ]:
+            assert feats[col].notna().any(), col
+
+    def test_stock_features_minimal_raw_contract(self):
+        from src.features.stock_features import StockFeatureBuilder
+
+        cfg = load_config()
+        builder = StockFeatureBuilder(cfg)
+        dates = pd.date_range("2014-01-01", periods=320)
+        prices = pd.DataFrame(
+            np.random.lognormal(0, 0.01, (320, 4)).cumprod(axis=0) * 1000,
+            index=dates,
+            columns=["TCS.NS", "INFY.NS", "HDFCBANK.NS", "RELIANCE.NS"],
+        )
+        volumes = pd.DataFrame(
+            np.random.lognormal(5, 0.2, (320, 4)),
+            index=dates,
+            columns=prices.columns,
+        )
+        sector_map = {
+            "TCS.NS": "IT",
+            "INFY.NS": "IT",
+            "HDFCBANK.NS": "Banking",
+            "RELIANCE.NS": "Energy",
+        }
+        feats = builder.build(prices, volumes, sector_map)
+        assert not feats.empty
+        for col in [
+            "ret_3m",
+            "mom_accel_3m_6m",
+            "amihud_1m",
+            "ma_50_200_ratio",
+        ]:
+            assert col in feats.columns
+            assert feats[col].notna().any(), col
 
 
 # ── Optimizer tests ───────────────────────────────────────────────────────────

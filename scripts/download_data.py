@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import click
 
 from src.config import load_config, setup_logging
-from src.data.earnings import build_earnings_panel, download_earnings, save_earnings_panel
+from src.data.earnings import build_earnings_panel, save_earnings_panel
 from src.data.ingestion import (
     build_price_matrix,
     build_volume_matrix,
@@ -68,7 +68,7 @@ def main(force, start, end, config, macro_only, equity_only, earnings_only, no_e
     if not no_earnings and not macro_only:
         from pathlib import Path
         import pandas as pd
-        logger.info("Step 4/4: Downloading earnings / fundamentals data ...")
+        logger.info("Step 4/4: Building earnings / fundamentals data from cached Screener data ...")
         raw_dir = Path(cfg["paths"]["raw_data"]) / "earnings"
         processed_path = Path(cfg["paths"]["processed_data"]) / "earnings_panel.parquet"
 
@@ -84,7 +84,6 @@ def main(force, start, end, config, macro_only, equity_only, earnings_only, no_e
         if price_matrix is not None:
             # Only equity tickers — skip macro proxies (futures, FX, indices)
             tickers = [t for t in price_matrix.columns if t.endswith(".NS") or t.endswith(".BO")]
-            download_earnings(tickers, raw_dir, force=force)
             panel = build_earnings_panel(tickers, price_matrix.index, raw_dir)
             save_earnings_panel(panel, processed_path)
             logger.info("Earnings panel shape: %s", panel.shape)

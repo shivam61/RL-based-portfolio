@@ -83,6 +83,27 @@ class TestMetadata:
         store2 = FeatureStore(tmp_path / "fs", cfg)
         assert store2.last_computed_date("macro") is not None
 
+    def test_universe_hash_changes_logic_hash_for_stock_and_sector(self, tmp_store):
+        class DummyUniverse:
+            def __init__(self, tickers):
+                self._uni_cfg = {
+                    "stocks": [
+                        {"ticker": ticker, "sector": "IT", "cap": "large"}
+                        for ticker in tickers
+                    ]
+                }
+
+        uni_a = DummyUniverse(["AAA.NS", "BBB.NS"])
+        uni_b = DummyUniverse(["AAA.NS", "CCC.NS"])
+
+        stock_a = tmp_store._current_logic_hash("stock", universe_mgr=uni_a)
+        stock_b = tmp_store._current_logic_hash("stock", universe_mgr=uni_b)
+        sector_a = tmp_store._current_logic_hash("sector", universe_mgr=uni_a)
+        sector_b = tmp_store._current_logic_hash("sector", universe_mgr=uni_b)
+
+        assert stock_a != stock_b
+        assert sector_a != sector_b
+
 
 # ── Macro store tests ─────────────────────────────────────────────────────────
 

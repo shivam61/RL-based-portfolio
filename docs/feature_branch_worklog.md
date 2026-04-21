@@ -109,3 +109,193 @@ Each task should record:
 - Learning:
   - Tightening realism on the current ~100-stock roster without expanding historical breadth reduced both return and risk-adjusted quality.
   - This suggests the next useful universe project is broader historical coverage, not a stricter version of the current narrow roster.
+
+### Task: Stage B universe broadening (current Nifty 200 large/mid roster)
+- Scope:
+  - expanded the equity universe from the hand-curated 99-stock roster to a generated 199-stock broad large/mid roster based on current Nifty 200 constituents
+  - added `scripts/build_universe_from_nifty200.py` to make the config generation reproducible
+  - stored source constituent files under `data/reference/indices/`
+  - added integrity tests for the broadened universe config
+  - fixed `scripts/download_data.py` stale earnings import so the equity-only refresh path works again
+  - fixed `FeatureStore` logic hashing so stock/sector shards rebuild when the universe roster changes
+  - normalized source-symbol issues during generation:
+    - dropped `DUMMY*` mirror artifacts
+    - remapped `ZOMATO` to `ETERNAL`
+    - excluded `TATAMOTORS` from this pass because the post-demerger ticker/history path was not stable in the Yahoo-backed downloader
+- Validation:
+  - `./.venv/bin/pytest tests -q` -> `94 passed`
+  - short smoke backtest (`2013-01-01` → `2015-06-30`) -> `6.88% CAGR`, `0.12 Sharpe`, `-2.85% MaxDD`, `14.88% avg turnover`
+  - initial full backtest result (`14.91% CAGR`, `0.61 Sharpe`, `-25.45% MaxDD`, `24.60% avg turnover`) was invalid because the feature store reused stale stock/sector shards from the old universe roster
+  - corrected full backtest after feature-store rebuild -> `17.64% CAGR`, `0.75 Sharpe`, `-33.50% MaxDD`, `33.71% avg turnover`
+- Decision:
+  - reject as new baseline
+- Learning:
+  - The first measurement caught a real infrastructure bug: feature-store freshness was not keyed on universe composition, so universe changes could silently produce invalid backtest reads.
+  - After correcting that bug and rebuilding the store, the broadened roster still underperformed the branch baseline (`18.94% CAGR`, `0.94 Sharpe`, `-21.47% MaxDD`, `21.92% turnover`) on return, Sharpe, drawdown, and turnover.
+  - The broader universe also materially increases runtime because stock-ranker training and RL retrain checkpoints scale with the larger candidate set.
+
+### Task: sector taxonomy experiment (18-sector target, selection_only)
+- Scope:
+  - remapped the current roster into the proposed 18-sector taxonomy using currently available local price history
+  - added clean extra names that already exist in the local price matrix where possible, including:
+    - `TATAELXSI.NS`
+    - `AUBANK.NS`
+    - `HDFCAMC.NS`
+    - `LUPIN.NS`
+    - `ZYDUSLIFE.NS`
+    - `ADANIGREEN.NS`
+    - `NTPC.NS`
+    - `POWERGRID.NS`
+    - `NHPC.NS`
+    - `JINDALSTEL.NS`
+    - `ETERNAL.NS`
+    - `PAYTM.NS`
+  - kept the run isolated in `/tmp/sector18_eval so it did not touch the main branch artifacts`
+- Validation:
+  - `selection_only` short backtest (`2013-01-01` → `2015-06-30`) -> `5.67% CAGR`, `-0.02 Sharpe`, `-10.47% MaxDD`, `72.80% avg turnover`
+  - selection diagnostics:
+    - Avg selected names `19.5`
+    - Top-k avg forward return `0.92%`
+    - Top-k vs universe `+0.17%`
+    - Top-k vs sector median `+0.01%`
+    - Precision@k `48.62%`
+    - Rank IC `0.193`
+    - Selection stability `26.17%`
+- Decision:
+  - reject and do not proceed to optimizer-only or full-RL on this taxonomy in the current branch state
+- Learning:
+  - The proposed finer sector split is reasonable as a target taxonomy, but on the current local history it did not materially improve stock selection versus the existing control setup.
+  - The raw ranking edge stayed small (`top-k vs universe` `+0.17%`, `top-k vs sector median` `+0.01%`) and the selection set remained thin (`avg selected names` `19.5`, `stability` `26.17%`), even though intra-sector dispersion was measurable (`0.0592`).
+  - That is consistent with relabeling clusters rather than creating a meaningfully easier ranking problem.
+  - The current 15-sector model remains the practical baseline until we have broader historical coverage for the missing names.
+  - The evaluation now includes explicit intra-sector dispersion in the selection diagnostics, and the added-stock feature path was validated against the local price/volume history for the names actually used in this isolated run.
+
+### Task: existing-sector universe expansion (added supported names only)
+- Scope:
+  - added the locally supported names into the existing sector buckets without changing the sector taxonomy:
+    - `TATAELXSI.NS`, `KPITTECH.NS`
+    - `AUBANK.NS`
+    - `HDFCAMC.NS`
+    - `TATACONSUM.NS`
+    - `SONACOMS.NS`, `BALKRISIND.NS`
+    - `LUPIN.NS`, `ZYDUSLIFE.NS`
+    - `ADANIGREEN.NS`, `ATGL.NS`
+    - `JINDALSTEL.NS`
+    - `PHOENIXLTD.NS`
+    - `SRF.NS`
+  - validated that the added names already have local price and volume history, so no fresh download was required for this set
+  - ran the isolated `selection_only` smoke backtest against the expanded roster in `/tmp/universe_additions_eval`
+- Validation:
+  - isolated `selection_only` short backtest (`2013-01-01` → `2015-06-30`) -> `8.13% CAGR`, `0.12 Sharpe`, `-12.06% MaxDD`, `72.85% avg turnover`
+  - selection diagnostics:
+    - Avg selected names `19.17`
+    - Top-k avg forward return `1.11%`
+    - Top-k vs universe `+0.23%`
+    - Top-k vs sector median `-0.02%`
+    - Precision@k `50.87%`
+    - Rank IC `0.083`
+    - Intra-sector dispersion `0.0577`
+    - Top-bottom spread `-0.0006`
+    - Selection stability `22.85%`
+- Decision:
+  - keep the roster additions in the live universe config for now, but do not treat this as a strong stock-selection win yet
+- Learning:
+  - The broader roster is valid and the added names are correctly wired through the data path.
+  - The ranking diagnostics are still mixed: top-k edge improved modestly, but rank IC, stability, and top-bottom spread remain weak.
+  - This is a better universe shape than a sector-taxonomy rewrite, but it still needs more evidence before we call it a durable alpha improvement.
+
+### Task: isolated 150-name universe retry
+- Scope:
+  - expanded the current curated roster to 150 names by adding extra liquid names available in the processed price matrix
+  - kept the experiment isolated in temp configs so it did not collide with the background full-RL run
+  - measured the stock-selection layer independently with the new `selection_only` / `optimizer_only` split
+- Validation:
+  - `selection_only` short backtest (`2013-01-01` → `2015-06-30`) -> `4.13% CAGR`, `-0.11 Sharpe`, `-10.32% MaxDD`, `72.85% avg turnover`
+  - `optimizer_only` short backtest (`2013-01-01` → `2015-06-30`) -> `8.53% CAGR`, `0.21 Sharpe`, `-6.72% MaxDD`, `51.45% avg turnover`
+  - selection diagnostics improved slightly in the optimizer pass, but not enough to beat the earlier isolated 99-name baseline
+- Decision:
+  - reject and do not keep the 150-name roster as a new baseline
+- Learning:
+  - The current roster can be expanded, but a naive bump from 99 to 150 names does not improve the isolated stock-selection or optimizer layers.
+  - This suggests the next meaningful universe step is not just more names, but more historically correct breadth.
+
+### Task: run_022 retry — selection-only / optimizer-only cross-sectional ranks
+- Scope:
+  - reintroduced `ret_1m_rank`, `ret_3m_rank`, and `ret_12m_rank` under the new `selection_only` / `optimizer_only` split
+  - measured the candidate independently from the RL overlay in an isolated temp workspace
+- Validation:
+  - `selection_only` short backtest (`2013-01-01` → `2015-06-30`) -> `4.93% CAGR`, `-0.06 Sharpe`, `-9.57% MaxDD`, `73.58% avg turnover`
+  - `optimizer_only` short backtest (`2013-01-01` → `2015-06-30`) -> `7.38% CAGR`, `0.13 Sharpe`, `-5.91% MaxDD`, `50.12% avg turnover`
+- Learning:
+  - The cross-sectional rank idea did improve some selection diagnostics, but it did not improve the portfolio outcome versus the current baseline in either isolated mode.
+  - `optimizer_only` remained better than `selection_only`, which means the optimizer is still adding value, but this candidate is not a clear keeper.
+  - This is enough evidence to treat `run_022` as a reject and move on to the next stock-selection candidate.
+
+### Task: run_024 — momentum acceleration
+- Scope:
+  - added `mom_accel_1m` and `mom_accel_3m` to the stock feature set
+  - kept the new `selection_only` / `optimizer_only` split for isolated measurement
+- Validation:
+  - `selection_only` short backtest (`2013-01-01` → `2015-06-30`) -> `4.13% CAGR`, `-0.11 Sharpe`, `-10.32% MaxDD`, `72.85% avg turnover`
+  - `optimizer_only` short backtest (`2013-01-01` → `2015-06-30`) -> `7.80% CAGR`, `0.14 Sharpe`, `-6.47% MaxDD`, `50.81% avg turnover`
+- Learning:
+  - Momentum acceleration improved over its own selection-only pass, which is the right direction, but it still did not beat the earlier isolated optimizer-only baseline.
+  - The optimizer is still contributing more than raw selection alone, but this candidate is also a reject for now.
+  - This feature family is closed and should not be revisited on this branch.
+
+### Task: cross-sectional ranking feature generation
+- Scope:
+  - added sector-relative momentum, per-date z-scores, rank transforms, and volatility-adjusted momentum to the stock feature builder
+  - widened the feature store invalidation path through a new stock feature logic hash so the expanded feature set rebuilds cleanly
+  - kept the universe fixed and reused the current expanded roster as the control set
+- Validation:
+  - `scripts/build_features.py` rebuilt the feature store with the new logic hash
+  - focused regression tests passed:
+    - `tests/test_data.py::TestFeatures::test_stock_features_cross_sectional_transforms`
+    - `tests/test_data.py::TestFeatures::test_taxonomy_additions_have_price_and_feature_coverage`
+  - stored stock feature parquet now includes:
+    - `mom_3m_vol_adj`
+    - `mom_3m_vol_adj_z`
+    - `mom_3m_vol_adj_rank`
+    - `ret_3m_z`
+    - `ret_3m_rank`
+    - `ret_12m_z`
+    - `ret_12m_rank`
+    - `mom_12m_skip1m_z`
+    - `mom_12m_skip1m_rank`
+- Learning:
+  - This is the right layer to attack next because the issue is ranking signal quality, not taxonomy.
+  - The expanded universe and the stock-selection diagnostics can now be tested on a richer, more discriminative feature set without changing sectors again.
+
+### Task: local-sector signal diagnostics
+- Scope:
+  - froze the current expanded universe as the control set
+  - added candidate-level score propagation into the walk-forward selection diagnostics
+  - added within-sector IC and within-sector top-bottom spread, plus sector-median separation, aggregated equal-weight and by candidate count
+- Validation:
+  - `tests/test_selection_diagnostics.py` now checks the new local-sector metrics
+  - `selection_diagnostics.json` can now report:
+    - `within_sector_ic`
+    - `within_sector_ic_weighted`
+    - `within_sector_top_bottom_spread`
+    - `within_sector_top_bottom_spread_weighted`
+    - `within_sector_top_k_minus_sector_median`
+    - `within_sector_top_k_minus_sector_median_weighted`
+- Learning:
+  - The ranking layer is now measurable both globally and locally inside each sector.
+  - This is the right diagnostic split for deciding whether the model should be read as a flat cross-sectional ranker or a sector-local ranker inside a hierarchical selection pipeline.
+
+### Task: stock ranker minimal raw v2
+- Scope:
+  - hard-prune the stock feature builder to the six raw canonical features only:
+    - `ret_3m`
+    - `mom_12m_skip1m`
+    - `mom_accel_3m_6m`
+    - `vol_3m`
+    - `amihud_1m`
+    - `ma_50_200_ratio`
+  - retire all `_z`, `_rank`, `_resid`, `_vs_sector`, benchmark-relative, and duplicate-horizon transforms from the stock-ranker experiment series
+  - update the schema tests to match the new contract
+- Rationale:
+  - the ranker is still fragmenting momentum signal across too many correlated transforms
+  - the next test is whether a concentrated raw set can finally move within-sector IC and top-bottom spread
