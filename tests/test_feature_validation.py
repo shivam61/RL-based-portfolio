@@ -54,7 +54,13 @@ def _make_volumes(price_df: pd.DataFrame, seed: int = 1) -> pd.DataFrame:
 _DEFAULT_SENTINEL = object()
 
 
-def _build_stock_features(price_df=None, volume_df=_DEFAULT_SENTINEL, sector_map=None, benchmark=None):
+def _build_stock_features(
+    price_df=None,
+    volume_df=_DEFAULT_SENTINEL,
+    sector_map=None,
+    benchmark=None,
+    blocks=None,
+):
     if price_df is None:
         price_df = _make_prices()
     if volume_df is _DEFAULT_SENTINEL:
@@ -65,6 +71,9 @@ def _build_stock_features(price_df=None, volume_df=_DEFAULT_SENTINEL, sector_map
         "features": {
             "lookback_short": 21, "lookback_medium": 63, "lookback_long": 252,
             "stock_lag": 1,
+        },
+        "stock_features": {
+            "blocks": blocks or ["absolute_momentum", "risk", "liquidity", "trend"],
         },
         "paths": {"feature_data": "/tmp", "processed_data": "/tmp"},
     }
@@ -392,6 +401,43 @@ class TestCrossFeatureConsistency:
         }
         feat_cols = {c for c in self.sf.columns if c not in {"date", "ticker", "sector"}}
         assert feat_cols == expected, f"Unexpected stock features: {sorted(feat_cols ^ expected)}"
+
+    def test_interaction_blocks_emit_expected_columns(self):
+        sf = _build_stock_features(
+            blocks=[
+                "absolute_momentum",
+                "risk",
+                "liquidity",
+                "trend",
+                "interaction_momentum_volatility",
+                "interaction_momentum_drawdown",
+                "interaction_trend_liquidity",
+                "sector_normalized",
+                "time_smoothing",
+            ]
+        )
+        feat_cols = {c for c in sf.columns if c not in {"date", "ticker", "sector"}}
+        expected = {
+            "ret_3m",
+            "mom_12m_skip1m",
+            "mom_accel_3m_6m",
+            "vol_3m",
+            "amihud_1m",
+            "ma_50_200_ratio",
+            "mom_x_vol_3m",
+            "mom_x_inv_vol_3m",
+            "mom_dd_penalty_3m",
+            "trend_x_liquidity",
+            "ret_3m_sector_z",
+            "mom_12m_skip1m_sector_z",
+            "vol_3m_sector_z",
+            "amihud_1m_sector_z",
+            "ma_50_200_ratio_sector_z",
+            "ret_3m_sector_rank",
+            "ret_3m_ema3",
+            "vol_3m_ema3",
+        }
+        assert expected.issubset(feat_cols), f"Missing interaction columns: {sorted(expected - feat_cols)}"
 
 
 # ── Reproducibility tests ────────────────────────────────────────────────────
