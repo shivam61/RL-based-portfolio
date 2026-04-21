@@ -15,6 +15,7 @@ import pandas as pd
 
 from src.attribution.attribution import AttributionResult
 from src.data.contracts import RebalanceRecord
+from src.reporting.selection_diagnostics import prepare_selection_diagnostics
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +47,18 @@ class ReportGenerator:
         strategy_navs: dict[str, pd.Series] | None = None,
         current_portfolio: dict | None = None,
         benchmark_nav: pd.Series | None = None,
+        selection_diagnostics: object | None = None,
+        stock_ranker: object | None = None,
     ) -> Path:
         """Generate all report artifacts and return report directory."""
         logger.info("Generating report → %s", self.report_dir)
+        prepared_selection = prepare_selection_diagnostics(selection_diagnostics)
 
         self._save_metrics_json(metrics)
         self._save_nav_parquet(nav_series, strategy_navs)
         self._save_rebalance_log(rebalance_records)
+        self._save_selection_diagnostics(prepared_selection)
+        self._save_stock_ranker_importance(stock_ranker)
         if current_portfolio:
             self._save_current_portfolio(current_portfolio)
         if attribution:
@@ -68,7 +74,7 @@ class ReportGenerator:
             )
             self._plot_rolling_returns(nav_series, benchmark_nav)
 
-        self._print_summary(metrics, attribution, current_portfolio)
+        self._print_summary(metrics, attribution, current_portfolio, prepared_selection)
         return self.report_dir
 
     # ── Text / JSON ───────────────────────────────────────────────────────────
@@ -192,6 +198,31 @@ class ReportGenerator:
             json.dump(portfolio, f, indent=2)
         logger.info("Current portfolio saved → %s", path)
 
+    def _save_selection_diagnostics(self, prepared: dict | None) -> None:
+        if not prepared:
+            return
+
+        summary = prepared.get("summary")
+        if summary:
+            path = self.report_dir / "selection_diagnostics.json"
+            with open(path, "w") as f:
+                json.dump(summary, f, indent=2)
+            logger.info("Selection diagnostics saved → %s", path)
+
+        per_rebalance = prepared.get("per_rebalance")
+        if per_rebalance is not None:
+            frame = (
+                per_rebalance.copy()
+                if isinstance(per_rebalance, pd.DataFrame)
+                else pd.DataFrame(per_rebalance)
+            )
+            if not frame.empty:
+                frame.to_parquet(
+                    self.report_dir / "selection_rebalance_log.parquet", engine="pyarrow"
+                )
+                frame.to_csv(self.report_dir / "selection_rebalance_log.csv", index=False)
+                logger.info("Selection diagnostics rebalance log saved: %d records", len(frame))
+
     def _save_attribution(self, attr: AttributionResult) -> None:
         data = {
             "total_return": attr.total_return,
@@ -206,6 +237,68 @@ class ReportGenerator:
         path = self.report_dir / "attribution.json"
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
+
+    def _save_stock_ranker_importance(self, stock_ranker: object | None) -> None:
+        if stock_ranker is None:
+            return
+        if not getattr(stock_ranker, "is_fitted", False):
+            return
+
+        models = getattr(stock_ranker, "models", {})
+        if not models:
+            return
+
+        rows: list[dict] = []
+        for sector in sorted(models.keys()):
+            try:
+                importance = stock_ranker.feature_importance(sector)
+            except Exception as exc:
+                logger.warning(
+                    "Skipping stock-ranker importance for %s: %s", sector, exc
+                )
+                continue
+
+            if importance is None or importance.empty:
+                continue
+
+            total = float(importance.sum())
+            for rank, (feature, value) in enumerate(importance.items(), start=1):
+                rows.append({
+                    "sector": sector,
+                    "feature": feature,
+                    "importance": float(value),
+                    "importance_share": float(value / total) if total > 0 else 0.0,
+                    "rank": rank,
+                })
+
+        if not rows:
+            return
+
+        df = pd.DataFrame(rows)
+        df = df.sort_values(["sector", "rank"], ascending=[True, True], kind="mergesort")
+        csv_path = self.report_dir / "stock_ranker_feature_importance.csv"
+        json_path = self.report_dir / "stock_ranker_feature_importance.json"
+        df.to_csv(csv_path, index=False)
+
+        summary = {
+            "n_sectors": int(df["sector"].nunique()),
+            "n_features": int(len(df)),
+            "sectors": {},
+        }
+        for sector in sorted(df["sector"].unique()):
+            sec_df = df.loc[df["sector"] == sector, ["feature", "importance", "importance_share", "rank"]]
+            summary["sectors"][sector] = [
+                {
+                    "feature": str(row["feature"]),
+                    "importance": float(row["importance"]),
+                    "importance_share": float(row["importance_share"]),
+                    "rank": int(row["rank"]),
+                }
+                for _, row in sec_df.iterrows()
+            ]
+        with open(json_path, "w") as f:
+            json.dump(summary, f, indent=2)
+        logger.info("Stock-ranker feature importance saved → %s", csv_path)
 
     # ── Charts ────────────────────────────────────────────────────────────────
 
@@ -340,7 +433,11 @@ class ReportGenerator:
     # ── Console summary ───────────────────────────────────────────────────────
 
     def _print_summary(
-        self, metrics: dict, attribution: Optional[AttributionResult], current_portfolio: dict | None
+        self,
+        metrics: dict,
+        attribution: Optional[AttributionResult],
+        current_portfolio: dict | None,
+        selection_diagnostics: dict | None,
     ) -> None:
         print("\n" + "=" * 70)
         print("  BACKTEST PERFORMANCE SUMMARY")
@@ -382,6 +479,24 @@ class ReportGenerator:
                 print(f"    {t:20s}  {w:.1%}")
             cash = current_portfolio.get("cash", weights.get("CASH", 0))
             print(f"    {'CASH':20s}  {float(cash):.1%}")
+
+        summary = (selection_diagnostics or {}).get("summary", {})
+        if summary:
+            print("\n  STOCK SELECTION DIAGNOSTICS:")
+            labels = [
+                ("avg_selected_count", "Avg selected names", "{:.1f}"),
+                ("top_k_avg_forward_return", "Top-k avg forward return", "{:.2%}"),
+                ("top_k_minus_universe", "Top-k vs universe", "{:+.2%}"),
+                ("top_k_minus_sector_median", "Top-k vs sector median", "{:+.2%}"),
+                ("precision_at_k", "Precision@k", "{:.2%}"),
+                ("rank_ic", "Rank IC", "{:.3f}"),
+                ("stability", "Selection stability", "{:.2%}"),
+            ]
+            for key, label, fmt in labels:
+                value = summary.get(key)
+                if value is None:
+                    continue
+                print(f"    {label:24s}  {fmt.format(value)}")
 
         print("=" * 70)
         print(f"  Full report saved → {self.report_dir}")

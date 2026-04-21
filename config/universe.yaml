@@ -29,6 +29,18 @@ stocks:
     name: LTIMindtree
     sector: IT
     cap: large
+  - ticker: TATAELXSI.NS
+    name: Tata Elxsi
+    sector: IT
+    cap: mid
+  - ticker: KPITTECH.NS
+    name: KPIT Technologies
+    sector: IT
+    cap: mid
+  - ticker: LTTS.NS
+    name: L&T Technology Services
+    sector: IT
+    cap: mid
   - ticker: COFORGE.NS
     name: Coforge
     sector: IT
@@ -79,6 +91,10 @@ stocks:
     name: IDFC First Bank
     sector: Banking
     cap: mid
+  - ticker: AUBANK.NS
+    name: AU Small Finance Bank
+    sector: Banking
+    cap: mid
 
   # ── Financial Services (NBFC / Insurance) ─────────────────────────────────
   - ticker: BAJFINANCE.NS
@@ -107,6 +123,14 @@ stocks:
     cap: mid
   - ticker: LICHSGFIN.NS
     name: LIC Housing Finance
+    sector: FinancialServices
+    cap: mid
+  - ticker: HDFCAMC.NS
+    name: HDFC Asset Management Company
+    sector: FinancialServices
+    cap: large
+  - ticker: NAM-INDIA.NS
+    name: Nippon Life India Asset Management
     sector: FinancialServices
     cap: mid
 
@@ -143,6 +167,10 @@ stocks:
     name: Godrej Consumer Products
     sector: FMCG
     cap: mid
+  - ticker: TATACONSUM.NS
+    name: Tata Consumer Products
+    sector: FMCG
+    cap: large
 
   # ── Automobiles ───────────────────────────────────────────────────────────
   - ticker: MARUTI.NS
@@ -175,6 +203,14 @@ stocks:
     cap: mid
   - ticker: TVSMOTOR.NS
     name: TVS Motor
+    sector: Automobiles
+    cap: mid
+  - ticker: SONACOMS.NS
+    name: Sona BLW Precision Forgings
+    sector: Automobiles
+    cap: mid
+  - ticker: BALKRISIND.NS
+    name: Balkrishna Industries
     sector: Automobiles
     cap: mid
 
@@ -211,6 +247,18 @@ stocks:
     name: Biocon
     sector: Pharma
     cap: mid
+  - ticker: LUPIN.NS
+    name: Lupin
+    sector: Pharma
+    cap: large
+  - ticker: ZYDUSLIFE.NS
+    name: Zydus Lifesciences
+    sector: Pharma
+    cap: mid
+  - ticker: GLENMARK.NS
+    name: Glenmark Pharmaceuticals
+    sector: Pharma
+    cap: mid
 
   # ── Energy & Oil & Gas ────────────────────────────────────────────────────
   - ticker: RELIANCE.NS
@@ -241,6 +289,14 @@ stocks:
     name: Mahanagar Gas
     sector: Energy
     cap: mid
+  - ticker: ADANIGREEN.NS
+    name: Adani Green Energy
+    sector: Energy
+    cap: mid
+  - ticker: ATGL.NS
+    name: Adani Total Gas
+    sector: Energy
+    cap: mid
 
   # ── Metals & Mining ───────────────────────────────────────────────────────
   - ticker: TATASTEEL.NS
@@ -269,6 +325,10 @@ stocks:
     cap: mid
   - ticker: COALINDIA.NS
     name: Coal India
+    sector: Metals
+    cap: large
+  - ticker: JINDALSTEL.NS
+    name: Jindal Steel and Power
     sector: Metals
     cap: large
 
@@ -407,6 +467,10 @@ stocks:
     name: Brigade Enterprises
     sector: RealEstate
     cap: mid
+  - ticker: PHOENIXLTD.NS
+    name: Phoenix Mills
+    sector: RealEstate
+    cap: mid
 
   # ── Chemicals ─────────────────────────────────────────────────────────────
   - ticker: DEEPAKNTR.NS
@@ -415,6 +479,22 @@ stocks:
     cap: mid
   - ticker: PIIND.NS
     name: PI Industries
+    sector: Chemicals
+    cap: mid
+  - ticker: SRF.NS
+    name: SRF
+    sector: Chemicals
+    cap: large
+  - ticker: FLUOROCHEM.NS
+    name: Gujarat Fluorochemicals
+    sector: Chemicals
+    cap: mid
+  - ticker: BALAMINES.NS
+    name: Balaji Amines
+    sector: Chemicals
+    cap: mid
+  - ticker: VINATIORGA.NS
+    name: Vinati Organics
     sector: Chemicals
     cap: mid
   - ticker: ALKYLAMINE.NS
@@ -428,6 +508,22 @@ stocks:
   - ticker: NAVINFLUOR.NS
     name: Navin Fluorine
     sector: Chemicals
+    cap: mid
+  - ticker: RELAXO.NS
+    name: Relaxo Footwears
+    sector: ConsumerDiscretionary
+    cap: mid
+  - ticker: LALPATHLAB.NS
+    name: Dr. Lal PathLabs
+    sector: Healthcare
+    cap: mid
+  - ticker: RAMCOCEM.NS
+    name: The Ramco Cements
+    sector: Cement
+    cap: mid
+  - ticker: AIAENG.NS
+    name: AIA Engineering
+    sector: CapitalGoods
     cap: mid
 
 # ── Sector metadata ───────────────────────────────────────────────────────────

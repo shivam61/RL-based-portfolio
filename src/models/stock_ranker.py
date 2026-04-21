@@ -187,7 +187,9 @@ class StockRanker:
             "ticker": sec_df["ticker"].values,
             "score": scores,
         })
-        result = result.sort_values("score", ascending=False).reset_index(drop=True)
+        result = result.sort_values(
+            ["score", "ticker"], ascending=[False, True], kind="mergesort"
+        ).reset_index(drop=True)
         result["rank"] = range(1, len(result) + 1)
 
         if top_k:

@@ -14,6 +14,7 @@ setup(
             "rlp-download=scripts.download_data:main",
             "rlp-backtest=scripts.run_backtest:main",
             "rlp-rl=scripts.run_rl:main",
+            "rlp-build-historical-universe=scripts.build_historical_sector_universe:main",
         ]
     },
 )
