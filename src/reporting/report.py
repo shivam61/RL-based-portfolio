@@ -285,6 +285,14 @@ class ReportGenerator:
             "n_features": int(len(df)),
             "sectors": {},
         }
+        horizons = list(getattr(stock_ranker, "horizons", []) or [])
+        blend_weights = getattr(stock_ranker, "blend_weights", {}) or {}
+        if horizons:
+            summary["horizons"] = [int(h) for h in horizons]
+        if blend_weights:
+            summary["blend_weights"] = {
+                str(int(h)): float(w) for h, w in blend_weights.items()
+            }
         for sector in sorted(df["sector"].unique()):
             sec_df = df.loc[df["sector"] == sector, ["feature", "importance", "importance_share", "rank"]]
             summary["sectors"][sector] = [

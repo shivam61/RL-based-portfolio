@@ -88,6 +88,11 @@ stock_model:
   retrain_freq_weeks: 12        # Ablation 2 optimal: 12w beats 4/6/8/26w on clean data
   top_k_per_sector: 5           # stocks selected per sector
   fwd_window_days: 28           # default label horizon for stock ranking (~4 weeks)
+  blend_horizons_days: [28, 56, 84]
+  blend_validation_fraction: 0.2
+  blend_ic_stability_penalty: 0.5
+  blend_spread_reward: 0.1
+  blend_grid_step: 0.25
 
 # ── Portfolio optimizer ───────────────────────────────────────────────────────
 optimizer:

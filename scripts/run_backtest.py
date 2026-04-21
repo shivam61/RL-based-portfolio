@@ -87,6 +87,9 @@ def main(disable_rl, mode, config, start, end, stock_fwd_window_days, baselines,
     logger.info("Period: %s → %s", cfg["backtest"]["start_date"], cfg["backtest"]["end_date"])
     logger.info("Mode: %s", mode)
     logger.info("Stock label horizon: %s trading days", cfg["stock_model"].get("fwd_window_days", 28))
+    blend_horizons = cfg["stock_model"].get("blend_horizons_days", [])
+    if blend_horizons:
+        logger.info("Stock blend horizons: %s", blend_horizons)
     logger.info("RL overlay: %s", "ENABLED" if mode == "full_rl" else "DISABLED")
     logger.info("=" * 70)
 
@@ -131,6 +134,9 @@ def main(disable_rl, mode, config, start, end, stock_fwd_window_days, baselines,
     engine.save_state()
     metrics["mode"] = mode
     metrics["stock_fwd_window_days"] = int(cfg["stock_model"].get("fwd_window_days", 28))
+    metrics["stock_blend_horizons_days"] = [
+        int(v) for v in cfg["stock_model"].get("blend_horizons_days", [])
+    ]
 
     # Add dates to metrics
     metrics["start_date"] = str(bt_start.date())
