@@ -1,28 +1,29 @@
 """
-Stock-level features: returns, momentum, volatility, trend, and relative-to-sector signals.
+Stock-level features: block-based momentum, risk, liquidity, trend, and interaction signals.
 
 All features are lagged at least 1 day.
+The enabled feature blocks are controlled through `cfg["stock_features"]["blocks"]`.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 import pandas as pd
 
 from src.config import load_config
-from src.features.base import (
-    rolling_max_drawdown,
-    rolling_vol,
-)
+from src.features.base import fill_price_gaps
 
 logger = logging.getLogger(__name__)
 
 
 class StockFeatureBuilder:
     """Compute stock-level features from price and volume matrices."""
+
+    DEFAULT_BLOCKS = ("absolute_momentum", "risk", "liquidity", "trend")
 
     def __init__(self, cfg: dict | None = None):
         self.cfg = cfg or load_config()
@@ -31,142 +32,158 @@ class StockFeatureBuilder:
         self.medium = feat_cfg["lookback_medium"]  # 63
         self.long = feat_cfg["lookback_long"]      # 252
         self.lag = feat_cfg["stock_lag"]
+        stock_cfg = self.cfg.get("stock_features", {})
+        blocks = stock_cfg.get("blocks", self.DEFAULT_BLOCKS)
+        self.blocks = tuple(str(b) for b in blocks)
+        self.LOGIC_VERSION = self._logic_version()
+
+    def _logic_version(self) -> str:
+        payload = {
+            "base": "stock_features_v9_blocks_interactions",
+            "blocks": list(self.blocks),
+        }
+        digest = hashlib.md5(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:8]
+        return f"stock_features_v9_{digest}"
+
+    def _sector_broadcast(self, frame: pd.DataFrame, sector_map: dict[str, str]) -> pd.DataFrame:
+        out = pd.DataFrame(index=frame.index, columns=frame.columns, dtype=float)
+        for sector in sorted(set(sector_map.values())):
+            cols = [t for t, s in sector_map.items() if s == sector and t in frame.columns]
+            if not cols:
+                continue
+            sector_mean = frame[cols].mean(axis=1)
+            out.loc[:, cols] = np.repeat(sector_mean.to_numpy()[:, None], len(cols), axis=1)
+        return out
+
+    def _sector_zscore(self, frame: pd.DataFrame, sector_map: dict[str, str]) -> pd.DataFrame:
+        out = pd.DataFrame(index=frame.index, columns=frame.columns, dtype=float)
+        for sector in sorted(set(sector_map.values())):
+            cols = [t for t, s in sector_map.items() if s == sector and t in frame.columns]
+            if not cols:
+                continue
+            sec = frame[cols]
+            mean = sec.mean(axis=1)
+            std = sec.std(axis=1).replace(0, np.nan)
+            out.loc[:, cols] = sec.sub(mean, axis=0).div(std, axis=0)
+        return out
+
+    def _sector_rank(self, frame: pd.DataFrame, sector_map: dict[str, str]) -> pd.DataFrame:
+        out = pd.DataFrame(index=frame.index, columns=frame.columns, dtype=float)
+        for sector in sorted(set(sector_map.values())):
+            cols = [t for t, s in sector_map.items() if s == sector and t in frame.columns]
+            if not cols:
+                continue
+            out.loc[:, cols] = frame[cols].rank(axis=1, pct=True)
+        return out
+
+    def _smoothed(self, frame: pd.DataFrame, span: int = 3) -> pd.DataFrame:
+        return frame.ewm(span=span, adjust=False).mean()
+
+    def _rolling_max_drawdown(self, prices: pd.DataFrame, window: int) -> pd.DataFrame:
+        roll_peak = prices.rolling(window, min_periods=max(5, window // 4)).max()
+        drawdown = prices / roll_peak.replace(0, np.nan) - 1.0
+        return drawdown.rolling(window, min_periods=max(5, window // 4)).min()
+
+    def _market_regime_flag(
+        self,
+        benchmark_prices: pd.Series,
+        index: pd.Index,
+        columns: list[str],
+    ) -> pd.DataFrame:
+        bm = benchmark_prices.reindex(index).ffill(limit=5)
+        bm_ma = bm.rolling(200, min_periods=50).mean()
+        flag = (bm > bm_ma).astype(float).fillna(0.0)
+        data = np.repeat(flag.to_numpy()[:, None], len(columns), axis=1)
+        return pd.DataFrame(data, index=index, columns=columns)
 
     def build(
         self,
-        price_matrix: pd.DataFrame,          # date × ticker
-        volume_matrix: pd.DataFrame | None,  # date × ticker (INR crore)
-        sector_map: dict[str, str],          # ticker → sector
+        price_matrix: pd.DataFrame,
+        volume_matrix: pd.DataFrame | None,
+        sector_map: dict[str, str],
         benchmark_prices: pd.Series | None = None,
         earnings_panel: pd.DataFrame | None = None,  # ignored; kept for API compatibility
     ) -> pd.DataFrame:
-        """
-        Returns long-format DataFrame indexed by (date, ticker).
-        All features lag-adjusted.
-        """
+        """Returns long-format DataFrame indexed by (date, ticker)."""
         tickers = [t for t in price_matrix.columns if t in sector_map]
-        prices = price_matrix[tickers].ffill()  # fill holiday NaNs so rolling windows work
+        prices = fill_price_gaps(price_matrix[tickers], limit=5)
         if benchmark_prices is not None:
-            benchmark_prices = benchmark_prices.ffill()
-        returns = prices.pct_change()
+            benchmark_prices = fill_price_gaps(benchmark_prices, limit=5)
+        returns = prices.pct_change(fill_method=None)
 
         feat_dict: dict[str, pd.DataFrame] = {}
+        ret_3m = prices.pct_change(self.medium)
+        ret_6m = prices.pct_change(int(self.medium * 2))
+        mom_12m_skip1m = prices.pct_change(self.long) - prices.pct_change(self.short)
+        vol_3m = returns.rolling(self.medium).std() * np.sqrt(252)
+        max_dd_3m = self._rolling_max_drawdown(prices, self.medium)
+        smoothed_ret_3m = self._smoothed(ret_3m, span=3)
+        smoothed_vol_3m = self._smoothed(vol_3m, span=3)
 
-        # ── Returns / Momentum ────────────────────────────────────────────────
-        for h, name in [(5, "1w"), (self.short, "1m"), (self.medium, "3m"),
-                        (int(self.medium * 2), "6m"), (self.long, "12m")]:
-            feat_dict[f"ret_{name}"] = prices.pct_change(h)
-
-        # skip-1-month momentum (standard factor)
-        feat_dict["mom_12m_skip1m"] = (
-            feat_dict.get("ret_12m", pd.DataFrame()) -
-            feat_dict.get("ret_1m", pd.DataFrame())
-        )
-
-        # ── Momentum stability ────────────────────────────────────────────────
-        feat_dict["mom_stab_3m"] = (returns > 0).rolling(self.medium).mean()
-        feat_dict["mom_stab_12m"] = (returns > 0).rolling(self.long).mean()
-
-        # ── Volatility ────────────────────────────────────────────────────────
-        feat_dict["vol_1m"] = returns.rolling(self.short).std() * np.sqrt(252)
-        feat_dict["vol_3m"] = returns.rolling(self.medium).std() * np.sqrt(252)
-        feat_dict["vol_12m"] = returns.rolling(self.long).std() * np.sqrt(252)
-        feat_dict["vol_ratio_1m_3m"] = feat_dict["vol_1m"] / feat_dict["vol_3m"].replace(0, np.nan)
-
-        # ── Downside risk ─────────────────────────────────────────────────────
-        feat_dict["downside_vol_3m"] = (
-            returns.clip(upper=0).rolling(self.medium).std() * np.sqrt(252)
-        )
-        feat_dict["max_dd_3m"] = prices.rolling(self.medium).apply(
-            lambda x: (x / np.maximum.accumulate(x) - 1).min(), raw=True
-        )
-        feat_dict["max_dd_12m"] = prices.rolling(self.long).apply(
-            lambda x: (x / np.maximum.accumulate(x) - 1).min(), raw=True
-        )
-
-        # ── Higher moments ────────────────────────────────────────────────────
-        feat_dict["skew_3m"] = returns.rolling(self.medium).skew()
-        feat_dict["kurt_3m"] = returns.rolling(self.medium).kurt()
-
-        # ── Trend ─────────────────────────────────────────────────────────────
-        # above_50ma / above_200ma dropped (run_020): 0% feature importance,
-        # redundant vs continuous ma_50_200_ratio
-        feat_dict["price_to_52w_high"] = prices / prices.rolling(252).max()
-        feat_dict["price_to_52w_low"] = prices / prices.rolling(252).min()
-
-        # ── Mean-reversion ────────────────────────────────────────────────────
-        feat_dict["zscore_6m"] = (
-            (prices - prices.rolling(int(self.medium * 2)).mean())
-            / prices.rolling(int(self.medium * 2)).std().replace(0, np.nan)
-        )
-
-        # ── Relative to benchmark ─────────────────────────────────────────────
-        if benchmark_prices is not None:
-            bm_rets = benchmark_prices.pct_change()
-            for col, h in [("ret_1m", self.short), ("ret_3m", self.medium)]:
-                if col in feat_dict:
-                    bm_h = (1 + bm_rets).rolling(h).apply(lambda x: x.prod() - 1, raw=True)
-                    feat_dict[f"alpha_{col}"] = feat_dict[col].sub(bm_h, axis=0)
-
-            bm_var = bm_rets.rolling(self.medium).var()
-            feat_dict["beta_3m"] = returns.rolling(self.medium).corr(
-                bm_rets
-            ) * feat_dict["vol_3m"] / (bm_rets.rolling(self.medium).std() * np.sqrt(252)).clip(lower=1e-6)
-
-        # ── Volume / Liquidity ────────────────────────────────────────────────
+        vol_tickers: list[str] = []
+        amihud_1m = None
         if volume_matrix is not None:
             vol_tickers = [t for t in tickers if t in volume_matrix.columns]
             vols = volume_matrix[vol_tickers]
-            feat_dict["avg_vol_1m"] = vols.rolling(self.short).mean()
-            feat_dict["avg_vol_3m"] = vols.rolling(self.medium).mean()
-            feat_dict["vol_trend"] = (
-                feat_dict["avg_vol_1m"] / feat_dict["avg_vol_3m"].replace(0, np.nan)
-            )
-            feat_dict["amihud_1m"] = (
+            amihud_1m = (
                 returns[vol_tickers].abs() / vols.replace(0, np.nan)
             ).rolling(self.short).mean()
 
-        # ── Additional momentum / trend features ─────────────────────────────
-        feat_dict["ma_50_200_ratio"] = (
-            prices.rolling(50).mean() / prices.rolling(200).mean().replace(0, np.nan) - 1
-        )
+        if "absolute_momentum" in self.blocks:
+            feat_dict["ret_3m"] = ret_3m
+            feat_dict["mom_12m_skip1m"] = mom_12m_skip1m
+            feat_dict["mom_accel_3m_6m"] = ret_3m - ret_6m
 
-        roll_high = prices.rolling(self.long).max()
-        roll_low  = prices.rolling(self.long).min()
-        feat_dict["price_pctile_1y"] = (
-            (prices - roll_low) / (roll_high - roll_low).replace(0, np.nan)
-        )
+        if "sector_relative_momentum" in self.blocks:
+            sector_ret_3m = self._sector_broadcast(ret_3m, sector_map)
+            sector_mom_12m = self._sector_broadcast(mom_12m_skip1m, sector_map)
+            feat_dict["ret_3m_vs_sector"] = ret_3m - sector_ret_3m
+            feat_dict["mom_12m_skip1m_vs_sector"] = mom_12m_skip1m - sector_mom_12m
 
-        if volume_matrix is not None and "avg_vol_1m" in feat_dict:
-            vol_tickers = [t for t in tickers if t in volume_matrix.columns]
-            vols = volume_matrix[vol_tickers]
-            vol_20d = vols.rolling(20).mean().replace(0, np.nan)
-            feat_dict["vol_spike"] = (vols / vol_20d).reindex(columns=prices.columns)
+        if "volatility_adjusted_momentum" in self.blocks:
+            feat_dict["mom_3m_vol_adj"] = ret_3m / (vol_3m.abs() + 1e-9)
 
-        gain = returns.clip(lower=0).rolling(14).mean()
-        loss = (-returns.clip(upper=0)).rolling(14).mean().replace(0, np.nan)
-        feat_dict["rsi_14"] = 100 - (100 / (1 + gain / loss))
+        if "interaction_momentum_volatility" in self.blocks:
+            feat_dict["mom_x_vol_3m"] = ret_3m * vol_3m
+            feat_dict["mom_x_inv_vol_3m"] = ret_3m / (vol_3m.abs() + 1e-9)
 
-        # ── Sector-relative features ──────────────────────────────────────────
-        sectors = sorted(set(sector_map.values()))
-        for feat_name in ["ret_1w", "ret_1m", "ret_3m", "ret_6m", "ret_12m", "vol_3m"]:
-            if feat_name not in feat_dict:
-                continue
-            sector_means: dict[str, pd.Series] = {}
-            for sec in sectors:
-                sec_tickers = [t for t in tickers if sector_map.get(t) == sec]
-                if not sec_tickers:
-                    continue
-                avail = [t for t in sec_tickers if t in feat_dict[feat_name].columns]
-                if avail:
-                    sector_means[sec] = feat_dict[feat_name][avail].mean(axis=1)
-            sec_mean_df = pd.DataFrame({
-                t: sector_means.get(sector_map[t], pd.Series(np.nan, index=prices.index))
-                for t in tickers if t in sector_map
-            })
-            feat_dict[f"{feat_name}_vs_sector"] = feat_dict[feat_name] - sec_mean_df
+        if "interaction_momentum_drawdown" in self.blocks:
+            feat_dict["mom_dd_penalty_3m"] = ret_3m + max_dd_3m.fillna(0.0)
 
-        # ── Assemble into long format ─────────────────────────────────────────
+        if "interaction_trend_liquidity" in self.blocks and amihud_1m is not None:
+            feat_dict["trend_x_liquidity"] = (
+                prices.rolling(50).mean() / prices.rolling(200).mean().replace(0, np.nan) - 1
+            ) / (amihud_1m.abs() + 1e-9)
+
+        if "regime_gated_momentum" in self.blocks and benchmark_prices is not None:
+            regime_flag = self._market_regime_flag(benchmark_prices, prices.index, tickers)
+            feat_dict["mom_regime_gate_3m"] = ret_3m * regime_flag
+
+        if "sector_normalized" in self.blocks:
+            feat_dict["ret_3m_sector_z"] = self._sector_zscore(ret_3m, sector_map)
+            feat_dict["mom_12m_skip1m_sector_z"] = self._sector_zscore(mom_12m_skip1m, sector_map)
+            feat_dict["vol_3m_sector_z"] = self._sector_zscore(vol_3m, sector_map)
+            feat_dict["amihud_1m_sector_z"] = self._sector_zscore(amihud_1m, sector_map) if amihud_1m is not None else pd.DataFrame()
+            trend_raw = prices.rolling(50).mean() / prices.rolling(200).mean().replace(0, np.nan) - 1
+            feat_dict["ma_50_200_ratio_sector_z"] = self._sector_zscore(trend_raw, sector_map)
+            feat_dict["ret_3m_sector_rank"] = self._sector_rank(ret_3m, sector_map)
+
+        if "time_smoothing" in self.blocks:
+            feat_dict["ret_3m_ema3"] = smoothed_ret_3m
+            feat_dict["vol_3m_ema3"] = smoothed_vol_3m
+
+        if "risk" in self.blocks:
+            feat_dict["vol_3m"] = vol_3m
+            feat_dict["max_dd_3m"] = max_dd_3m
+
+        if "liquidity" in self.blocks and amihud_1m is not None:
+            feat_dict["amihud_1m"] = amihud_1m
+
+        if "trend" in self.blocks:
+            feat_dict["ma_50_200_ratio"] = (
+                prices.rolling(50).mean() / prices.rolling(200).mean().replace(0, np.nan) - 1
+            )
+
         all_dfs = []
         for feat_name, df in feat_dict.items():
             if isinstance(df, pd.DataFrame) and not df.empty:
@@ -182,7 +199,6 @@ class StockFeatureBuilder:
         long_df = long_df.reset_index()
         long_df["sector"] = long_df["ticker"].map(sector_map)
 
-        # drop rows with all NaN features
         feat_cols = [c for c in long_df.columns if c not in ["date", "ticker", "sector"]]
         long_df = long_df.dropna(subset=feat_cols, how="all")
 

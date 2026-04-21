@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.config import load_config
+from src.data.ingestion import load_price_matrix, load_volume_matrix
 from src.data.contracts import (
     DailyBar, PortfolioState, StockMeta, UniverseSnapshot
 )
@@ -18,7 +19,9 @@ from src.data.universe import UniverseManager
 
 @pytest.fixture
 def cfg():
-    return load_config()
+    cfg = load_config()
+    cfg["universe"]["mode"] = "static"
+    return cfg
 
 
 @pytest.fixture
@@ -101,6 +104,32 @@ class TestUniverseManager:
         for s in snap.stocks:
             assert not s.blacklisted
 
+    def test_membership_mask_respects_listing_and_delisting(self, universe_mgr):
+        dates = pd.date_range("2015-01-01", "2017-12-31", freq="B")
+        prices = pd.DataFrame(
+            {
+                "OLD.NS": np.linspace(100, 200, len(dates)),
+                "NEW.NS": np.linspace(50, 150, len(dates)),
+            },
+            index=dates,
+        )
+        universe_mgr._stock_meta = [
+            StockMeta(
+                ticker="OLD.NS", name="Old", sector="IT", cap="large",
+                listed_since=date(2014, 1, 1), delisted_on=date(2016, 12, 1),
+            ),
+            StockMeta(
+                ticker="NEW.NS", name="New", sector="IT", cap="large",
+                listed_since=date(2016, 1, 1),
+            ),
+        ]
+
+        membership = universe_mgr.membership_mask(prices)
+
+        assert membership.loc["2015-12-31", "NEW.NS"] == False
+        assert membership.loc["2017-02-01", "OLD.NS"] == False
+        assert membership.loc["2017-02-01", "NEW.NS"] == True
+
 
 # ── Feature tests ─────────────────────────────────────────────────────────────
 
@@ -138,6 +167,137 @@ class TestFeatures:
         # Should have rows with date and ticker
         assert "date" in feats.columns
         assert "ticker" in feats.columns
+
+    def test_sector_features_ignore_nominal_price_scale(self):
+        from src.features.sector_features import SectorFeatureBuilder
+
+        cfg = load_config()
+        builder = SectorFeatureBuilder(cfg)
+        dates = pd.date_range("2014-01-01", periods=320)
+        base_a = pd.Series(np.linspace(100, 180, len(dates)), index=dates)
+        base_b = pd.Series(np.linspace(50, 90, len(dates)), index=dates)
+        prices_lo = pd.DataFrame({"A.NS": base_a, "B.NS": base_b}, index=dates)
+        prices_hi = pd.DataFrame({"A.NS": base_a * 10, "B.NS": base_b}, index=dates)
+        sector_map = {"A.NS": "IT", "B.NS": "IT"}
+
+        feats_lo = builder.build(prices_lo, sector_map)
+        feats_hi = builder.build(prices_hi, sector_map)
+
+        lo = feats_lo[feats_lo["sector"] == "IT"]
+        hi = feats_hi[feats_hi["sector"] == "IT"]
+        cols = ["mom_3m", "mom_12m"]
+
+        for col in cols:
+            left = lo[col].dropna()
+            right = hi[col].dropna()
+            common = left.index.intersection(right.index)
+            assert np.allclose(left.loc[common], right.loc[common], atol=1e-9, equal_nan=True)
+
+    def test_taxonomy_additions_have_price_and_feature_coverage(self):
+        from src.features.stock_features import StockFeatureBuilder
+
+        cfg = load_config()
+        price_matrix = load_price_matrix(cfg)
+        volume_matrix = load_volume_matrix(cfg)
+        added = [
+            "TATAELXSI.NS",
+            "LTTS.NS",
+            "AUBANK.NS",
+            "HDFCAMC.NS",
+            "NAM-INDIA.NS",
+            "LUPIN.NS",
+            "ZYDUSLIFE.NS",
+            "GLENMARK.NS",
+            "ADANIGREEN.NS",
+            "FLUOROCHEM.NS",
+            "BALAMINES.NS",
+            "VINATIORGA.NS",
+            "NTPC.NS",
+            "POWERGRID.NS",
+            "RELAXO.NS",
+            "LALPATHLAB.NS",
+            "RAMCOCEM.NS",
+            "AIAENG.NS",
+            "JINDALSTEL.NS",
+        ]
+
+        present = [t for t in added if t in price_matrix.columns]
+        assert present == added
+        for ticker in added:
+            assert price_matrix[ticker].notna().sum() > 0, ticker
+
+        # Validate feature generation on a subset with actual local history.
+        long_hist = [t for t in added if price_matrix[t].notna().sum() >= 252]
+        assert long_hist
+        sample_prices = price_matrix[long_hist].copy()
+        sample_volume = volume_matrix[long_hist].copy()
+        sector_map = {
+            "TATAELXSI.NS": "IT",
+            "LTTS.NS": "IT",
+            "AUBANK.NS": "Banking",
+            "HDFCAMC.NS": "FinancialServices",
+            "NAM-INDIA.NS": "FinancialServices",
+            "LUPIN.NS": "Pharma",
+            "ZYDUSLIFE.NS": "Pharma",
+            "GLENMARK.NS": "Pharma",
+            "ADANIGREEN.NS": "Energy",
+            "FLUOROCHEM.NS": "Chemicals",
+            "BALAMINES.NS": "Chemicals",
+            "VINATIORGA.NS": "Chemicals",
+            "NTPC.NS": "Utilities",
+            "POWERGRID.NS": "Utilities",
+            "RELAXO.NS": "ConsumerDiscretionary",
+            "LALPATHLAB.NS": "Healthcare",
+            "RAMCOCEM.NS": "Cement",
+            "AIAENG.NS": "CapitalGoods",
+            "JINDALSTEL.NS": "Metals",
+        }
+
+        builder = StockFeatureBuilder(cfg)
+        feats = builder.build(sample_prices, sample_volume, sector_map)
+        assert not feats.empty
+        assert set(long_hist).issubset(set(feats["ticker"].unique()))
+        for col in [
+            "ret_3m",
+            "vol_3m",
+            "mom_accel_3m_6m",
+            "ma_50_200_ratio",
+            "amihud_1m",
+        ]:
+            assert feats[col].notna().any(), col
+
+    def test_stock_features_minimal_raw_contract(self):
+        from src.features.stock_features import StockFeatureBuilder
+
+        cfg = load_config()
+        builder = StockFeatureBuilder(cfg)
+        dates = pd.date_range("2014-01-01", periods=320)
+        prices = pd.DataFrame(
+            np.random.lognormal(0, 0.01, (320, 4)).cumprod(axis=0) * 1000,
+            index=dates,
+            columns=["TCS.NS", "INFY.NS", "HDFCBANK.NS", "RELIANCE.NS"],
+        )
+        volumes = pd.DataFrame(
+            np.random.lognormal(5, 0.2, (320, 4)),
+            index=dates,
+            columns=prices.columns,
+        )
+        sector_map = {
+            "TCS.NS": "IT",
+            "INFY.NS": "IT",
+            "HDFCBANK.NS": "Banking",
+            "RELIANCE.NS": "Energy",
+        }
+        feats = builder.build(prices, volumes, sector_map)
+        assert not feats.empty
+        for col in [
+            "ret_3m",
+            "mom_accel_3m_6m",
+            "amihud_1m",
+            "ma_50_200_ratio",
+        ]:
+            assert col in feats.columns
+            assert feats[col].notna().any(), col
 
 
 # ── Optimizer tests ───────────────────────────────────────────────────────────
@@ -187,6 +347,45 @@ class TestOptimizer:
         else:
             # Without CVXPY, verify valid weight dict
             assert sum(result.values()) <= 1.0 + 1e-3
+
+    def test_one_way_turnover_matches_liquidation_only_case(self):
+        from src.optimizer.portfolio_optimizer import PortfolioOptimizer
+
+        turnover = PortfolioOptimizer._compute_one_way_turnover(
+            w_val=np.array([0.35, 0.35]),
+            w_prev=np.array([0.35, 0.35]),
+            cash_val=0.30,
+            w_prev_cash=0.10,
+            liquidation_cost=0.20,
+        )
+        assert turnover == pytest.approx(0.20)
+
+    def test_turnover_repair_brings_solution_within_budget(self):
+        from src.optimizer.portfolio_optimizer import PortfolioOptimizer
+
+        cfg = load_config()
+        opt = PortfolioOptimizer(cfg)
+
+        repaired = opt._repair_turnover_violation(
+            w_val=np.array([0.16, 0.16, 0.04, 0.04]),
+            cash_val=0.60,
+            w_prev=np.array([0.20, 0.20, 0.00, 0.00]),
+            w_prev_cash=0.60,
+            liquidation_cost=0.0,
+            max_turnover=0.12,
+            max_stock=0.20,
+            tickers=["A.NS", "B.NS", "C.NS", "D.NS"],
+            sector_map={"A.NS": "IT", "B.NS": "IT", "C.NS": "Banking", "D.NS": "Banking"},
+            max_sector=0.20,
+        )
+
+        assert repaired is not None
+        w_new, cash_new = repaired
+        turnover = opt._compute_one_way_turnover(
+            w_new, np.array([0.20, 0.20, 0.00, 0.00]), cash_new, 0.60, 0.0
+        )
+        assert turnover <= 0.12 + 1e-6
+        assert w_new.max() <= 0.20 + 1e-6
 
 
 # ── Risk engine tests ─────────────────────────────────────────────────────────
@@ -243,6 +442,59 @@ class TestSimulator:
         assert nav_after > 0
         assert nav_after <= init_state.nav  # costs reduce NAV
         assert nav_after > init_state.nav * 0.99  # should not lose >1% to costs
+
+    def test_rebalance_never_returns_negative_cash_weight(self):
+        from src.backtest.simulator import PortfolioSimulator
+        from src.data.contracts import PortfolioState
+
+        cfg = load_config()
+        sim = PortfolioSimulator(cfg)
+
+        prices = pd.Series({"TCS.NS": 3000.0, "INFY.NS": 1500.0})
+        init_state = PortfolioState(
+            date=date(2020, 1, 1),
+            cash=500_000.0,
+            holdings={},
+            weights={"CASH": 1.0},
+            nav=500_000.0,
+            sector_weights={},
+        )
+        target = {"TCS.NS": 0.50, "INFY.NS": 0.50}
+
+        result = sim.execute_rebalance(target, init_state, prices, date(2020, 1, 2))
+
+        assert result.new_portfolio.cash >= 0
+        assert result.new_portfolio.weights.get("CASH", 0.0) >= -1e-9
+        assert abs(sum(result.new_portfolio.weights.values()) - 1.0) < 1e-6
+
+    def test_rebalance_uses_marked_to_market_state_nav(self):
+        from src.backtest.simulator import PortfolioSimulator
+        from src.data.contracts import PortfolioState
+
+        cfg = load_config()
+        sim = PortfolioSimulator(cfg)
+
+        stale_state = PortfolioState(
+            date=date(2020, 1, 1),
+            cash=0.0,
+            holdings={"TCS.NS": 10.0},
+            weights={"TCS.NS": 1.0, "CASH": 0.0},
+            nav=1_000.0,
+            sector_weights={},
+        )
+        prices = pd.Series({"TCS.NS": 120.0, "INFY.NS": 60.0})
+
+        mtm_state = sim.value_portfolio(stale_state, prices, date(2020, 1, 2))
+        result = sim.execute_rebalance(
+            {"TCS.NS": 0.50, "INFY.NS": 0.50},
+            mtm_state,
+            prices,
+            date(2020, 1, 2),
+        )
+
+        assert mtm_state.nav == 1_200.0
+        assert result.new_portfolio.nav > 0
+        assert result.new_portfolio.cash >= 0
 
     def test_compute_metrics(self):
         from src.backtest.simulator import PortfolioSimulator

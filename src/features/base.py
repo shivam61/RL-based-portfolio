@@ -5,12 +5,48 @@ import numpy as np
 import pandas as pd
 
 
+def fill_price_gaps(
+    data: pd.DataFrame | pd.Series,
+    limit: int = 5,
+) -> pd.DataFrame | pd.Series:
+    """Forward-fill short market gaps without bridging long outages."""
+    return data.ffill(limit=limit)
+
+
 def safe_pct_change(s: pd.Series, periods: int = 1) -> pd.Series:
-    return s.pct_change(periods).replace([np.inf, -np.inf], np.nan)
+    return s.pct_change(periods, fill_method=None).replace([np.inf, -np.inf], np.nan)
 
 
 def rolling_return(prices: pd.Series, window: int) -> pd.Series:
     return prices / prices.shift(window) - 1
+
+
+def normalized_equal_weight_index(
+    price_df: pd.DataFrame,
+    max_gap: int = 5,
+) -> pd.Series:
+    """
+    Build a normalized equal-weight index from constituent returns.
+
+    Using normalized returns avoids raw-price-level distortion inside sectors.
+    """
+    if price_df.empty:
+        return pd.Series(dtype=float)
+
+    prices = fill_price_gaps(price_df, limit=max_gap)
+    returns = prices.pct_change(fill_method=None)
+    eq_returns = returns.mean(axis=1, skipna=True)
+    valid_counts = prices.notna().sum(axis=1)
+    valid_dates = valid_counts[valid_counts > 0].index
+
+    out = pd.Series(np.nan, index=prices.index, dtype=float)
+    if len(valid_dates) == 0:
+        return out
+
+    start = valid_dates[0]
+    base = (1 + eq_returns.loc[start:].fillna(0.0)).cumprod()
+    out.loc[start:] = base / base.iloc[0]
+    return out
 
 
 def rolling_vol(returns: pd.Series, window: int, ann: int = 252) -> pd.Series:

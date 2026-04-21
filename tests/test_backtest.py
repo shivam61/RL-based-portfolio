@@ -147,3 +147,25 @@ class TestWalkForwardIntegration:
             assert rec.post_nav > 0
             total_w = sum(rec.target_weights.values())
             assert abs(total_w - 1.0) < 0.01, f"Weights don't sum to 1: {total_w}"
+
+    def test_stock_fwd_window_override_is_respected(self, synthetic_data):
+        cfg = load_config()
+        cfg["backtest"]["start_date"] = "2013-01-01"
+        cfg["backtest"]["end_date"] = "2014-06-30"
+        cfg["backtest"]["min_train_years"] = 1
+        cfg["rl"]["use_rl"] = False
+        cfg["sector_model"]["n_estimators"] = 5
+        cfg["stock_model"]["n_estimators"] = 5
+        cfg["stock_model"]["fwd_window_days"] = 56
+
+        price_matrix, volume_matrix, macro_df = synthetic_data
+
+        from src.backtest.walk_forward import WalkForwardEngine
+        engine = WalkForwardEngine(
+            price_matrix=price_matrix,
+            volume_matrix=volume_matrix,
+            macro_df=macro_df,
+            cfg=cfg,
+            use_rl=False,
+        )
+        assert engine.stock_fwd_window_days == 56

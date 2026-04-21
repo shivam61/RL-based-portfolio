@@ -4,6 +4,14 @@ Each item is implemented one at a time, backtested, committed, and measured befo
 Best known result: **run_020 — 22.19% CAGR, Sharpe 0.96, MaxDD −23.5%** (12w retrain, no triggers, dropped zero-importance binary features)
 Stable ceiling on corrected data: **~22–25% CAGR** (12w retrain config — ablation D2 showed 24.98% single-pass; run_020 is 22.19% accumulated)
 
+Current stock-ranker baseline:
+- frozen 8W label horizon
+- `selection_only`
+- current universe
+- current feature set
+- deterministic seed `42`
+- use this as the comparison point for further feature-block ablations
+
 ---
 
 ## Run History
@@ -155,11 +163,26 @@ If it doesn't, revert `stock_features.py` and move to the next step.
 | Run | Step | Change | Status | CAGR | Sharpe | Delta | Decision |
 |-----|------|--------|--------|------|--------|-------|----------|
 | run_020 | Step 0 | Drop `above_50ma` + `above_200ma` (0% importance) | ✅ KEEP | 22.19% | 0.96 | +0.06% CAGR / +0.12 Sharpe / MaxDD −6.6pp | KEEP — neutral CAGR but Sharpe 0.84→0.96, MaxDD −30%→−23.5% |
-| run_021 | Step 1 | Add Sharpe features: `sharpe_1m/3m/12m`, `calmar_3m` | ⏳ PENDING | — | — | — | — |
-| run_022 | Step 2 | Add CS ranks: `ret_1m/3m/12m_rank` (percentile across universe) | ⏳ PENDING | — | — | — | — |
-| run_023 | Step 3 | Fix sector z-score: `ret_vs_sector = (ret-mean)/std` | ⏳ PENDING | — | — | — | — |
-| run_024 | Step 4 | Add momentum acceleration: `mom_accel_1m`, `mom_accel_3m` | ⏳ PENDING | — | — | — | — |
-| run_025 | Step 5 | Combine all winning steps; prune back to ≤42 features | ⏳ PENDING | — | — | — | — |
+| run_021 | Step 1 | Add Sharpe features: `sharpe_1m/3m/12m`, `calmar_3m` | ❌ REJECT | 10.00% | 0.31 | -8.94% CAGR / -0.63 Sharpe vs branch baseline | REJECT — cash-heavy RL regime and major performance collapse |
+| run_022 | Step 2 | Add CS ranks: `ret_1m/3m/12m_rank` (percentile across universe) | ❌ REJECT | 12.20% | 0.43 | -6.74% CAGR / -0.51 Sharpe vs branch baseline | REJECT — higher turnover, deeper drawdown, weaker risk-adjusted returns |
+| run_023 | Step 3 | Fix sector z-score: `ret_vs_sector = (ret-mean)/std` | ❌ REJECT | 11.73% | 0.39 | -7.21% CAGR / -0.55 Sharpe vs branch baseline | REJECT — materially worse CAGR, Sharpe, MaxDD, and turnover |
+
+Additional reject on the current branch:
+- `sector_relative_strength` (residual momentum + within-sector rank + drawdown-vs-sector peers) was tested in `selection_only` on the frozen 8W baseline and rejected.
+- Result: `11.57% CAGR`, `0.33 Sharpe`, `-16.91% MaxDD`, `55.95% avg turnover`
+- Diagnostics: `top-k vs sector median +0.50%`, `rank IC -0.032`, `within-sector IC -0.026`, `within-sector top-bottom spread -0.0019`
+- Decision: revert the block and keep `sector_normalized` as the better sector-aware configuration
+
+### Universe hardening attempt (Stage A)
+
+| Task | Description | CAGR | Sharpe | MaxDD | Turnover | Decision |
+|------|-------------|------|--------|-------|----------|----------|
+| Stage A | Infer `listed_since` from price history + default large/mid-only active caps | 16.67% | 0.69 | -30.69% | 24.34% | ❌ REJECT — more realistic but clearly worse than branch baseline |
+| Stage B | Broaden to generated current Nifty 200 large/mid roster (199 names) | 17.64% | 0.75 | -33.50% | 33.71% | ❌ REJECT — initial read was invalid due to stale feature-store shards; corrected run still worse than branch baseline and much higher turnover |
+| Stage C | Expand curated roster to 150 names and re-measure stock-selection only | 4.13% / 8.53% | -0.11 / 0.21 | -10.32% / -6.72% | 72.85% / 51.45% | ❌ REJECT — no improvement over the smaller isolated baseline; keep the branch roster unchanged |
+| Stage D | Re-map the current roster into the proposed 18-sector taxonomy and test `selection_only` | 5.67% | -0.02 | -10.47% | 72.80% | ❌ REJECT — small ranking edge (`top-k vs universe +0.17%`, `rank IC 0.193`) and thin selection (`19.5` names, `26.17%` stability); do not proceed to optimizer/full-RL on this branch |
+| run_024 | Step 4 | Add momentum acceleration: `mom_accel_1m`, `mom_accel_3m` | ❌ REJECT | 4.13% / 7.80% | -0.11 / 0.14 | - | REJECT — closed, do not revisit on this branch |
+| run_025 | Step 5 | Combine all winning steps; prune back to ≤42 features | ⏳ PENDING | — | — | — | pending after remaining winners are identified |
 
 ### Feature detail
 
@@ -259,6 +282,73 @@ More timesteps = more overfitting to the same thin buffer. 20k stays.
 ### TASK-5 — Sector cap revisit [DEFERRED — needs more live data]
 Re-enable P0-A (cap 0.35→0.50) only after TASK-3 unlocks (500+ live steps).
 The constraint feedback loop (realized weights in state) must be active first.
+
+### TASK-6 — Cross-sectional ranking features [IN PROGRESS]
+Goal: improve stock-selection separability without changing taxonomy or universe breadth.
+Added features:
+- sector-relative momentum
+- per-date z-scores
+- cross-sectional rank transforms
+- volatility-adjusted momentum
+
+Validation:
+- rebuild feature store after logic hash change
+- run `selection_only` before `optimizer_only`
+- compare:
+  - top-k vs universe
+  - top-k vs sector median
+  - rank IC
+  - precision@k
+  - stability
+  - top-bottom spread
+  - intra-sector dispersion
+
+Decision rule:
+- keep only if ranking diagnostics improve materially on the frozen universe
+- do not change taxonomy again for this track
+
+Current direction:
+- prune the ranker further to the six raw canonical features only:
+  - `ret_3m`
+  - `mom_12m_skip1m`
+  - `mom_accel_3m_6m`
+  - `vol_3m`
+  - `amihud_1m`
+  - `ma_50_200_ratio`
+- retire the transform-heavy feature variants if the raw-minimal run improves local ranking diagnostics
+
+### TASK-7 — Local-sector diagnostics [IN PROGRESS]
+Goal: decide whether the stock ranker is acting as a true sector-local ranker.
+Add and track:
+- within-sector IC
+- within-sector top-bottom spread
+- sector-median separation
+
+Reporting:
+- equal-weighted across sectors
+- weighted by candidate count
+
+Decision rule:
+- require positive local metrics and non-collapsing stability before calling the feature layer useful
+- if local metrics are weak too, the feature layer needs redesign rather than more universe or taxonomy changes
+
+### TASK-8 — Horizon shift experiment [NEXT]
+Goal: test whether the current stock signal is slow-moving momentum rather than a 4W alpha.
+Keep the raw-minimal stock contract fixed and vary only the label horizon:
+- 4W baseline: `--stock-fwd-window-days 28`
+- 8W test: `--stock-fwd-window-days 56`
+- 12W test: `--stock-fwd-window-days 84`
+
+Measure `selection_only` first on the frozen universe, then compare:
+- within-sector IC
+- within-sector top-bottom spread
+- top-k vs sector median
+- stability
+- turnover
+
+Decision rule:
+- if IC/spread improve with horizon, keep the longer horizon and reduce rebalance frequency to match
+- if nothing improves, stop horizon tuning and move to orthogonal alpha blocks
 
 ---
 

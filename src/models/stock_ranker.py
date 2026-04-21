@@ -2,7 +2,7 @@
 Stock ranking model.
 
 Uses LightGBM LambdaRank to rank stocks within each sector by
-expected 4-week forward return (cross-sectional).
+expected forward return.
 """
 from __future__ import annotations
 
@@ -31,13 +31,13 @@ _EXCLUDE_COLS = {"date", "ticker", "sector"}
 class StockRanker:
     """
     Train a cross-sectional ranking model within sectors.
-    Predicts a score where higher → better expected 4-week return.
+    Predicts a score where higher means better expected forward return.
     """
 
     def __init__(self, cfg: dict):
         self.cfg = cfg
         self._model_cfg = cfg["stock_model"]
-        self.models: dict[str, object] = {}   # one model per sector
+        self.models: dict[str, object] = {}
         self.scalers: dict[str, StandardScaler] = {}
         self.feature_names: list[str] = []
         self.is_fitted = False
@@ -46,9 +46,9 @@ class StockRanker:
 
     def fit(
         self,
-        stock_features: pd.DataFrame,   # long: date, ticker, sector, features...
-        price_matrix: pd.DataFrame,      # date × ticker adj close
-        fwd_window: int = 28,
+        stock_features: pd.DataFrame,
+        price_matrix: pd.DataFrame,
+        fwd_window: int = 56,
     ) -> "StockRanker":
         """Train one ranking model per sector using available history."""
         if stock_features.empty:
@@ -56,8 +56,10 @@ class StockRanker:
 
         feat_cols = [c for c in stock_features.columns if c not in _EXCLUDE_COLS]
         self.feature_names = feat_cols
+        self.models = {}
+        self.scalers = {}
 
-        # Build forward return labels
+        fwd_window = int(fwd_window)
         fwd_rets = price_matrix.pct_change(fwd_window).shift(-fwd_window)
 
         sectors = stock_features["sector"].dropna().unique()
@@ -65,50 +67,62 @@ class StockRanker:
             sec_df = stock_features[stock_features["sector"] == sector].copy()
             if len(sec_df) < 100:
                 continue
-
-            X, y, groups = self._build_rank_dataset(sec_df, fwd_rets, feat_cols)
-            if X is None or len(X) < 50:
+            model_pack = self._train_sector_model(sec_df, fwd_rets, feat_cols)
+            if model_pack is None:
                 continue
-
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X.fillna(0))
-            self.scalers[sector] = scaler
-
-            if HAS_LGB:
-                params = {
-                    "objective": "lambdarank",
-                    "n_estimators": self._model_cfg["n_estimators"],
-                    "learning_rate": self._model_cfg["learning_rate"],
-                    "max_depth": self._model_cfg["max_depth"],
-                    "num_leaves": self._model_cfg["num_leaves"],
-                    "subsample": self._model_cfg["subsample"],
-                    "colsample_bytree": self._model_cfg["colsample_bytree"],
-                    "min_child_samples": self._model_cfg["min_child_samples"],
-                    "verbose": -1,
-                    "n_jobs": 1,
-                }
-                model = lgb.LGBMRanker(**params)
-                model.fit(X_scaled, y.values, group=groups)
-            else:
-                from sklearn.ensemble import GradientBoostingRegressor
-                model = GradientBoostingRegressor(
-                    n_estimators=100, learning_rate=0.05, max_depth=3
-                )
-                model.fit(X_scaled, y.values)
-
+            model, scaler = model_pack
             self.models[sector] = model
-            logger.debug("StockRanker[%s] trained on %d rows", sector, len(X))
+            self.scalers[sector] = scaler
 
         self.is_fitted = bool(self.models)
         logger.info("StockRanker fitted for sectors: %s", list(self.models.keys()))
         return self
+
+    def _train_sector_model(
+        self,
+        sec_df: pd.DataFrame,
+        fwd_rets: pd.DataFrame,
+        feat_cols: list[str],
+    ) -> tuple[object, StandardScaler] | None:
+        X, y, groups = self._build_rank_dataset(sec_df, fwd_rets, feat_cols)
+        if X is None or len(X) < 50:
+            return None
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X.fillna(0))
+
+        if HAS_LGB:
+            params = {
+                "objective": "lambdarank",
+                "n_estimators": self._model_cfg["n_estimators"],
+                "learning_rate": self._model_cfg["learning_rate"],
+                "max_depth": self._model_cfg["max_depth"],
+                "num_leaves": self._model_cfg["num_leaves"],
+                "subsample": self._model_cfg["subsample"],
+                "colsample_bytree": self._model_cfg["colsample_bytree"],
+                "min_child_samples": self._model_cfg["min_child_samples"],
+                "random_state": int(self.cfg.get("backtest", {}).get("random_seed", 42)),
+                "verbose": -1,
+                "n_jobs": 1,
+            }
+            model = lgb.LGBMRanker(**params)
+            model.fit(X_scaled, y.values, group=groups)
+        else:
+            from sklearn.ensemble import GradientBoostingRegressor
+
+            model = GradientBoostingRegressor(
+                n_estimators=100, learning_rate=0.05, max_depth=3
+            )
+            model.fit(X_scaled, y.values)
+
+        return model, scaler
 
     def _build_rank_dataset(
         self,
         sec_df: pd.DataFrame,
         fwd_rets: pd.DataFrame,
         feat_cols: list[str],
-    ) -> tuple:
+    ) -> tuple[pd.DataFrame, pd.Series, np.ndarray] | tuple[None, None, None]:
         rows = []
         for date_val in sec_df["date"].unique():
             day_df = sec_df[sec_df["date"] == date_val]
@@ -153,7 +167,7 @@ class StockRanker:
 
     def rank_stocks(
         self,
-        stock_features_snap: pd.DataFrame,   # one row per ticker (current date)
+        stock_features_snap: pd.DataFrame,
         sector: str,
         top_k: int | None = None,
     ) -> pd.DataFrame:
@@ -167,13 +181,17 @@ class StockRanker:
             return pd.DataFrame(columns=["ticker", "score", "rank"])
 
         if sector in self.models:
-            scaler = self.scalers[sector]
-            feat_cols = [c for c in self.feature_names if c in sec_df.columns]
-            X_raw = sec_df.reindex(columns=self.feature_names, fill_value=0).fillna(0).select_dtypes(include=[np.number])
+            model = self.models[sector]
+            X_raw = sec_df.reindex(columns=self.feature_names, fill_value=0).fillna(0)
+            X_raw = X_raw.select_dtypes(include=[np.number])
             X_raw = X_raw.reindex(columns=self.feature_names, fill_value=0).fillna(0)
-            X_arr = scaler.transform(X_raw)
-            X_named = pd.DataFrame(X_arr, columns=self.feature_names)
-            scores = self.models[sector].predict(X_named)
+            scaler = self.scalers.get(sector)
+            if scaler is None:
+                scores = np.asarray(model.predict(X_raw), dtype=float)
+            else:
+                X_arr = scaler.transform(X_raw)
+                X_named = pd.DataFrame(X_arr, columns=self.feature_names)
+                scores = np.asarray(model.predict(X_named), dtype=float)
         else:
             # fallback: use 3-month momentum
             if "ret_3m" in sec_df.columns:
@@ -187,7 +205,9 @@ class StockRanker:
             "ticker": sec_df["ticker"].values,
             "score": scores,
         })
-        result = result.sort_values("score", ascending=False).reset_index(drop=True)
+        result = result.sort_values(
+            ["score", "ticker"], ascending=[False, True], kind="mergesort"
+        ).reset_index(drop=True)
         result["rank"] = range(1, len(result) + 1)
 
         if top_k:
@@ -200,10 +220,8 @@ class StockRanker:
             return pd.Series(dtype=float)
         model = self.models[sector]
         if HAS_LGB and isinstance(model, lgb.LGBMRanker):
-            return pd.Series(
-                model.feature_importances_,
-                index=self.feature_names,
-            ).sort_values(ascending=False)
+            imp = model.feature_importances_
+            return pd.Series(imp, index=self.feature_names).sort_values(ascending=False)
         return pd.Series(dtype=float)
 
     # ── Persistence ───────────────────────────────────────────────────────────

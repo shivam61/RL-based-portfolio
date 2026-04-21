@@ -1,5 +1,19 @@
 # Feature Experiment Plan — Stock Ranker Improvement Series
 
+For the run-by-run operating checklist, see
+[docs/stock_ranker_experiment_protocol.md](./stock_ranker_experiment_protocol.md).
+
+Current active stock-ranker contract:
+- `ret_3m`
+- `mom_12m_skip1m`
+- `mom_accel_3m_6m`
+- `vol_3m`
+- `amihud_1m`
+- `ma_50_200_ratio`
+
+All `_z`, `_rank`, `_resid`, `_vs_sector`, and benchmark-relative stock features
+have been retired for the current experiment series.
+
 ## Goal
 
 Improve the cross-sectional stock ranking signal quality through targeted,

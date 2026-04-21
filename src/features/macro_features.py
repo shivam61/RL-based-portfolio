@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 class MacroFeatureBuilder:
     """Builds macro feature DataFrame from raw macro data."""
 
+    LOGIC_VERSION = "macro_features_v2_store_logic_hash"
+
     def __init__(self, cfg: dict | None = None):
         self.cfg = cfg or load_config()
         self._lag = self.cfg["features"]["macro_lag"]

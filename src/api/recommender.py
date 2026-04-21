@@ -15,14 +15,11 @@ from src.data.ingestion import load_price_matrix, load_volume_matrix
 from src.data.macro import MacroDataManager
 from src.data.universe import UniverseManager
 from src.features.feature_store import FeatureStore
-from src.features.sector_features import SectorFeatureBuilder
-from src.features.stock_features import StockFeatureBuilder
 from src.models.sector_scorer import SectorScorer
 from src.models.stock_ranker import StockRanker
 from src.optimizer.portfolio_optimizer import PortfolioOptimizer
 from src.risk.risk_engine import RiskEngine
 from src.rl.agent import RLSectorAgent
-from src.data.contracts import PortfolioState
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +57,8 @@ class PortfolioRecommender:
             self._volume_matrix = load_volume_matrix(self.cfg)
             self._macro_mgr     = MacroDataManager(self.cfg)
             self._universe_mgr  = UniverseManager(self.cfg)
-            self._feature_store = FeatureStore(self.cfg)
+            store_dir = Path(self.cfg["paths"]["artifact_dir"]) / "feature_store"
+            self._feature_store = FeatureStore(store_dir, self.cfg)
             self._optimizer     = PortfolioOptimizer(self.cfg)
             self._risk_engine   = RiskEngine(self.cfg)
 
@@ -119,10 +117,8 @@ class PortfolioRecommender:
         as_of_ts = pd.Timestamp(as_of) if as_of else self._price_matrix.index[-1]
 
         # Build current market features
-        sector_feats = self._feature_store.load("sector",
-            as_of_ts - pd.DateOffset(days=30), as_of_ts)
-        stock_feats  = self._feature_store.load("stock",
-            as_of_ts - pd.DateOffset(days=90), as_of_ts)
+        sector_feats_now = self._feature_store.snapshot("sector", as_of_ts)
+        stock_feats_now = self._feature_store.snapshot("stock", as_of_ts)
 
         # Get latest macro snapshot
         macro_df = self._macro_mgr.load()
@@ -134,15 +130,12 @@ class PortfolioRecommender:
         ].iloc[-1].dropna()
 
         snapshot = self._universe_mgr.get_universe(as_of_ts.date(), price_matrix=self._price_matrix)
-        sector_map = snapshot.sector_map if hasattr(snapshot, "sector_map") else {}
-        cap_map    = snapshot.cap_map    if hasattr(snapshot, "cap_map")    else {}
+        sector_map = self._universe_mgr.get_sector_map(snapshot)
+        cap_map = {s.ticker: s.cap for s in snapshot.stocks}
 
         # Sector scores
         sector_scores: dict[str, float] = {}
-        if self._sector_scorer and self._sector_scorer.is_fitted and not sector_feats.empty:
-            sector_feats_now = sector_feats.loc[
-                sector_feats.index == sector_feats.index.max()
-            ] if not sector_feats.empty else sector_feats
+        if self._sector_scorer and self._sector_scorer.is_fitted and not sector_feats_now.empty:
             sector_scores = self._sector_scorer.predict(sector_feats_now)
 
         # RL decision or rule-based
@@ -154,8 +147,8 @@ class PortfolioRecommender:
                 "active_ret_1m": 0.0, "n_stocks": 0,
             }
             sector_state = {}
-            if not sector_feats.empty:
-                for _, row in sector_feats.loc[sector_feats.index == sector_feats.index.max()].iterrows():
+            if not sector_feats_now.empty:
+                for _, row in sector_feats_now.iterrows():
                     sec = row.get("sector", "unknown")
                     sector_state[sec] = {k: row.get(k, 0) for k in ["mom_1m", "mom_3m", "rel_str_1m", "breadth_3m"]}
 
@@ -179,9 +172,6 @@ class PortfolioRecommender:
         # Rank stocks
         top_k = self.cfg["stock_model"]["top_k_per_sector"]
         alpha_scores: dict[str, float] = {}
-        stock_feats_now = stock_feats.loc[
-            stock_feats.index == stock_feats.index.max()
-        ] if not stock_feats.empty else stock_feats
 
         for sector in snapshot.sectors:
             tilt = rl_decision["sector_tilts"].get(sector, 1.0)
