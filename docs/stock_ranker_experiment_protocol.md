@@ -129,3 +129,21 @@ After each completed run, record:
 
 This keeps the branch history reproducible and makes later comparisons easier.
 
+## 9. Commit and push the checkpoint
+
+After the run is complete and the artifacts are refreshed:
+
+- commit the code and doc changes for that experiment
+- push the branch to the remote before starting the next experiment
+- do not let local and remote drift across experiment boundaries
+
+The intended workflow is:
+
+1. make the experiment change
+2. invalidate and rebuild if needed
+3. run the backtest to completion
+4. refresh report artifacts
+5. record the result in the worklog
+6. commit the checkpoint
+7. push the branch
+8. start the next experiment from the pushed state
