@@ -140,16 +140,6 @@ class StockFeatureBuilder:
             feat_dict["ret_3m_vs_sector"] = ret_3m - sector_ret_3m
             feat_dict["mom_12m_skip1m_vs_sector"] = mom_12m_skip1m - sector_mom_12m
 
-        if "sector_relative_strength" in self.blocks:
-            sector_ret_3m = self._sector_broadcast(ret_3m, sector_map)
-            sector_mom_12m = self._sector_broadcast(mom_12m_skip1m, sector_map)
-            sector_max_dd_3m = self._sector_broadcast(max_dd_3m, sector_map)
-            feat_dict["ret_3m_resid"] = ret_3m - sector_ret_3m
-            feat_dict["mom_12m_skip1m_resid"] = mom_12m_skip1m - sector_mom_12m
-            feat_dict["ret_3m_sector_rank"] = self._sector_rank(ret_3m, sector_map)
-            feat_dict["max_dd_3m_vs_sector"] = max_dd_3m - sector_max_dd_3m
-            feat_dict["max_dd_3m_sector_rank"] = self._sector_rank(max_dd_3m, sector_map)
-
         if "volatility_adjusted_momentum" in self.blocks:
             feat_dict["mom_3m_vol_adj"] = ret_3m / (vol_3m.abs() + 1e-9)
 

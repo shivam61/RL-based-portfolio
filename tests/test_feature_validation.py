@@ -413,7 +413,6 @@ class TestCrossFeatureConsistency:
                 "interaction_momentum_drawdown",
                 "interaction_trend_liquidity",
                 "sector_normalized",
-                "sector_relative_strength",
                 "time_smoothing",
             ]
         )
@@ -435,10 +434,6 @@ class TestCrossFeatureConsistency:
             "amihud_1m_sector_z",
             "ma_50_200_ratio_sector_z",
             "ret_3m_sector_rank",
-            "ret_3m_resid",
-            "mom_12m_skip1m_resid",
-            "max_dd_3m_vs_sector",
-            "max_dd_3m_sector_rank",
             "ret_3m_ema3",
             "vol_3m_ema3",
         }

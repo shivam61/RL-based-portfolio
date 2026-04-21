@@ -10,6 +10,32 @@ Each task should record:
 
 ## 2026-04-21
 
+### Task: sector_relative_strength block
+- Scope:
+  - add a stronger sector-relative stock feature block with residual momentum, sector percentile rank, and drawdown-vs-sector peers
+  - test the block in `selection_only` on the frozen 8W baseline
+- Validation:
+  - `./.venv/bin/python -m py_compile src/features/stock_features.py tests/test_feature_validation.py`
+  - `./.venv/bin/python -m pytest tests/test_feature_validation.py::TestCrossFeatureConsistency::test_interaction_blocks_emit_expected_columns -q` -> `1 passed`
+  - `selection_only` on `2013-01-01 → 2016-12-31` with `absolute_momentum + risk + liquidity + trend + sector_relative_strength`
+    - `11.57% CAGR`
+    - `0.33 Sharpe`
+    - `-16.91% MaxDD`
+    - `55.95% avg turnover`
+    - selection diagnostics:
+      - `top-k vs universe +0.54%`
+      - `top-k vs sector median +0.66%`
+      - `precision@k 53.86%`
+      - `rank IC -0.032`
+      - `within-sector IC -0.026`
+      - `within-sector top-bottom spread -0.0019`
+- Decision:
+  - reject and revert the block
+- Learning:
+  - stronger sector-relative residuals and sector percentile features did not improve the stock ranker's local ordering
+  - the block preserved the familiar top-k vs sector-median lift, but it worsened the actual separability metrics we care about
+  - `sector_normalized` remains the better sector-aware configuration on this frozen window
+
 ### Task: Freeze truth baseline and run stock-feature ablations
 - Scope:
   - revert horizon blending and lock the stock-ranker truth baseline to a single 8W label horizon

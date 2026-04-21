@@ -167,6 +167,12 @@ If it doesn't, revert `stock_features.py` and move to the next step.
 | run_022 | Step 2 | Add CS ranks: `ret_1m/3m/12m_rank` (percentile across universe) | ❌ REJECT | 12.20% | 0.43 | -6.74% CAGR / -0.51 Sharpe vs branch baseline | REJECT — higher turnover, deeper drawdown, weaker risk-adjusted returns |
 | run_023 | Step 3 | Fix sector z-score: `ret_vs_sector = (ret-mean)/std` | ❌ REJECT | 11.73% | 0.39 | -7.21% CAGR / -0.55 Sharpe vs branch baseline | REJECT — materially worse CAGR, Sharpe, MaxDD, and turnover |
 
+Additional reject on the current branch:
+- `sector_relative_strength` (residual momentum + within-sector rank + drawdown-vs-sector peers) was tested in `selection_only` on the frozen 8W baseline and rejected.
+- Result: `11.57% CAGR`, `0.33 Sharpe`, `-16.91% MaxDD`, `55.95% avg turnover`
+- Diagnostics: `top-k vs sector median +0.50%`, `rank IC -0.032`, `within-sector IC -0.026`, `within-sector top-bottom spread -0.0019`
+- Decision: revert the block and keep `sector_normalized` as the better sector-aware configuration
+
 ### Universe hardening attempt (Stage A)
 
 | Task | Description | CAGR | Sharpe | MaxDD | Turnover | Decision |
