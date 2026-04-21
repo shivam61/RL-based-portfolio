@@ -47,6 +47,13 @@ Run the backtest in the mode you want to measure, usually `selection_only` first
 - `optimizer_only` only after the ranker itself looks better
 - `full_rl` only after both selection and optimizer are acceptable
 
+For horizon-shift experiments, keep the feature contract fixed and only vary
+the stock-label horizon:
+
+- `--stock-fwd-window-days 28` for the 4W baseline
+- `--stock-fwd-window-days 56` for the 8W test
+- `--stock-fwd-window-days 84` for the 12W test
+
 Wait for the run to finish completely. Do not inspect or export importance from
 an in-progress run.
 
@@ -114,6 +121,10 @@ experiments, use the ranking diagnostics first.
 - stock-ranker feature importance by sector
 - grouped importance by feature family
 - whether momentum features are being displaced by volatility/liquidity features
+
+For horizon experiments, compare 4W vs 8W vs 12W on the same metrics and keep
+the longest horizon only if it improves local ranking diagnostics without
+collapsing stability or turnover.
 
 ## 8. Keep the experiment log updated
 

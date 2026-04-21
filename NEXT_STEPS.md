@@ -318,6 +318,24 @@ Decision rule:
 - require positive local metrics and non-collapsing stability before calling the feature layer useful
 - if local metrics are weak too, the feature layer needs redesign rather than more universe or taxonomy changes
 
+### TASK-8 — Horizon shift experiment [NEXT]
+Goal: test whether the current stock signal is slow-moving momentum rather than a 4W alpha.
+Keep the raw-minimal stock contract fixed and vary only the label horizon:
+- 4W baseline: `--stock-fwd-window-days 28`
+- 8W test: `--stock-fwd-window-days 56`
+- 12W test: `--stock-fwd-window-days 84`
+
+Measure `selection_only` first on the frozen universe, then compare:
+- within-sector IC
+- within-sector top-bottom spread
+- top-k vs sector median
+- stability
+- turnover
+
+Decision rule:
+- if IC/spread improve with horizon, keep the longer horizon and reduce rebalance frequency to match
+- if nothing improves, stop horizon tuning and move to orthogonal alpha blocks
+
 ---
 
 ## Ops Notes

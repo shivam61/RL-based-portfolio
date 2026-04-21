@@ -299,3 +299,11 @@ Each task should record:
 - Rationale:
   - the ranker is still fragmenting momentum signal across too many correlated transforms
   - the next test is whether a concentrated raw set can finally move within-sector IC and top-bottom spread
+
+### Task: stock horizon shift [NEXT]
+- Scope:
+  - keep the raw-minimal stock contract fixed
+  - vary only the stock label horizon at 4W / 8W / 12W
+  - expose the horizon as `stock_model.fwd_window_days` plus a `run_backtest.py` CLI override
+- Rationale:
+  - the ranker has little to no 4W signal; the next hypothesis is that the signal is slower-moving momentum rather than a broken model wiring path

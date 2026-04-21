@@ -3,7 +3,7 @@
 CLI: Run the full walk-forward backtest.
 
 Usage:
-    python scripts/run_backtest.py [--no-rl] [--config path/to/base.yaml]
+    python scripts/run_backtest.py [--mode full_rl] [--config path/to/base.yaml]
 
 This script:
 1. Loads cached data (run download_data.py first)
@@ -45,27 +45,49 @@ from src.reporting.report import ReportGenerator
 
 
 @click.command()
-@click.option("--no-rl", "disable_rl", is_flag=True, default=False, help="Disable RL overlay")
+@click.option("--no-rl", "disable_rl", is_flag=True, default=False, help="Disable RL overlay (maps to optimizer_only when --mode is omitted)")
+@click.option(
+    "--mode",
+    type=click.Choice(["selection_only", "optimizer_only", "full_rl"], case_sensitive=False),
+    default="full_rl",
+    show_default=True,
+    help="Backtest mode: stock selection only, selection+optimizer, or full RL pipeline",
+)
 @click.option("--config", default=None, help="Path to custom config file")
 @click.option("--start", default=None, help="Override backtest start date")
 @click.option("--end", default=None, help="Override backtest end date")
+@click.option(
+    "--stock-fwd-window-days",
+    type=int,
+    default=None,
+    help="Override the stock-ranker label horizon in trading days (28≈4W, 56≈8W, 84≈12W)",
+)
 @click.option("--baselines/--no-baselines", default=True, help="Run baseline strategies")
 @click.option("--report/--no-report", default=True, help="Generate report")
-def main(disable_rl, config, start, end, baselines, report):
+def main(disable_rl, mode, config, start, end, stock_fwd_window_days, baselines, report):
     """Run the full walk-forward backtest and generate report."""
     cfg = load_config(config)
     setup_logging(cfg)
     logger = logging.getLogger(__name__)
 
+    if disable_rl and mode == "full_rl":
+        mode = "optimizer_only"
+    elif disable_rl and mode != "optimizer_only":
+        raise click.UsageError("--no-rl only supports optimizer_only mode")
+
     if start:
         cfg["backtest"]["start_date"] = start
     if end:
         cfg["backtest"]["end_date"] = end
+    if stock_fwd_window_days is not None:
+        cfg["stock_model"]["fwd_window_days"] = int(stock_fwd_window_days)
 
     logger.info("=" * 70)
     logger.info("WALK-FORWARD BACKTEST")
     logger.info("Period: %s → %s", cfg["backtest"]["start_date"], cfg["backtest"]["end_date"])
-    logger.info("RL overlay: %s", "DISABLED" if disable_rl else "ENABLED")
+    logger.info("Mode: %s", mode)
+    logger.info("Stock label horizon: %s trading days", cfg["stock_model"].get("fwd_window_days", 28))
+    logger.info("RL overlay: %s", "ENABLED" if mode == "full_rl" else "DISABLED")
     logger.info("=" * 70)
 
     # ── 1. Load data ──────────────────────────────────────────────────────────
@@ -102,11 +124,13 @@ def main(disable_rl, config, start, end, baselines, report):
         volume_matrix=volume_matrix,
         macro_df=macro_df,
         cfg=cfg,
-        use_rl=not disable_rl,
+        mode=mode,
     )
 
     metrics = engine.run()
     engine.save_state()
+    metrics["mode"] = mode
+    metrics["stock_fwd_window_days"] = int(cfg["stock_model"].get("fwd_window_days", 28))
 
     # Add dates to metrics
     metrics["start_date"] = str(bt_start.date())
@@ -204,6 +228,8 @@ def main(disable_rl, config, start, end, baselines, report):
             strategy_navs=strategy_navs if strategy_navs else None,
             current_portfolio=current_portfolio,
             benchmark_nav=bm_nav,
+            selection_diagnostics=engine.selection_diagnostics,
+            stock_ranker=engine.stock_ranker,
         )
         logger.info("Report generated → %s", report_dir)
 

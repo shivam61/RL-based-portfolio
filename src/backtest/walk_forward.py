@@ -62,13 +62,19 @@ class WalkForwardEngine:
         macro_df: pd.DataFrame,
         cfg: dict | None = None,
         use_rl: bool | None = None,
+        mode: str = "full_rl",
     ):
         self.cfg = cfg or load_config()
         self.price_matrix = price_matrix
         self.volume_matrix = volume_matrix
         self.macro_df = macro_df
-
-        self.use_rl = use_rl if use_rl is not None else self.cfg["rl"].get("use_rl", True)
+        valid_modes = {"selection_only", "optimizer_only", "full_rl"}
+        if mode not in valid_modes:
+            raise ValueError(f"Unsupported backtest mode: {mode}")
+        self.mode = mode
+        self.use_rl = (
+            use_rl if use_rl is not None else self.cfg["rl"].get("use_rl", True)
+        ) and self.mode == "full_rl"
 
         bt_cfg = self.cfg["backtest"]
         self.initial_capital = bt_cfg["initial_capital"]
@@ -88,6 +94,7 @@ class WalkForwardEngine:
         self.optimizer = PortfolioOptimizer(self.cfg)
         self.risk_engine = RiskEngine(self.cfg)
         self.simulator = PortfolioSimulator(self.cfg)
+        self.stock_fwd_window_days = int(self.cfg["stock_model"].get("fwd_window_days", 28))
 
         # Precompute macro features
         logger.info("Building macro features ...")
@@ -109,6 +116,7 @@ class WalkForwardEngine:
         self.rebalance_records: list[RebalanceRecord] = []
         self.nav_series: pd.Series = pd.Series(dtype=float)
         self.daily_log: list[dict] = []
+        self.selection_diagnostics: list[dict] = []
         self._trigger_log: list[dict] = []  # records every event that fired
         self._rl_retrain_count: int = 0
 
@@ -120,6 +128,7 @@ class WalkForwardEngine:
         logger.info("Starting walk-forward backtest")
         logger.info("Period: %s → %s", self.start_date.date(), self.end_date.date())
         logger.info("Initial capital: INR %.0f", self.initial_capital)
+        logger.info("Mode: %s", self.mode)
         logger.info("RL overlay: %s", "ENABLED" if self.use_rl else "DISABLED")
         logger.info("=" * 70)
 
@@ -228,10 +237,14 @@ class WalkForwardEngine:
                     prev_realized_sector_weights=portfolio.sector_weights,
                 )
             else:
-                rl_decision = RLSectorAgent.rule_based_action(
-                    sector_scores, macro_now.to_dict() if isinstance(macro_now, pd.Series) else {},
-                    risk_regime=risk_regime
-                )
+                if self.mode == "full_rl":
+                    rl_decision = RLSectorAgent.rule_based_action(
+                        sector_scores,
+                        macro_now.to_dict() if isinstance(macro_now, pd.Series) else {},
+                        risk_regime=risk_regime,
+                    )
+                else:
+                    rl_decision = self._default_decision(snapshot.sectors)
 
             # ── F. Risk evaluation ────────────────────────────────────────────
             risk_signal, risk_action = self.risk_engine.evaluate(
@@ -241,19 +254,20 @@ class WalkForwardEngine:
                 volume_matrix=self.volume_matrix,
             )
 
-            # Override RL cash if risk says higher floor
-            cash_target = max(
-                rl_decision.get("cash_target", 0.05),
-                risk_action.cash_floor,
-            )
+            # Keep selection_only as a pure selection signal; other modes still honor risk cash floors.
+            if self.mode == "selection_only":
+                cash_target = 0.0
+            else:
+                cash_target = max(rl_decision.get("cash_target", 0.05), risk_action.cash_floor)
 
             # ── G. Select stocks ──────────────────────────────────────────────
             top_k = self.cfg["stock_model"]["top_k_per_sector"]
             alpha_scores: dict[str, float] = {}
-
-            for sector in snapshot.sectors:
+            selected_stock_rows: list[dict[str, object]] = []
+            selected_sectors = self._select_sectors(snapshot.sectors, sector_scores, rl_decision)
+            for sector in selected_sectors:
                 tilt = rl_decision["sector_tilts"].get(sector, 1.0)
-                if tilt < 0.4:
+                if self.mode == "full_rl" and tilt < 0.4:
                     continue  # RL decided to avoid sector
 
                 ranking = self.stock_ranker.rank_stocks(
@@ -263,34 +277,56 @@ class WalkForwardEngine:
                     ticker = row["ticker"]
                     raw_score = float(row["score"])
                     alpha_scores[ticker] = raw_score  # tilt applied once in optimizer
+                    selected_stock_rows.append(
+                        {"ticker": ticker, "sector": sector, "score": raw_score}
+                    )
 
             # fallback: if no alpha scores, use sector-momentum top stocks
             if not alpha_scores and not stock_feats_now.empty:
                 for t in snapshot.tickers[:30]:
                     if t in prices_today.index:
                         alpha_scores[t] = 0.5
+                        selected_stock_rows.append(
+                            {"ticker": t, "sector": sector_map.get(t, "Unknown"), "score": 0.5}
+                        )
 
             # ── H. Optimize portfolio ─────────────────────────────────────────
-            cov_matrix = PortfolioOptimizer.estimate_covariance(
-                self.price_matrix.loc[:current_date],
-                list(alpha_scores.keys()),
-            )
-
-            target_weights = self.optimizer.optimize(
-                alpha_scores=alpha_scores,
-                cov_matrix=cov_matrix,
-                sector_map=sector_map,
-                current_weights=portfolio.weights,
-                sector_tilts=rl_decision["sector_tilts"],
-                aggressiveness=rl_decision.get("aggressiveness", 1.0),
-                cash_target=cash_target,
-                forced_exclude=risk_action.exclude_tickers,
-            )
+            if self.mode == "selection_only":
+                target_weights = self._build_equal_weight_targets(
+                    alpha_scores=alpha_scores,
+                    cash_target=cash_target,
+                )
+                pre_risk_target_weights = dict(target_weights)
+            else:
+                cov_matrix = PortfolioOptimizer.estimate_covariance(
+                    self.price_matrix.loc[:current_date],
+                    list(alpha_scores.keys()),
+                )
+                target_weights = self.optimizer.optimize(
+                    alpha_scores=alpha_scores,
+                    cov_matrix=cov_matrix,
+                    sector_map=sector_map,
+                    current_weights=portfolio.weights,
+                    sector_tilts=(
+                        rl_decision["sector_tilts"]
+                        if self.mode == "full_rl"
+                        else {sector: 1.0 for sector in snapshot.sectors}
+                    ),
+                    aggressiveness=(
+                        rl_decision.get("aggressiveness", 1.0)
+                        if self.mode == "full_rl"
+                        else 1.0
+                    ),
+                    cash_target=cash_target,
+                    forced_exclude=risk_action.exclude_tickers,
+                )
+                pre_risk_target_weights = dict(target_weights)
 
             # ── I. Pre-trade risk checks ──────────────────────────────────────
-            target_weights = self.risk_engine.check_pre_trade(
-                target_weights, sector_map, cap_map, risk_action
-            )
+            if self.mode != "selection_only":
+                target_weights = self.risk_engine.check_pre_trade(
+                    target_weights, sector_map, cap_map, risk_action
+                )
 
             # ── J. Execute trades ─────────────────────────────────────────────
             # Mark-to-market before trade to get accurate period return
@@ -356,6 +392,103 @@ class WalkForwardEngine:
                 emergency=risk_signal.emergency_rebalance,
             )
             self.rebalance_records.append(rec)
+            selected_forward_returns = self._selected_forward_returns(
+                selected_stock_rows,
+                prices_today,
+                next_date,
+                period_nav,
+            )
+            universe_forward_returns = {
+                ticker: ret
+                for ticker, ret in (
+                    self._forward_returns_for_tickers(
+                        snapshot.tickers,
+                        prices_today,
+                        next_date,
+                    ).items()
+                )
+                if np.isfinite(ret)
+            }
+            sector_forward_returns: dict[str, dict[str, float]] = {}
+            for sector in snapshot.sectors:
+                sector_tickers = [
+                    ticker
+                    for ticker in snapshot.tickers
+                    if sector_map.get(ticker, "Unknown") == sector
+                ]
+                if not sector_tickers:
+                    continue
+                sector_forward_returns[sector] = self._forward_returns_for_tickers(
+                    sector_tickers,
+                    prices_today,
+                    next_date,
+                )
+
+            selected_returns = list(selected_forward_returns.values())
+            universe_returns = [
+                ret for ret in universe_forward_returns.values() if np.isfinite(ret)
+            ]
+            top_k_avg = float(np.mean(selected_returns)) if selected_returns else None
+            universe_avg = float(np.mean(universe_returns)) if universe_returns else None
+            sector_medians: list[float] = []
+            for row in selected_stock_rows:
+                sector = str(row["sector"])
+                sector_rets = [
+                    ret
+                    for ret in sector_forward_returns.get(sector, {}).values()
+                    if np.isfinite(ret)
+                ]
+                if sector_rets:
+                    sector_medians.append(float(np.median(sector_rets)))
+            self.selection_diagnostics.append(
+                {
+                    "rebalance_date": current_date.date(),
+                    "mode": self.mode,
+                    "selected_sectors": selected_sectors,
+                    "selected_stocks": [
+                        {"ticker": str(row["ticker"]), "sector": str(row["sector"])}
+                        for row in selected_stock_rows
+                    ],
+                    "candidate_stock_scores": {
+                        str(ticker): float(score) for ticker, score in alpha_scores.items()
+                    },
+                    "candidate_stock_sectors": {
+                        str(ticker): str(sector_map.get(ticker, "Unknown"))
+                        for ticker in alpha_scores
+                    },
+                    "raw_stock_scores": {
+                        str(row["ticker"]): float(row["score"]) for row in selected_stock_rows
+                    },
+                    "optimized_weights_before_rl": pre_risk_target_weights,
+                    "final_weights_after_rl": target_weights,
+                    "cash_pct": float(target_weights.get("CASH", 0.0)),
+                    "turnover": float(exec_result.total_turnover),
+                    "next_period_returns": selected_forward_returns,
+                    "universe_forward_returns": universe_forward_returns,
+                    "sector_forward_returns": sector_forward_returns,
+                    "top_k_avg_forward_return": top_k_avg,
+                    "top_k_minus_universe_forward_return": (
+                        top_k_avg - universe_avg
+                        if top_k_avg is not None and universe_avg is not None
+                        else None
+                    ),
+                    "top_k_minus_sector_median_forward_return": (
+                        top_k_avg - float(np.mean(sector_medians))
+                        if top_k_avg is not None and sector_medians
+                        else None
+                    ),
+                    "precision_at_k": (
+                        float(np.mean([ret > 0 for ret in selected_returns]))
+                        if selected_returns
+                        else None
+                    ),
+                    "rank_ic": self._rank_ic(
+                        {ticker: alpha_scores[ticker] for ticker in alpha_scores},
+                        universe_forward_returns,
+                    ),
+                    "stability": self._selection_stability(selected_stock_rows),
+                }
+            )
 
             # ── N. Per-period detailed progress print ─────────────────────────
             total_periods = len(rebalance_dates) - 1
@@ -379,7 +512,12 @@ class WalkForwardEngine:
             tilts = rl_decision.get("sector_tilts", {})
             rl_overweights = sorted([(s, t) for s, t in tilts.items() if t > 1.1], key=lambda x: -x[1])[:3]
             rl_underweights = sorted([(s, t) for s, t in tilts.items() if t < 0.9], key=lambda x: x[1])[:3]
-            rl_mode = "RL" if (self.use_rl and self.rl_agent.is_trained) else "Rule"
+            if self.mode == "selection_only":
+                rl_mode = "Selection"
+            elif self.use_rl and self.rl_agent.is_trained:
+                rl_mode = "RL"
+            else:
+                rl_mode = "Rule"
             aggressiveness = rl_decision.get("aggressiveness", 1.0)
 
             # Top holdings by weight
@@ -607,7 +745,7 @@ class WalkForwardEngine:
         # sector return matrix for labels
         # NOTE: extend price window by fwd_window to allow label computation,
         # but sector_feats are truncated to label_cutoff to prevent lookahead.
-        fwd_window = 28
+        fwd_window = self.stock_fwd_window_days
         label_cutoff = as_of - pd.offsets.BDay(fwd_window + 2)
         extended_prices = self.price_matrix.loc[
             (self.price_matrix.index >= train_start) &
@@ -643,7 +781,7 @@ class WalkForwardEngine:
         # train stock ranker (quarterly)
         if train_stock:
             t0 = time.perf_counter()
-            self.stock_ranker.fit(stock_feats, train_prices, fwd_window=28)
+            self.stock_ranker.fit(stock_feats, train_prices, fwd_window=fwd_window)
             logger.info("  [timing] stock_ranker.fit    → %.2fs", time.perf_counter() - t0)
 
         logger.info("  [timing] _train_models total → %.2fs", time.perf_counter() - t0_total)
@@ -827,6 +965,131 @@ class WalkForwardEngine:
             for sec, w in rec.sector_tilts.items():
                 contributions[sec] = contributions.get(sec, 0) + (w - 1.0)
         return contributions
+
+    @staticmethod
+    def _default_decision(sectors: list[str]) -> dict:
+        return {
+            "sector_tilts": {sector: 1.0 for sector in sectors},
+            "cash_target": 0.05,
+            "aggressiveness": 1.0,
+        }
+
+    def _select_sectors(
+        self,
+        sectors: list[str],
+        sector_scores: dict[str, float],
+        rl_decision: dict,
+    ) -> list[str]:
+        ordered = sorted(
+            ((sector, float(sector_scores.get(sector, 0.0))) for sector in sectors),
+            key=lambda item: (-item[1], item[0]),
+        )
+        if self.mode == "full_rl":
+            return [
+                sector
+                for sector, _ in ordered
+                if rl_decision["sector_tilts"].get(sector, 1.0) >= 0.4
+            ]
+        top_n = min(len(ordered), 5)
+        return [sector for sector, _ in ordered[:top_n]]
+
+    def _build_equal_weight_targets(
+        self,
+        alpha_scores: dict[str, float],
+        cash_target: float,
+    ) -> dict[str, float]:
+        """Deterministic equal-weight constructor used by selection_only mode."""
+        if not alpha_scores:
+            return {"CASH": 1.0}
+
+        max_stock = float(self.cfg["optimizer"]["max_stock_weight"])
+        investable = max(0.0, 1.0 - float(cash_target))
+        ordered = sorted(alpha_scores, key=lambda ticker: (-alpha_scores[ticker], ticker))
+        if investable <= 0 or not ordered:
+            return {"CASH": 1.0}
+
+        per_stock = min(investable / len(ordered), max_stock)
+        weights = {ticker: per_stock for ticker in ordered if per_stock > 0}
+        invested = per_stock * len(weights)
+        weights["CASH"] = max(0.0, 1.0 - invested)
+        return weights
+
+    def _selected_forward_returns(
+        self,
+        selected_stock_rows: list[dict[str, object]],
+        prices_today: pd.Series,
+        next_date: pd.Timestamp,
+        _period_nav: list[tuple[pd.Timestamp, float]] | None = None,
+    ) -> dict[str, float]:
+        tickers = [str(row["ticker"]) for row in selected_stock_rows]
+        return self._forward_returns_for_tickers(tickers, prices_today, next_date)
+
+    def _forward_returns_for_tickers(
+        self,
+        tickers: list[str],
+        prices_today: pd.Series,
+        next_date: pd.Timestamp,
+    ) -> dict[str, float]:
+        returns: dict[str, float] = {}
+        if not tickers:
+            return returns
+
+        available = [ticker for ticker in tickers if ticker in self.price_matrix.columns]
+        if not available:
+            return returns
+
+        next_prices = self.price_matrix.loc[:next_date, available].ffill().iloc[-1]
+        for ticker in available:
+            if ticker not in prices_today.index or ticker not in next_prices.index:
+                continue
+            start_price = float(prices_today.get(ticker, np.nan))
+            end_price = float(next_prices.get(ticker, np.nan))
+            if (
+                np.isfinite(start_price)
+                and np.isfinite(end_price)
+                and start_price > 0
+            ):
+                returns[ticker] = (end_price - start_price) / start_price
+        return returns
+
+    @staticmethod
+    def _rank_ic(scores: dict[str, float], forward_returns: dict[str, float]) -> float | None:
+        common = [
+            (float(scores[ticker]), float(forward_returns[ticker]))
+            for ticker in sorted(set(scores) & set(forward_returns))
+            if np.isfinite(scores[ticker]) and np.isfinite(forward_returns[ticker])
+        ]
+        if len(common) < 2:
+            return None
+
+        score_series = pd.Series([item[0] for item in common]).rank(method="average")
+        return_series = pd.Series([item[1] for item in common]).rank(method="average")
+        corr = score_series.corr(return_series, method="pearson")
+        return float(corr) if pd.notna(corr) else None
+
+    def _selection_stability(self, selected_stock_rows: list[dict[str, object]]) -> float | None:
+        selected = {str(row["ticker"]) for row in selected_stock_rows}
+        if not selected:
+            return None
+
+        previous = None
+        for record in reversed(self.selection_diagnostics):
+            previous_rows = record.get("selected_stocks", [])
+            previous = {
+                str(item["ticker"])
+                for item in previous_rows
+                if isinstance(item, dict) and item.get("ticker")
+            }
+            if previous:
+                break
+
+        if not previous:
+            return None
+
+        union = selected | previous
+        if not union:
+            return None
+        return float(len(selected & previous) / len(union))
 
     # ── Save/load ─────────────────────────────────────────────────────────────
 

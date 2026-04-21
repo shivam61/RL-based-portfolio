@@ -22,6 +22,7 @@ paths:
 
 # ── Universe ──────────────────────────────────────────────────────────────────
 universe:
+  mode: "static"               # static | historical_union_10y
   config_file: "config/universe.yaml"
   min_market_cap_cr: 500        # INR crore
   min_avg_volume_cr: 1          # INR crore daily avg volume
@@ -33,6 +34,24 @@ universe:
     large: 0.60
     mid: 0.30
     small: 0.10
+  historical_union:
+    lookback_years: 10
+    output_dir: "data/processed/universe/historical_union_10y"
+    candidate_sector_map_file: null   # optional CSV/Parquet/JSON with ticker,sector
+    min_price_history_days: 252
+    min_median_traded_value_cr: 2.0
+    liquidity_lookback_days: 63
+    rebalance_frequency: "4W"
+    use_active_window_filter: true
+    relevance:
+      min_history_days_for_relevance: 126
+      market_cap_proxy_rank_max: 300
+      min_median_traded_value_cr: 8.0
+      include_if_in_broad_index: true
+      broad_index_membership_file: null   # optional file with ticker[,date]
+    sanity:
+      min_stocks_per_sector: 2
+      max_stocks_per_sector: 250
 
 # ── Features ─────────────────────────────────────────────────────────────────
 features:
@@ -68,6 +87,7 @@ stock_model:
   min_child_samples: 30
   retrain_freq_weeks: 12        # Ablation 2 optimal: 12w beats 4/6/8/26w on clean data
   top_k_per_sector: 5           # stocks selected per sector
+  fwd_window_days: 28           # default label horizon for stock ranking (~4 weeks)
 
 # ── Portfolio optimizer ───────────────────────────────────────────────────────
 optimizer:
