@@ -136,6 +136,8 @@ After the run is complete and the artifacts are refreshed:
 - commit the code and doc changes for that experiment
 - push the branch to the remote before starting the next experiment
 - do not let local and remote drift across experiment boundaries
+- use the canonical SSH remote `git@github-personal:shivam61/RL-based-portfolio.git`
+  for experiment checkpoints unless that transport is unavailable
 
 The intended workflow is:
 
