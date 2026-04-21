@@ -9,6 +9,7 @@ backtest:
   slippage_bps: 10              # market impact per trade
   emergency_rebalance: true     # risk-triggered intra-period rebalance
   benchmark_ticker: "^NSEI"
+  random_seed: 42
 
 # ── Data paths ────────────────────────────────────────────────────────────────
 paths:
@@ -61,6 +62,13 @@ features:
   macro_lag: 1                  # days lag for macro features
   stock_lag: 1                  # days lag for stock features
 
+stock_features:
+  blocks:
+    - absolute_momentum
+    - risk
+    - liquidity
+    - trend
+
 # ── Sector scoring model ──────────────────────────────────────────────────────
 sector_model:
   type: "lightgbm"
@@ -87,12 +95,7 @@ stock_model:
   min_child_samples: 30
   retrain_freq_weeks: 12        # Ablation 2 optimal: 12w beats 4/6/8/26w on clean data
   top_k_per_sector: 5           # stocks selected per sector
-  fwd_window_days: 28           # default label horizon for stock ranking (~4 weeks)
-  blend_horizons_days: [28, 56, 84]
-  blend_validation_fraction: 0.2
-  blend_ic_stability_penalty: 0.5
-  blend_spread_reward: 0.1
-  blend_grid_step: 0.25
+  fwd_window_days: 56           # truth baseline label horizon for stock ranking (~8 weeks)
 
 # ── Portfolio optimizer ───────────────────────────────────────────────────────
 optimizer:

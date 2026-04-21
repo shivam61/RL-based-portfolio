@@ -27,6 +27,7 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import click
+import numpy as np
 import pandas as pd
 
 from src.attribution.attribution import AttributionEngine
@@ -60,15 +61,22 @@ from src.reporting.report import ReportGenerator
     "--stock-fwd-window-days",
     type=int,
     default=None,
-    help="Override the stock-ranker label horizon in trading days (28≈4W, 56≈8W, 84≈12W)",
+    help="Override the stock-ranker label horizon in trading days (56≈8W baseline, 84≈12W)",
+)
+@click.option(
+    "--stock-feature-blocks",
+    default=None,
+    help="Comma-separated stock feature blocks, e.g. absolute_momentum,sector_relative_momentum,risk,liquidity,trend,volatility_adjusted_momentum",
 )
 @click.option("--baselines/--no-baselines", default=True, help="Run baseline strategies")
 @click.option("--report/--no-report", default=True, help="Generate report")
-def main(disable_rl, mode, config, start, end, stock_fwd_window_days, baselines, report):
+def main(disable_rl, mode, config, start, end, stock_fwd_window_days, stock_feature_blocks, baselines, report):
     """Run the full walk-forward backtest and generate report."""
     cfg = load_config(config)
     setup_logging(cfg)
     logger = logging.getLogger(__name__)
+    seed = int(cfg.get("backtest", {}).get("random_seed", 42))
+    np.random.seed(seed)
 
     if disable_rl and mode == "full_rl":
         mode = "optimizer_only"
@@ -81,15 +89,19 @@ def main(disable_rl, mode, config, start, end, stock_fwd_window_days, baselines,
         cfg["backtest"]["end_date"] = end
     if stock_fwd_window_days is not None:
         cfg["stock_model"]["fwd_window_days"] = int(stock_fwd_window_days)
+    if stock_feature_blocks:
+        cfg.setdefault("stock_features", {})
+        cfg["stock_features"]["blocks"] = [
+            block.strip() for block in stock_feature_blocks.split(",") if block.strip()
+        ]
 
     logger.info("=" * 70)
     logger.info("WALK-FORWARD BACKTEST")
     logger.info("Period: %s → %s", cfg["backtest"]["start_date"], cfg["backtest"]["end_date"])
     logger.info("Mode: %s", mode)
-    logger.info("Stock label horizon: %s trading days", cfg["stock_model"].get("fwd_window_days", 28))
-    blend_horizons = cfg["stock_model"].get("blend_horizons_days", [])
-    if blend_horizons:
-        logger.info("Stock blend horizons: %s", blend_horizons)
+    logger.info("Stock label horizon: %s trading days", cfg["stock_model"].get("fwd_window_days", 56))
+    logger.info("Random seed: %s", seed)
+    logger.info("Stock feature blocks: %s", cfg.get("stock_features", {}).get("blocks", "default"))
     logger.info("RL overlay: %s", "ENABLED" if mode == "full_rl" else "DISABLED")
     logger.info("=" * 70)
 
@@ -133,10 +145,9 @@ def main(disable_rl, mode, config, start, end, stock_fwd_window_days, baselines,
     metrics = engine.run()
     engine.save_state()
     metrics["mode"] = mode
-    metrics["stock_fwd_window_days"] = int(cfg["stock_model"].get("fwd_window_days", 28))
-    metrics["stock_blend_horizons_days"] = [
-        int(v) for v in cfg["stock_model"].get("blend_horizons_days", [])
-    ]
+    metrics["stock_fwd_window_days"] = int(cfg["stock_model"].get("fwd_window_days", 56))
+    metrics["random_seed"] = seed
+    metrics["stock_feature_blocks"] = cfg.get("stock_features", {}).get("blocks", [])
 
     # Add dates to metrics
     metrics["start_date"] = str(bt_start.date())

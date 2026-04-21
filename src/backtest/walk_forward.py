@@ -94,17 +94,7 @@ class WalkForwardEngine:
         self.optimizer = PortfolioOptimizer(self.cfg)
         self.risk_engine = RiskEngine(self.cfg)
         self.simulator = PortfolioSimulator(self.cfg)
-        self.stock_fwd_window_days = int(self.cfg["stock_model"].get("fwd_window_days", 28))
-        self.stock_blend_horizons_days = [
-            int(v)
-            for v in self.cfg["stock_model"].get("blend_horizons_days", [])
-            if int(v) > 0
-        ]
-        self.stock_blend_target_horizon = (
-            min(self.stock_blend_horizons_days)
-            if len(self.stock_blend_horizons_days) > 1
-            else self.stock_fwd_window_days
-        )
+        self.stock_fwd_window_days = int(self.cfg["stock_model"].get("fwd_window_days", 56))
 
         # Precompute macro features
         logger.info("Building macro features ...")
@@ -755,13 +745,7 @@ class WalkForwardEngine:
         # sector return matrix for labels
         # NOTE: extend price window by fwd_window to allow label computation,
         # but sector_feats are truncated to label_cutoff to prevent lookahead.
-        sector_fwd_window = self.stock_blend_target_horizon
-        if len(self.stock_blend_horizons_days) > 1:
-            fwd_window: int | list[int] = self.stock_blend_horizons_days
-        else:
-            fwd_window = self.stock_fwd_window_days
-            sector_fwd_window = self.stock_fwd_window_days
-        label_horizon = sector_fwd_window
+        label_horizon = self.stock_fwd_window_days
         label_cutoff = as_of - pd.offsets.BDay(label_horizon + 2)
         extended_prices = self.price_matrix.loc[
             (self.price_matrix.index >= train_start) &
@@ -786,7 +770,7 @@ class WalkForwardEngine:
             self.sector_scorer.fit(
                 safe_sector_feats,
                 sec_returns,
-                fwd_window=sector_fwd_window,
+                fwd_window=self.stock_fwd_window_days,
                 macro_features=self.macro_features.loc[
                     (self.macro_features.index >= train_start) &
                     (self.macro_features.index < as_of)
@@ -797,7 +781,7 @@ class WalkForwardEngine:
         # train stock ranker (quarterly)
         if train_stock:
             t0 = time.perf_counter()
-            self.stock_ranker.fit(stock_feats, train_prices, fwd_window=fwd_window)
+            self.stock_ranker.fit(stock_feats, train_prices, fwd_window=self.stock_fwd_window_days)
             logger.info("  [timing] stock_ranker.fit    → %.2fs", time.perf_counter() - t0)
 
         logger.info("  [timing] _train_models total → %.2fs", time.perf_counter() - t0_total)

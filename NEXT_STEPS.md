@@ -4,6 +4,14 @@ Each item is implemented one at a time, backtested, committed, and measured befo
 Best known result: **run_020 — 22.19% CAGR, Sharpe 0.96, MaxDD −23.5%** (12w retrain, no triggers, dropped zero-importance binary features)
 Stable ceiling on corrected data: **~22–25% CAGR** (12w retrain config — ablation D2 showed 24.98% single-pass; run_020 is 22.19% accumulated)
 
+Current stock-ranker baseline:
+- frozen 8W label horizon
+- `selection_only`
+- current universe
+- current feature set
+- deterministic seed `42`
+- use this as the comparison point for further feature-block ablations
+
 ---
 
 ## Run History

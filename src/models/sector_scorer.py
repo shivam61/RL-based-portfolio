@@ -80,6 +80,7 @@ class SectorScorer:
                 "subsample": self._model_cfg["subsample"],
                 "colsample_bytree": self._model_cfg["colsample_bytree"],
                 "min_child_samples": self._model_cfg["min_child_samples"],
+                "random_state": int(self.cfg.get("backtest", {}).get("random_seed", 42)),
                 "verbose": -1,
                 "n_jobs": 1,
             }

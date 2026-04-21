@@ -8,6 +8,34 @@ Each task should record:
 - outcome
 - learning
 
+## 2026-04-21
+
+### Task: Freeze truth baseline and run stock-feature ablations
+- Scope:
+  - revert horizon blending and lock the stock-ranker truth baseline to a single 8W label horizon
+  - add block-based stock feature selection so the ranker can be ablated without changing architecture
+  - add deterministic seed wiring for reproducible selection-only runs
+  - run the following frozen-window ablations on `2013-01-01 → 2016-12-31`:
+    - baseline blocks: `absolute_momentum + risk + liquidity + trend`
+    - `absolute_momentum` only
+    - `sector_relative_momentum` only
+    - `absolute_momentum + sector_relative_momentum`
+    - `volatility_adjusted_momentum`
+- Validation:
+  - `./.venv/bin/python -m py_compile src/models/stock_ranker.py src/models/sector_scorer.py src/backtest/walk_forward.py scripts/run_backtest.py src/features/stock_features.py src/reporting/report.py scripts/export_stock_ranker_importance.py`
+  - `selection_only` baseline -> `11.55% CAGR`, `0.32 Sharpe`, `-19.58% MaxDD`, `54.45% avg turnover`
+  - `absolute_momentum` only -> `7.05% CAGR`, `0.06 Sharpe`, `-23.70% MaxDD`, `56.32% avg turnover`
+  - `sector_relative_momentum` only -> `6.53% CAGR`, `0.03 Sharpe`, `-24.79% MaxDD`, `56.66% avg turnover`
+  - `absolute_momentum + sector_relative_momentum` -> `8.49% CAGR`, `0.14 Sharpe`, `-22.07% MaxDD`, `55.87% avg turnover`
+  - `volatility_adjusted_momentum` -> `7.62% CAGR`, `0.09 Sharpe`, `-22.52% MaxDD`, `59.44% avg turnover`
+- Learning:
+  - the 8W truth baseline is the strongest of the tested feature slices on this frozen window
+  - absolute momentum by itself is not enough
+  - sector-relative momentum by itself is not enough
+  - combining absolute + sector-relative helps relative to either alone, but still underperforms the full baseline that retains risk/liquidity/trend context
+  - volatility-adjusted momentum alone does not solve the ranking problem
+  - the next useful step is to prune weaker blocks one at a time from the 8W truth baseline rather than reintroducing horizon or optimizer complexity
+
 ## 2026-04-20
 
 ### Task: Data / PIT correctness baseline
