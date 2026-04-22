@@ -238,6 +238,14 @@ Current Stage 2A result:
     - targeted tests pass
     - real holdout runtime is currently too slow because every reward step launches multiple counterfactual posture rollouts
     - next refinement should cut regret compute cost before wider evaluation
+  - cached one-step regret is now the active prototype:
+    - 2016 holdout -> CAGR `30.74%`, Sharpe `1.577`, MaxDD `-13.33%`, turnover `19.83%`
+    - neutral full-stack -> CAGR `32.99%`, Sharpe `1.496`, MaxDD `-14.99%`, turnover `25.53%`
+    - decision-quality basis: `cached_one_step_soft_regret_v1`
+    - posture optimality improved to `41.7%`, but posture utility dispersion is only `2.32e-05`
+    - interpretation:
+      - runtime is acceptable again
+      - posture separation is still too weak to break the static `risk_off` policy
 
 #### Stage 3 — Add breadth control
 

@@ -192,6 +192,50 @@ Copy this block for each future change:
   - the immediate blocker is compute cost from per-step counterfactual rollouts
   - next work should make the regret term cheaper before relying on full holdout economics
 
+## Iteration 9 — Stage 2 Cached One-Step Soft-Regret
+
+- Date:
+  - `2026-04-22`
+- Scope:
+  - replace full counterfactual rollout regret with cached one-step approximate regret
+  - keep bounded regime-weighted utility and soft regret structure
+  - preserve the decision-quality/control-realization diagnostics
+- Control levers changed:
+  - none
+  - objective and diagnostics only
+- Config flags:
+  - same soft-regret config surface as Iteration 8
+  - decision-quality basis now reported as `cached_one_step_soft_regret_v1`
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not run
+- Holdout result vs `neutral_full_stack`:
+  - candidate RL:
+    - CAGR `30.74%`
+    - Sharpe `1.577`
+    - MaxDD `-13.33%`
+    - avg turnover `19.83%`
+  - neutral full-stack:
+    - CAGR `32.99%`
+    - Sharpe `1.496`
+    - MaxDD `-14.99%`
+    - avg turnover `25.53%`
+- Stress-window behavior:
+  - holdout diagnostics:
+    - `posture_counts = {'risk_off': 12}`
+    - `target_posture_counts = {'neutral': 5, 'risk_on': 5, 'risk_off': 2}`
+    - `posture_optimality_rate = 41.7%`
+    - `mean_regret = 0.057`
+    - `mean_posture_utility_dispersion = 2.32e-05`
+- Decision:
+  - keep as the active Stage 2 reward baseline
+  - do not promote as a successful posture controller yet
+- Learning:
+  - the research loop is fast enough again
+  - the remaining blocker is weak posture utility separation, not compute
+  - cached regret improved practicality, but the policy still collapses to static `risk_off`
+
 ## Iteration 1 — Stage 0 Control Evaluation Harness
 
 - Date:

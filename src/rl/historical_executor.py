@@ -364,6 +364,13 @@ class HistoricalPeriodExecutor:
             step_idx=prepared.idx,
             starting_portfolio=portfolio,
             starting_nav_points=nav_points,
+            current_weights=dict(portfolio_mtm.weights),
+            base_target_weights=dict(target_weights),
+            realized_asset_returns=self._realized_asset_returns(
+                prepared.prices_today,
+                next_prices,
+            ),
+            observed_turnover=float(exec_result.total_turnover),
             pre_nav=pre_nav,
             end_nav=end_nav,
             nav_points=nav_points,
@@ -449,6 +456,10 @@ class HistoricalPeriodExecutor:
         step_idx: int,
         starting_portfolio: PortfolioState,
         starting_nav_points: list[tuple[pd.Timestamp, float]],
+        current_weights: dict[str, float],
+        base_target_weights: dict[str, float],
+        realized_asset_returns: dict[str, float],
+        observed_turnover: float,
         pre_nav: float,
         end_nav: float,
         nav_points: list[tuple[pd.Timestamp, float]],
@@ -584,11 +595,17 @@ class HistoricalPeriodExecutor:
         regret_policy_count = 0
         if compute_regret and bool(rl_cfg.get("enable_soft_posture_regret", True)):
             posture_value_map, regret_meta = self._compute_posture_value_map(
-                step_idx=step_idx,
-                portfolio=starting_portfolio,
+                current_weights=current_weights,
+                base_target_weights=base_target_weights,
+                realized_asset_returns=realized_asset_returns,
+                observed_cost_ratio=cost_ratio,
+                observed_turnover=observed_turnover,
+                pre_nav=pre_nav,
                 nav_points=starting_nav_points,
                 base_decision=decision,
                 stress_signal=stress_signal,
+                benchmark_return=benchmark_return,
+                liquidity_stress=liquidity_stress,
             )
             if posture_value_map:
                 values = np.asarray(list(posture_value_map.values()), dtype=float)
@@ -654,7 +671,7 @@ class HistoricalPeriodExecutor:
             "posture_progress_bonus": float(posture_progress_bonus),
             "posture_stale_penalty": float(posture_stale_penalty),
             "posture_flip_penalty": float(posture_flip_penalty),
-            "decision_quality_basis": "counterfactual_soft_regret_v1",
+            "decision_quality_basis": "cached_one_step_soft_regret_v1",
             "soft_regret": float(soft_regret),
             "soft_regret_penalty": float(soft_regret_penalty),
             "soft_regret_baseline": float(soft_regret_baseline),
@@ -776,113 +793,94 @@ class HistoricalPeriodExecutor:
     def _compute_posture_value_map(
         self,
         *,
-        step_idx: int,
-        portfolio: PortfolioState,
+        current_weights: dict[str, float],
+        base_target_weights: dict[str, float],
+        realized_asset_returns: dict[str, float],
+        observed_cost_ratio: float,
+        observed_turnover: float,
+        pre_nav: float,
         nav_points: list[tuple[pd.Timestamp, float]],
         base_decision: dict[str, Any],
         stress_signal: float,
+        benchmark_return: float | None,
+        liquidity_stress: bool,
     ) -> tuple[dict[str, float], dict[str, int]]:
-        horizon_steps = self._regret_horizon_steps(stress_signal)
-        if horizon_steps <= 0:
-            return {}, {"horizon_steps": 0, "policy_count": 0}
-        switch_candidates = self._regret_switch_candidates(step_idx, horizon_steps)
         postures = ("risk_on", "neutral", "risk_off")
         posture_values: dict[str, float] = {}
-        policy_count = 0
         for posture in postures:
-            candidate_values = [
-                self._simulate_posture_sequence_utility(
-                    step_idx=step_idx,
-                    portfolio=portfolio,
-                    nav_points=nav_points,
-                    base_decision=base_decision,
-                    posture_sequence=[posture] * horizon_steps,
-                )
-            ]
-            policy_count += 1
-            for switch_idx in switch_candidates:
-                for target_posture in postures:
-                    if target_posture == posture:
-                        continue
-                    sequence = [
-                        posture if offset < switch_idx else target_posture
-                        for offset in range(horizon_steps)
-                    ]
-                    candidate_values.append(
-                        self._simulate_posture_sequence_utility(
-                            step_idx=step_idx,
-                            portfolio=portfolio,
-                            nav_points=nav_points,
-                            base_decision=base_decision,
-                            posture_sequence=sequence,
-                        )
-                    )
-                    policy_count += 1
-            posture_values[posture] = float(max(candidate_values))
+            candidate_decision = self._counterfactual_decision(base_decision, posture)
+            candidate_utility = self._approximate_counterfactual_utility(
+                current_weights=current_weights,
+                base_target_weights=base_target_weights,
+                realized_asset_returns=realized_asset_returns,
+                observed_cost_ratio=observed_cost_ratio,
+                observed_turnover=observed_turnover,
+                pre_nav=pre_nav,
+                nav_points=nav_points,
+                candidate_decision=candidate_decision,
+                stress_signal=stress_signal,
+                benchmark_return=benchmark_return,
+                liquidity_stress=liquidity_stress,
+            )
+            posture_values[posture] = float(candidate_utility)
         return posture_values, {
-            "horizon_steps": int(horizon_steps),
-            "policy_count": int(policy_count),
+            "horizon_steps": 1,
+            "policy_count": len(postures),
         }
 
-    def _simulate_posture_sequence_utility(
+    def _approximate_counterfactual_utility(
         self,
         *,
-        step_idx: int,
-        portfolio: PortfolioState,
+        current_weights: dict[str, float],
+        base_target_weights: dict[str, float],
+        realized_asset_returns: dict[str, float],
+        observed_cost_ratio: float,
+        observed_turnover: float,
+        pre_nav: float,
         nav_points: list[tuple[pd.Timestamp, float]],
-        base_decision: dict[str, Any],
-        posture_sequence: list[str],
+        candidate_decision: dict[str, Any],
+        stress_signal: float,
+        benchmark_return: float | None,
+        liquidity_stress: bool,
     ) -> float:
-        original_risk_engine = self.engine.risk_engine
-        counterfactual = HistoricalPeriodExecutor(
-            self.engine,
-            mode=self.mode,
-            allow_model_retraining=False,
+        candidate_weights, candidate_turnover = self._approximate_posture_weights(
+            current_weights=current_weights,
+            base_target_weights=base_target_weights,
+            candidate_decision=candidate_decision,
         )
-        counterfactual.reset_runtime_state(list(nav_points))
-        counterfactual._recent_turnovers = list(self._recent_turnovers)
-        counterfactual._recent_cost_ratios = list(self._recent_cost_ratios)
-        counterfactual._prev_posture = self._prev_posture
-        counterfactual._prev_target_posture = self._prev_target_posture
-        counterfactual._prev_stress_signal = self._prev_stress_signal
-        counterfactual._target_posture_streak = self._target_posture_streak
-        counterfactual._prev_posture_mismatch = self._prev_posture_mismatch
-        local_portfolio = self._copy_portfolio_state(portfolio)
-        local_nav_points = list(nav_points)
-        utilities: list[float] = []
-        try:
-            for offset, posture in enumerate(posture_sequence):
-                idx = step_idx + offset
-                if idx >= len(counterfactual.rebalance_dates) - 1:
-                    break
-                prepared = counterfactual.prepare_step(idx, local_portfolio, local_nav_points)
-                decision = counterfactual._counterfactual_decision(base_decision, posture)
-                result = counterfactual.execute_prepared_step(
-                    prepared,
-                    local_portfolio,
-                    local_nav_points,
-                    rl_decision=decision,
-                    done=False,
-                    compute_regret=False,
-                )
-                utilities.append(
-                    float(
-                        result.transition.get("info", {})
-                        .get("reward_components", {})
-                        .get("utility_reduced", 0.0)
-                    )
-                )
-                counterfactual.engine.risk_engine.update(
-                    result.post_trade_portfolio.nav,
-                    result.post_trade_portfolio.date,
-                )
-                local_portfolio = result.next_portfolio
-                local_nav_points = result.updated_nav_points
-        finally:
-            self.engine.risk_engine = original_risk_engine
-        if not utilities:
-            return 0.0
-        return float(np.mean(utilities))
+        period_return = float(
+            sum(
+                float(weight) * float(realized_asset_returns.get(ticker, 0.0))
+                for ticker, weight in candidate_weights.items()
+                if ticker != "CASH"
+            )
+        )
+        active_return = (
+            period_return - float(benchmark_return)
+            if benchmark_return is not None
+            else period_return
+        )
+        candidate_cost_ratio = self._approximate_cost_ratio(
+            observed_cost_ratio=observed_cost_ratio,
+            observed_turnover=observed_turnover,
+            candidate_turnover=candidate_turnover,
+        )
+        prev_peak = max([float(nav) for _, nav in nav_points] + [float(pre_nav)], default=float(pre_nav))
+        approx_end_nav = float(pre_nav) * (1.0 + period_return - candidate_cost_ratio)
+        approx_drawdown = min(0.0, (approx_end_nav - prev_peak) / prev_peak) if prev_peak > 0 else 0.0
+        concentration_hhi = float(
+            sum(float(weight) ** 2 for ticker, weight in candidate_weights.items() if ticker != "CASH" and float(weight) > 0.0)
+        )
+        reduced_utility, _ = self._compose_utility(
+            active_return=active_return,
+            realized_drawdown=approx_drawdown,
+            cost_ratio=candidate_cost_ratio,
+            concentration_excess=max(0.0, concentration_hhi - float(self.engine.cfg.get("risk", {}).get("max_concentration_hhi", 0.15))),
+            liquidity_stress=liquidity_stress,
+            stress_signal=stress_signal,
+            reduced=True,
+        )
+        return float(reduced_utility)
 
     def _counterfactual_decision(
         self,
@@ -897,31 +895,80 @@ class HistoricalPeriodExecutor:
         decision["turnover_cap"] = float(posture_controls["turnover_cap"])
         return decision
 
-    def _regret_horizon_steps(self, stress_signal: float) -> int:
-        rl_cfg = self.engine.cfg.get("rl", {})
-        bucket = self._stress_bucket_label(stress_signal, self.engine.cfg)
-        if bucket == "high":
-            return max(1, int(rl_cfg.get("reward_regret_horizon_high", 2)))
-        if bucket == "medium":
-            return max(1, int(rl_cfg.get("reward_regret_horizon_medium", 3)))
-        return max(1, int(rl_cfg.get("reward_regret_horizon_low", 4)))
+    @staticmethod
+    def _approximate_posture_weights(
+        *,
+        current_weights: dict[str, float],
+        base_target_weights: dict[str, float],
+        candidate_decision: dict[str, Any],
+    ) -> tuple[dict[str, float], float]:
+        cash_target = float(candidate_decision.get("cash_target", 0.05))
+        aggressiveness = float(candidate_decision.get("aggressiveness", 1.0))
+        turnover_cap = float(candidate_decision.get("turnover_cap", 0.40) or 0.40)
+        current = {ticker: float(weight) for ticker, weight in current_weights.items()}
+        current.setdefault("CASH", 0.0)
+        base_equity = {
+            ticker: float(weight)
+            for ticker, weight in base_target_weights.items()
+            if ticker != "CASH" and not str(ticker).startswith("__") and float(weight) > 0.0
+        }
+        current_equity = {
+            ticker: float(weight)
+            for ticker, weight in current.items()
+            if ticker != "CASH" and float(weight) > 0.0
+        }
+        base_total = sum(base_equity.values())
+        current_total = sum(current_equity.values())
+        if base_total <= 0:
+            desired = {"CASH": 1.0}
+        else:
+            target_mix = {ticker: weight / base_total for ticker, weight in base_equity.items()}
+            current_mix = (
+                {ticker: weight / current_total for ticker, weight in current_equity.items()}
+                if current_total > 0
+                else target_mix
+            )
+            mix_strength = float(np.clip((aggressiveness - 0.60) / 0.80, 0.0, 1.0))
+            equity_budget = float(np.clip(1.0 - cash_target, 0.0, 1.0))
+            tickers = sorted(set(target_mix) | set(current_mix))
+            desired = {
+                ticker: equity_budget * (
+                    (1.0 - mix_strength) * current_mix.get(ticker, 0.0)
+                    + mix_strength * target_mix.get(ticker, 0.0)
+                )
+                for ticker in tickers
+            }
+            desired["CASH"] = cash_target
+        all_tickers = sorted(set(current) | set(desired))
+        raw_turnover = 0.5 * sum(abs(desired.get(ticker, 0.0) - current.get(ticker, 0.0)) for ticker in all_tickers)
+        move_fraction = 1.0 if raw_turnover <= 1e-12 else float(np.clip(turnover_cap / raw_turnover, 0.0, 1.0))
+        candidate = {
+            ticker: current.get(ticker, 0.0) + move_fraction * (desired.get(ticker, 0.0) - current.get(ticker, 0.0))
+            for ticker in all_tickers
+        }
+        total = sum(max(0.0, weight) for weight in candidate.values())
+        if total > 0:
+            candidate = {ticker: max(0.0, weight) / total for ticker, weight in candidate.items()}
+        candidate_turnover = 0.5 * sum(abs(candidate.get(ticker, 0.0) - current.get(ticker, 0.0)) for ticker in all_tickers)
+        return candidate, float(candidate_turnover)
 
-    def _regret_switch_candidates(self, step_idx: int, horizon_steps: int) -> list[int]:
-        if horizon_steps <= 1:
-            return []
-        rl_cfg = self.engine.cfg.get("rl", {})
-        fractions = rl_cfg.get("reward_regret_switch_anchor_fracs", [0.4, 0.7])
-        jitter_steps = int(max(0, rl_cfg.get("reward_regret_switch_jitter_steps", 1)))
-        candidates: set[int] = set()
-        for anchor_idx, fraction in enumerate(fractions):
-            base = int(round(float(fraction) * max(1, horizon_steps - 1)))
-            jitter = 0
-            if jitter_steps > 0:
-                seed = (step_idx + 1) * 97 + (anchor_idx + 1) * 17
-                jitter = int((seed % (2 * jitter_steps + 1)) - jitter_steps)
-            candidate = int(np.clip(base + jitter, 1, horizon_steps - 1))
-            candidates.add(candidate)
-        return sorted(candidates)
+    def _approximate_cost_ratio(
+        self,
+        *,
+        observed_cost_ratio: float,
+        observed_turnover: float,
+        candidate_turnover: float,
+    ) -> float:
+        if observed_turnover > 1.0e-8:
+            unit_cost = observed_cost_ratio / observed_turnover
+        else:
+            simulator = getattr(self.engine, "simulator", None)
+            unit_cost = (
+                float(getattr(simulator, "total_cost_bps", 0.0)) / 10000.0
+                if simulator is not None
+                else 0.0
+            )
+        return float(max(0.0, unit_cost) * max(0.0, candidate_turnover))
 
     @staticmethod
     def _soft_utility_baseline(values: np.ndarray, temperature: float) -> float:
@@ -953,6 +1000,21 @@ class HistoricalPeriodExecutor:
             nav=float(portfolio.nav),
             sector_weights=dict(portfolio.sector_weights),
         )
+
+    @staticmethod
+    def _realized_asset_returns(
+        current_prices: pd.Series,
+        next_prices: pd.Series,
+    ) -> dict[str, float]:
+        returns: dict[str, float] = {}
+        tickers = set(current_prices.index) | set(next_prices.index)
+        for ticker in tickers:
+            start = float(current_prices.get(ticker, np.nan))
+            end = float(next_prices.get(ticker, np.nan))
+            if not np.isfinite(start) or not np.isfinite(end) or start <= 0:
+                continue
+            returns[str(ticker)] = float((end - start) / start)
+        return returns
 
     def _benchmark_period_return(
         self,

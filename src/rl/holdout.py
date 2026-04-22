@@ -529,7 +529,7 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             )
         ),
         "decision_quality_basis": (
-            "counterfactual_soft_regret_v1"
+            "cached_one_step_soft_regret_v1"
             if any(
                 "soft_regret" in entry.get("reward_components", {})
                 for entry in trace

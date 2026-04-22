@@ -306,6 +306,32 @@ Each task should record:
   - the first operational bottleneck is compute, not correctness
   - the counterfactual term needs approximation, caching, or a smaller candidate set before full holdout evaluation is practical
 
+### Task: Stage 2 cached one-step soft-regret optimization
+- Scope:
+  - replace full rollout regret with cached one-step approximate regret from:
+    - current weights
+    - feasible target weights
+    - realized next-step asset returns
+    - observed turnover/cost
+  - keep the new diagnostics and reward structure intact
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `19 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `30.74% CAGR`, `1.577 Sharpe`, `-13.33% MaxDD`, `19.83% avg turnover`
+    - neutral full-stack -> `32.99% CAGR`, `1.496 Sharpe`, `-14.99% MaxDD`, `25.53% avg turnover`
+    - decision-quality diagnostics:
+      - `decision_quality_basis = cached_one_step_soft_regret_v1`
+      - `posture_optimality_rate = 41.7%`
+      - `mean_regret = 0.057`
+      - `mean_posture_utility_dispersion = 2.32e-05`
+- Decision:
+  - keep
+  - use this as the active Stage 2 reward baseline, not the slower rollout version
+- Learning:
+  - the research loop is usable again
+  - the dominant remaining problem is not compute; it is weak posture separability
+  - posture utility dispersion is extremely small, which explains why the policy still collapses to static `risk_off`
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block

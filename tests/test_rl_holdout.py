@@ -92,7 +92,7 @@ def test_evaluate_holdout_returns_trained_vs_neutral_comparison(monkeypatch):
     assert result["trained_policy_diagnostics"]["target_posture_by_stress_bucket"]
     assert (
         result["trained_policy_diagnostics"]["decision_quality_basis"]
-        == "counterfactual_soft_regret_v1"
+        == "cached_one_step_soft_regret_v1"
     )
     assert "mean_regret" in result["trained_policy_diagnostics"]
     assert "regret_by_stress_bucket" in result["trained_policy_diagnostics"]
@@ -174,7 +174,7 @@ def test_summarize_trace_reports_dispersion_and_bucketed_decision_quality():
 
     summary = _summarize_trace(trace)
 
-    assert summary["decision_quality_basis"] == "counterfactual_soft_regret_v1"
+    assert summary["decision_quality_basis"] == "cached_one_step_soft_regret_v1"
     assert summary["posture_counts"] == {"neutral": 1, "risk_off": 1}
     assert summary["target_posture_by_stress_bucket"]["high"]["risk_off"] == 1
     assert summary["posture_optimality_rate"] == pytest.approx(0.5)

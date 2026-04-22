@@ -376,6 +376,10 @@ def test_historical_executor_reward_uses_bounded_weights_and_soft_regret(monkeyp
         step_idx=0,
         starting_portfolio=portfolio,
         starting_nav_points=[(pd.Timestamp("2024-01-01"), 100000.0)],
+        current_weights={"AAA": 0.90, "CASH": 0.10},
+        base_target_weights={"AAA": 0.95, "CASH": 0.05},
+        realized_asset_returns={"AAA": 0.03},
+        observed_turnover=0.15,
         pre_nav=100000.0,
         end_nav=103000.0,
         nav_points=[(pd.Timestamp("2024-01-01"), 100000.0)],
@@ -422,10 +426,11 @@ def test_historical_executor_reward_uses_bounded_weights_and_soft_regret(monkeyp
     assert 0.70 <= components["return_weight"] <= 1.15
     assert 0.80 <= components["drawdown_weight"] <= 1.35
     assert 0.85 <= components["turnover_weight"] <= 1.20
-    assert components["decision_quality_basis"] == "counterfactual_soft_regret_v1"
+    assert components["decision_quality_basis"] == "cached_one_step_soft_regret_v1"
     assert components["soft_regret"] >= 0.0
     assert components["soft_regret_penalty"] >= 0.0
     assert components["posture_utility_variance"] > 0.0
+    assert components["regret_horizon_steps"] == 3
     assert components["regret_policy_count"] == 7
     assert reward == pytest.approx(components["reward"])
 
