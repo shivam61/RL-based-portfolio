@@ -318,26 +318,35 @@ class RLSectorAgent:
         else:
             tilts = {s: 1.0 for s in SECTORS}
 
-        # cash target based on regime
-        cash_target = {
-            "bull": 0.03,
-            "bear": 0.15,
-            "stressed": 0.20,
-            "neutral": 0.05,
-        }.get(risk_regime, 0.05)
-
-        # aggressiveness based on regime
-        agg = {
-            "bull": 1.2,
-            "bear": 0.7,
-            "stressed": 0.5,
-            "neutral": 1.0,
-        }.get(risk_regime, 1.0)
+        posture = {
+            "bull": "risk_on",
+            "bear": "risk_off",
+            "stressed": "risk_off",
+            "neutral": "neutral",
+        }.get(risk_regime, "neutral")
+        neutral_controls = SectorAllocationEnv.neutral_action()
+        if posture == "risk_on":
+            controls = {
+                **neutral_controls,
+                "cash_target": 0.03,
+                "aggressiveness": 1.05,
+                "turnover_cap": 0.40,
+            }
+        elif posture == "risk_off":
+            controls = {
+                **neutral_controls,
+                "cash_target": 0.20 if risk_regime == "stressed" else 0.15,
+                "aggressiveness": 0.90 if risk_regime == "stressed" else 0.95,
+                "turnover_cap": 0.25 if risk_regime == "stressed" else 0.30,
+            }
+        else:
+            controls = neutral_controls
 
         return {
             "sector_tilts": tilts,
-            "cash_target": cash_target,
-            "aggressiveness": agg,
-            "turnover_cap": None,
+            "posture": posture,
+            "cash_target": float(controls["cash_target"]),
+            "aggressiveness": float(controls["aggressiveness"]),
+            "turnover_cap": float(controls["turnover_cap"]),
             "should_rebalance": True,
         }

@@ -388,6 +388,7 @@ class HistoricalPeriodExecutor:
                     if decision.get("turnover_cap") is not None
                     else None
                 ),
+                "posture": str(decision.get("posture", "neutral")),
                 "control_guidance": control_guidance,
                 "reward_components": reward_components,
             },
@@ -485,7 +486,8 @@ class HistoricalPeriodExecutor:
         next_stress = self._stress_signal(next_state)
         stress_signal = float(max(current_stress, next_stress))
         defensive_posture = self._defensive_posture(decision)
-        target_controls = self._target_controls_for_stress(stress_signal, self.engine.cfg)
+        target_posture_label = self._target_posture_for_stress(stress_signal, self.engine.cfg)
+        target_controls = self._target_controls_for_posture(target_posture_label, self.engine.cfg)
         target_posture = self._defensive_posture(target_controls)
         defense_gap_penalty = float(
             rl_cfg.get("reward_lambda_defense_gap", 0.0)
@@ -531,6 +533,8 @@ class HistoricalPeriodExecutor:
             "action_deviation_penalty": float(action_deviation_penalty),
             "stress_signal": float(stress_signal),
             "defensive_posture": float(defensive_posture),
+            "posture": str(decision.get("posture", "neutral")),
+            "target_posture": str(target_posture_label),
             "target_defensive_posture": float(target_posture),
             "target_cash_target": float(target_controls["cash_target"]),
             "target_aggressiveness": float(target_controls["aggressiveness"]),
@@ -642,6 +646,11 @@ class HistoricalPeriodExecutor:
 
     @staticmethod
     def _target_controls_for_stress(stress_signal: float, cfg: dict | None = None) -> dict[str, float]:
+        target_posture = HistoricalPeriodExecutor._target_posture_for_stress(stress_signal, cfg)
+        return HistoricalPeriodExecutor._target_controls_for_posture(target_posture, cfg)
+
+    @staticmethod
+    def _target_posture_for_stress(stress_signal: float, cfg: dict | None = None) -> str:
         rl_cfg = (cfg or {}).get("rl", {}) if isinstance(cfg, dict) else {}
         moderate_threshold = float(rl_cfg.get("stress_target_moderate", 0.18))
         high_threshold = float(rl_cfg.get("stress_target_high", 0.35))
@@ -649,25 +658,43 @@ class HistoricalPeriodExecutor:
             moderate_threshold, high_threshold = high_threshold, moderate_threshold
 
         if stress_signal >= high_threshold:
-            return {
-                "cash_target": float(rl_cfg.get("target_cash_high", 0.30)),
-                "aggressiveness": float(rl_cfg.get("target_aggressiveness_high", 0.85)),
-                "turnover_cap": float(rl_cfg.get("target_turnover_cap_high", 0.20)),
-            }
+            return "risk_off"
         if stress_signal >= moderate_threshold:
-            return {
-                "cash_target": float(rl_cfg.get("target_cash_moderate", 0.15)),
-                "aggressiveness": float(rl_cfg.get("target_aggressiveness_moderate", 0.95)),
-                "turnover_cap": float(rl_cfg.get("target_turnover_cap_moderate", 0.30)),
-            }
-        return {
-            "cash_target": 0.05,
-            "aggressiveness": 1.0,
-            "turnover_cap": 0.40,
+            return "neutral"
+        return "risk_on"
+
+    @staticmethod
+    def _target_controls_for_posture(posture: str, cfg: dict | None = None) -> dict[str, float]:
+        rl_cfg = (cfg or {}).get("rl", {}) if isinstance(cfg, dict) else {}
+        profiles = rl_cfg.get("posture_profiles", {}) if isinstance(rl_cfg, dict) else {}
+        defaults = {
+            "risk_off": {
+                "cash_target": float(rl_cfg.get("target_cash_high", 0.20)),
+                "aggressiveness": float(rl_cfg.get("target_aggressiveness_high", 0.90)),
+                "turnover_cap": float(rl_cfg.get("target_turnover_cap_high", 0.25)),
+            },
+            "neutral": {
+                "cash_target": 0.05,
+                "aggressiveness": 1.0,
+                "turnover_cap": 0.40,
+            },
+            "risk_on": {
+                "cash_target": float(rl_cfg.get("target_cash_risk_on", 0.03)),
+                "aggressiveness": float(rl_cfg.get("target_aggressiveness_risk_on", 1.05)),
+                "turnover_cap": float(rl_cfg.get("target_turnover_cap_risk_on", 0.40)),
+            },
         }
+        profile = defaults.get(posture, defaults["neutral"]).copy()
+        configured = profiles.get(posture, {}) if isinstance(profiles, dict) else {}
+        if isinstance(configured, dict):
+            profile.update({k: float(v) for k, v in configured.items() if k in profile})
+        return profile
 
     @staticmethod
     def _target_control_gap(decision: dict[str, Any], target_controls: dict[str, float]) -> float:
+        decision_posture = str(decision.get("posture", "neutral"))
+        target_posture = HistoricalPeriodExecutor._nearest_posture_label(target_controls)
+        posture_gap = 0.0 if decision_posture == target_posture else 1.0
         cash_gap = abs(
             float(decision.get("cash_target", 0.05) or 0.05)
             - float(target_controls.get("cash_target", 0.05))
@@ -682,7 +709,27 @@ class HistoricalPeriodExecutor:
             if turnover_cap is not None
             else 0.0
         )
-        return float(np.mean([cash_gap, aggressiveness_gap, turnover_gap]))
+        return float(np.mean([posture_gap, cash_gap, aggressiveness_gap, turnover_gap]))
+
+    @staticmethod
+    def _nearest_posture_label(controls: dict[str, float]) -> str:
+        candidates = {
+            "risk_off": {"cash_target": 0.20, "aggressiveness": 0.90, "turnover_cap": 0.25},
+            "neutral": {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.40},
+            "risk_on": {"cash_target": 0.03, "aggressiveness": 1.05, "turnover_cap": 0.40},
+        }
+        best_label = "neutral"
+        best_distance = float("inf")
+        for label, target in candidates.items():
+            distance = (
+                abs(float(controls.get("cash_target", 0.05)) - target["cash_target"]) / 0.25
+                + abs(float(controls.get("aggressiveness", 1.0)) - target["aggressiveness"]) / 0.40
+                + abs(float(controls.get("turnover_cap", 0.40)) - target["turnover_cap"]) / 0.20
+            )
+            if distance < best_distance:
+                best_label = label
+                best_distance = distance
+        return best_label
 
     def _apply_target_control_guidance(
         self,
@@ -694,7 +741,8 @@ class HistoricalPeriodExecutor:
             return decision, {"enabled": False, "blend_weight": 0.0}
 
         stress_signal = self._stress_signal(current_state)
-        target_controls = self._target_controls_for_stress(stress_signal, self.engine.cfg)
+        target_posture = self._target_posture_for_stress(stress_signal, self.engine.cfg)
+        target_controls = self._target_controls_for_posture(target_posture, self.engine.cfg)
         min_blend = float(rl_cfg.get("target_control_blend_min", 0.15))
         max_blend = float(rl_cfg.get("target_control_blend_max", 0.85))
         if min_blend > max_blend:
@@ -720,10 +768,12 @@ class HistoricalPeriodExecutor:
             list(decision.get("sector_tilts", {}).keys()),
             guided,
         )
+        guided["posture"] = self._nearest_posture_label(guided)
         return guided, {
             "enabled": True,
             "blend_weight": float(blend_weight),
             "stress_signal": float(stress_signal),
+            "target_posture": str(target_posture),
             "target_cash_target": float(target_controls["cash_target"]),
             "target_aggressiveness": float(target_controls["aggressiveness"]),
             "target_turnover_cap": float(target_controls["turnover_cap"]),
@@ -836,6 +886,10 @@ class HistoricalPeriodExecutor:
             for sector, tilt in rl_decision.get("sector_tilts", {}).items()
         }
         decision["sector_tilts"].update(sector_tilts)
+        posture = str(rl_decision.get("posture", decision.get("posture", "neutral")))
+        if posture not in {"risk_off", "neutral", "risk_on"}:
+            posture = "neutral"
+        decision["posture"] = posture
         if "cash_target" in rl_decision:
             decision["cash_target"] = float(np.clip(rl_decision["cash_target"], 0.0, 0.30))
         if "aggressiveness" in rl_decision:
@@ -849,6 +903,13 @@ class HistoricalPeriodExecutor:
                 self.engine.cfg.get("optimizer", {}).get("max_turnover_per_rebalance", 0.40)
             )
             decision["turnover_cap"] = float(np.clip(rl_decision["turnover_cap"], 0.05, max_turnover))
+        posture_controls = self._target_controls_for_posture(decision["posture"], self.engine.cfg)
+        if "cash_target" not in rl_decision:
+            decision["cash_target"] = float(posture_controls["cash_target"])
+        if "aggressiveness" not in rl_decision:
+            decision["aggressiveness"] = float(posture_controls["aggressiveness"])
+        if "turnover_cap" not in rl_decision or rl_decision.get("turnover_cap") is None:
+            decision["turnover_cap"] = float(posture_controls["turnover_cap"])
         return decision
 
     def _with_sector_weights(

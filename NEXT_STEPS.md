@@ -163,8 +163,6 @@ Status:
 
 #### Stage 2 — Add a posture layer
 
-Only after Stage 1 works:
-
 - use discrete posture selected by RL:
   - `risk_on`
   - `neutral`
@@ -175,6 +173,32 @@ Only after Stage 1 works:
   - turnover cap
 
 This is safer than giving RL unconstrained continuous authority too early.
+
+Status:
+- implementation slice landed:
+  - posture is now the primary RL control primitive
+  - posture is persisted in rebalance logs and RL comparison traces
+  - each posture maps to bounded cash / aggressiveness / turnover settings
+- first measured holdout after the posture rollout:
+  - candidate RL CAGR `38.08%` vs neutral `32.39%`
+  - candidate RL Sharpe `1.745` vs neutral `1.465`
+  - policy behavior:
+    - `unique_postures = ['neutral']`
+    - `posture_usage_rate = 0.0`
+    - `posture_change_rate = 0.0`
+    - target posture still varied across `risk_on / neutral / risk_off`
+- second measured holdout after tightening posture activation:
+  - candidate RL CAGR `36.77%` vs neutral `32.39%`
+  - candidate RL Sharpe `1.675` vs neutral `1.465`
+  - policy behavior:
+    - `unique_postures = ['risk_on']`
+    - `posture_usage_rate = 1.0`
+    - `posture_change_rate = 0.0`
+    - target posture still varied across `risk_on / neutral / risk_off`
+- decision:
+  - keep the posture-controller implementation
+  - do not promote the resulting policy as a valid regime controller yet
+  - next Stage 2 work must focus on conditional posture switching, not more generic action activation
 
 #### Stage 3 — Add breadth control
 

@@ -365,3 +365,94 @@ Copy this block for each future change:
     - turnover cap remains effectively fixed at `30%`
     - the stock universe and sector set remain unchanged, so control still acts on a diluted book
   - the next likely step is no longer generic reward tuning; it is a constrained posture controller or stronger turnover-cap guidance
+
+## Iteration 5 — Stage 2 Discrete Posture Controller
+
+- Date:
+  - `2026-04-22`
+- Scope:
+  - replace raw continuous risk-budget control with a discrete posture controller:
+    - `risk_on`
+    - `neutral`
+    - `risk_off`
+  - keep sector tilts unchanged
+  - wire posture through action encoding, executor normalization, reward targeting, rebalance logs, and RL comparison traces
+- Control levers changed:
+  - posture becomes the primary RL control primitive
+  - cash / aggressiveness / turnover are now posture-mapped execution settings
+- Config flags:
+  - `enable_posture_control`
+  - `posture_neutral_band`
+  - `posture_profiles`
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not re-run in this iteration
+- Holdout result vs `neutral_full_stack`:
+  - candidate RL:
+    - CAGR `38.08%`
+    - Sharpe `1.745`
+    - MaxDD `-14.70%`
+    - avg turnover `24.62%`
+  - neutral full-stack:
+    - CAGR `32.39%`
+    - Sharpe `1.465`
+    - MaxDD `-15.00%`
+    - avg turnover `25.54%`
+- Stress-window behavior:
+  - holdout-only review in this iteration
+  - posture diagnostics:
+    - `unique_postures = ['neutral']`
+    - `posture_usage_rate = 0.0`
+    - `posture_change_rate = 0.0`
+    - target posture still varied across `risk_on / neutral / risk_off`
+- Decision:
+  - keep implementation
+  - reject promotion of the resulting policy as a posture-aware controller
+- Learning:
+  - the discrete posture contract is now wired end to end
+  - economics improved materially on the 2016 holdout
+  - but the policy achieved that while staying `neutral` on every rebalance, so the new posture control was not actually used
+
+## Iteration 6 — Stage 2 Posture Activation Tightening
+
+- Date:
+  - `2026-04-22`
+- Scope:
+  - make posture easier to leave neutral
+  - increase reward pressure on target-posture alignment
+- Control levers changed:
+  - tighter posture neutral band
+  - stronger target-posture penalty
+- Config flags:
+  - `posture_neutral_band`
+  - `reward_lambda_target_posture`
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not re-run in this iteration
+- Holdout result vs `neutral_full_stack`:
+  - candidate RL:
+    - CAGR `36.77%`
+    - Sharpe `1.675`
+    - MaxDD `-15.03%`
+    - avg turnover `24.83%`
+  - neutral full-stack:
+    - CAGR `32.39%`
+    - Sharpe `1.465`
+    - MaxDD `-15.00%`
+    - avg turnover `25.54%`
+- Stress-window behavior:
+  - holdout-only review in this iteration
+  - posture diagnostics:
+    - `unique_postures = ['risk_on']`
+    - `posture_usage_rate = 1.0`
+    - `posture_change_rate = 0.0`
+    - target posture still varied across `risk_on / neutral / risk_off`
+- Decision:
+  - keep the activation changes
+  - reject promotion of the resulting policy as a state-conditional regime controller
+- Learning:
+  - posture activation is no longer stuck at neutral
+  - the failure mode simply moved from “always neutral” to “always risk-on”
+  - the next Stage 2 improvement should target conditional posture switching rather than more generic action activation

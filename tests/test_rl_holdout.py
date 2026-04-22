@@ -41,8 +41,10 @@ def test_evaluate_holdout_returns_trained_vs_neutral_comparison(monkeypatch):
                 sector: (0.3 if idx % 2 == 0 else 1.4)
                 for idx, sector in enumerate(SECTORS)
             },
+            "posture": "risk_off",
             "cash_target": 0.20,
-            "aggressiveness": 0.6,
+            "aggressiveness": 0.90,
+            "turnover_cap": 0.25,
             "should_rebalance": True,
         }
 
@@ -71,3 +73,5 @@ def test_evaluate_holdout_returns_trained_vs_neutral_comparison(monkeypatch):
     )
     assert result["trained_policy_diagnostics"]["cash_usage_rate"] > 0.0
     assert result["trained_policy_diagnostics"]["aggressiveness_usage_rate"] > 0.0
+    assert result["trained_policy_diagnostics"]["posture_usage_rate"] > 0.0
+    assert "risk_off" in result["trained_policy_diagnostics"]["unique_postures"]

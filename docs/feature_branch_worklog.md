@@ -170,6 +170,55 @@ Each task should record:
   - this is the first iteration where posture varies with stress instead of staying flat
   - but returns degraded further, so the remaining problem is economic quality of control decisions, not missing control movement
 
+### Task: Stage 2 discrete posture controller
+- Scope:
+  - replace continuous risk-budget control with a posture controller:
+    - `risk_on`
+    - `neutral`
+    - `risk_off`
+  - map posture to bounded cash / aggressiveness / turnover settings
+  - persist posture in:
+    - rebalance logs
+    - holdout traces
+    - full neutral comparison diagnostics
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py tests/test_reporting_artifacts.py -q` -> `18 passed`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q` -> `123 passed, 1 skipped`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `38.08% CAGR`, `1.745 Sharpe`, `-14.70% MaxDD`, `24.62% avg turnover`
+    - neutral full-stack -> `32.39% CAGR`, `1.465 Sharpe`, `-15.00% MaxDD`, `25.54% avg turnover`
+    - posture diagnostics:
+      - `unique_postures = ['neutral']`
+      - `posture_usage_rate = 0.0`
+      - `posture_change_rate = 0.0`
+- Decision:
+  - keep the implementation
+  - do not promote the resulting policy as a working posture controller
+- Learning:
+  - the discrete posture execution path is now correct and observable
+  - better holdout economics alone are not enough here, because the policy never left neutral posture
+
+### Task: Stage 2 posture activation tightening
+- Scope:
+  - reduce neutral-band stickiness for posture decoding
+  - increase reward pressure on target-posture mismatch
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py -q` -> `15 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `36.77% CAGR`, `1.675 Sharpe`, `-15.03% MaxDD`, `24.83% avg turnover`
+    - neutral full-stack -> `32.39% CAGR`, `1.465 Sharpe`, `-15.00% MaxDD`, `25.54% avg turnover`
+    - posture diagnostics:
+      - `unique_postures = ['risk_on']`
+      - `posture_usage_rate = 1.0`
+      - `posture_change_rate = 0.0`
+      - target posture still varied across `risk_on / neutral / risk_off`
+- Decision:
+  - keep the activation adjustments
+  - keep Stage 2 open
+- Learning:
+  - posture now activates, but still does not switch conditionally
+  - the immediate next problem is regime discrimination / posture switching quality, not missing action activation
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block

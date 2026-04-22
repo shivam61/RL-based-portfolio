@@ -133,6 +133,7 @@ class ReportGenerator:
         base_columns = [
             "date",
             "mode",
+            "posture",
             "pre_nav",
             "post_nav",
             "period_return_pct",
@@ -180,6 +181,7 @@ class ReportGenerator:
             rows.append({
                 "date":              str(r.rebalance_date),
                 "mode":              "RL" if r.rl_action.get("sector_tilts") else "Rule",
+                "posture":           str(getattr(r, "posture", "neutral")),
                 "pre_nav":           round(r.pre_nav, 2),
                 "post_nav":          round(r.post_nav, 2),
                 "period_return_pct": round(period_ret * 100, 3),

@@ -28,11 +28,13 @@ def _cfg() -> dict:
     return {
         "rl": {
             "training_backend": "disabled",
-            "enable_cash_control": True,
-            "cash_buckets": [0.0, 0.05, 0.15, 0.3],
-            "enable_turnover_control": True,
-            "turnover_buckets": [0.2, 0.3, 0.4],
-            "bucket_activation_threshold": 0.10,
+            "enable_posture_control": True,
+            "posture_neutral_band": 0.25,
+            "posture_profiles": {
+                "risk_off": {"cash_target": 0.20, "aggressiveness": 0.90, "turnover_cap": 0.25},
+                "neutral": {"cash_target": 0.05, "aggressiveness": 1.00, "turnover_cap": 0.40},
+                "risk_on": {"cash_target": 0.03, "aggressiveness": 1.05, "turnover_cap": 0.40},
+            },
             "aggressiveness_min": 0.60,
             "aggressiveness_max": 1.40,
             "reward_lambda_dd": 2.0,
@@ -84,8 +86,10 @@ def _transition_step(portfolio_return: float = 0.02) -> dict:
         state=state,
         action={
             "sector_tilts": {sector: 1.0 for sector in SECTORS},
+            "posture": "neutral",
             "cash_target": 0.05,
             "aggressiveness": 1.0,
+            "turnover_cap": 0.40,
             "should_rebalance": True,
         },
         reward=portfolio_return,
@@ -122,25 +126,28 @@ def test_sector_allocation_env_replays_logged_transition_and_reports_action_mism
     assert neutral_info["action_mismatch_l1"] == pytest.approx(0.0)
 
 
-def test_decode_action_maps_cash_and_turnover_to_buckets():
+def test_decode_action_maps_posture_slot_to_risk_off():
     cfg = _cfg()
-    action = np.array([0.0] * len(SECTORS) + [-0.20, 1.0, -1.0], dtype=np.float32)
+    action = np.array([0.0] * len(SECTORS) + [-1.0], dtype=np.float32)
 
     decoded = SectorAllocationEnv.decode_action(action, cfg)
 
-    assert decoded["cash_target"] == pytest.approx(0.30)
-    assert decoded["turnover_cap"] == pytest.approx(0.20)
-    assert decoded["aggressiveness"] == pytest.approx(0.80)
+    assert decoded["posture"] == "risk_off"
+    assert decoded["cash_target"] == pytest.approx(0.20)
+    assert decoded["turnover_cap"] == pytest.approx(0.25)
+    assert decoded["aggressiveness"] == pytest.approx(0.90)
 
 
-def test_decode_action_exits_neutral_bucket_after_activation_threshold():
+def test_decode_action_maps_posture_slot_to_risk_on():
     cfg = _cfg()
-    action = np.array([0.0] * len(SECTORS) + [0.0, 0.12, -0.12], dtype=np.float32)
+    action = np.array([0.0] * len(SECTORS) + [1.0], dtype=np.float32)
 
     decoded = SectorAllocationEnv.decode_action(action, cfg)
 
-    assert decoded["cash_target"] == pytest.approx(0.15)
-    assert decoded["turnover_cap"] == pytest.approx(0.30)
+    assert decoded["posture"] == "risk_on"
+    assert decoded["cash_target"] == pytest.approx(0.03)
+    assert decoded["turnover_cap"] == pytest.approx(0.40)
+    assert decoded["aggressiveness"] == pytest.approx(1.05)
 
 
 def test_encode_observation_emits_finite_vector_with_control_features():
@@ -193,26 +200,15 @@ def test_historical_executor_defensive_posture_reflects_cash_risk_and_turnover()
 
 def test_historical_executor_target_controls_scale_with_stress():
     cfg = _cfg()
-    cfg["rl"].update(
-        {
-            "stress_target_moderate": 0.18,
-            "stress_target_high": 0.35,
-            "target_cash_moderate": 0.15,
-            "target_cash_high": 0.30,
-            "target_aggressiveness_moderate": 0.95,
-            "target_aggressiveness_high": 0.85,
-            "target_turnover_cap_moderate": 0.30,
-            "target_turnover_cap_high": 0.20,
-        }
-    )
+    cfg["rl"].update({"stress_target_moderate": 0.18, "stress_target_high": 0.35})
 
     low = HistoricalPeriodExecutor._target_controls_for_stress(0.10, cfg)
     moderate = HistoricalPeriodExecutor._target_controls_for_stress(0.20, cfg)
     high = HistoricalPeriodExecutor._target_controls_for_stress(0.40, cfg)
 
-    assert low == {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.40}
-    assert moderate == {"cash_target": 0.15, "aggressiveness": 0.95, "turnover_cap": 0.30}
-    assert high == {"cash_target": 0.30, "aggressiveness": 0.85, "turnover_cap": 0.20}
+    assert low == {"cash_target": 0.03, "aggressiveness": 1.05, "turnover_cap": 0.40}
+    assert moderate == {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.40}
+    assert high == {"cash_target": 0.20, "aggressiveness": 0.90, "turnover_cap": 0.25}
 
 
 def test_historical_executor_guidance_blends_controls_toward_target():
@@ -228,12 +224,11 @@ def test_historical_executor_guidance_blends_controls_toward_target():
                     "target_control_blend_max": 0.85,
                     "stress_target_moderate": 0.18,
                     "stress_target_high": 0.35,
-                    "target_cash_moderate": 0.15,
-                    "target_cash_high": 0.30,
-                    "target_aggressiveness_moderate": 0.95,
-                    "target_aggressiveness_high": 0.85,
-                    "target_turnover_cap_moderate": 0.30,
-                    "target_turnover_cap_high": 0.20,
+                    "posture_profiles": {
+                        "risk_off": {"cash_target": 0.20, "aggressiveness": 0.90, "turnover_cap": 0.25},
+                        "neutral": {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.40},
+                        "risk_on": {"cash_target": 0.03, "aggressiveness": 1.05, "turnover_cap": 0.40},
+                    },
                     "aggressiveness_min": 0.60,
                     "aggressiveness_max": 1.40,
                 },
@@ -245,6 +240,7 @@ def test_historical_executor_guidance_blends_controls_toward_target():
 
     decision = {
         "sector_tilts": {sector: 1.0 for sector in SECTORS},
+        "posture": "neutral",
         "cash_target": 0.15,
         "aggressiveness": 1.0,
         "turnover_cap": 0.30,
@@ -269,9 +265,11 @@ def test_historical_executor_guidance_blends_controls_toward_target():
 
     assert guidance["enabled"] is True
     assert guidance["blend_weight"] > 0.15
+    assert guidance["target_posture"] == "risk_off"
     assert guided["cash_target"] > decision["cash_target"]
     assert guided["aggressiveness"] < decision["aggressiveness"]
     assert guided["turnover_cap"] < decision["turnover_cap"]
+    assert guided["posture"] == "risk_off"
 
 
 def test_rl_agent_trains_fresh_policy_on_causal_env(monkeypatch):

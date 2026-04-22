@@ -55,9 +55,10 @@ def default_decision(sectors: list[str]) -> dict[str, object]:
     """Neutral allocation decision used when RL is disabled or unavailable."""
     return {
         "sector_tilts": {sector: 1.0 for sector in sectors},
+        "posture": "neutral",
         "cash_target": 0.05,
         "aggressiveness": 1.0,
-        "turnover_cap": None,
+        "turnover_cap": 0.40,
         "should_rebalance": True,
     }
 

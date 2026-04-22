@@ -426,6 +426,7 @@ class WalkForwardEngine:
                 sector_tilts=rl_decision["sector_tilts"],
                 cash_target=cash_target,
                 aggressiveness=rl_decision.get("aggressiveness", 1.0),
+                posture=str(rl_decision.get("posture", "neutral")),
                 selected_sector_count=len(selected_sectors),
                 selected_stock_count=len(selected_stock_rows),
                 turnover_cap=rl_decision.get("turnover_cap"),
@@ -653,6 +654,7 @@ class WalkForwardEngine:
                         if rl_decision.get("turnover_cap") is not None
                         else None
                     ),
+                    "posture": str(rl_decision.get("posture", "neutral")),
                     "selected_sectors": [str(sector) for sector in selected_sectors],
                 }
                 outcome = {
@@ -683,6 +685,7 @@ class WalkForwardEngine:
                             if rl_decision.get("turnover_cap") is not None
                             else None
                         ),
+                        "posture": str(rl_decision.get("posture", "neutral")),
                     },
                     "reward": float(period_return),
                     "next_state": next_state,
@@ -1147,9 +1150,10 @@ class WalkForwardEngine:
     def _default_decision(sectors: list[str]) -> dict:
         return {
             "sector_tilts": {sector: 1.0 for sector in sectors},
+            "posture": "neutral",
             "cash_target": 0.05,
             "aggressiveness": 1.0,
-            "turnover_cap": None,
+            "turnover_cap": 0.40,
         }
 
     def _select_sectors(

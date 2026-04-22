@@ -41,14 +41,13 @@ N_SECTORS = len(SECTORS)
 
 # Action dimensions
 # [0:N_SECTORS]        zero-sum sector tilt deltas  [-0.35, 0.35]
-# [N_SECTORS]          aggressiveness delta         configurable around 1.0
-# [N_SECTORS + 1]      cash control slot            optional bucketed control
-# [N_SECTORS + 2]      turnover control slot        optional bucketed control
-ACTION_DIM = N_SECTORS + 3
+# [N_SECTORS]          posture slot                 risk_off / neutral / risk_on
+ACTION_DIM = N_SECTORS + 1
 SECTOR_DELTA_MAX = 0.35
 CASH_TARGET_NEUTRAL = 0.05
 CASH_TARGET_MIN = 0.0
 AGGRESSIVENESS_NEUTRAL = 1.0
+POSTURE_LABELS = ["risk_off", "neutral", "risk_on"]
 
 # State dimensions
 MACRO_DIM = 12          # macro features
@@ -98,15 +97,12 @@ class SectorAllocationEnv(_GymBase):
             self._setup_gym_spaces()
 
     def _setup_gym_spaces(self) -> None:
-        agg_min, agg_max = _aggressiveness_bounds(self.cfg)
         low_a = np.array(
-            [-SECTOR_DELTA_MAX] * N_SECTORS
-            + [agg_min - AGGRESSIVENESS_NEUTRAL, -1.0, -1.0],
+            [-SECTOR_DELTA_MAX] * N_SECTORS + [-1.0],
             dtype=np.float32,
         )
         high_a = np.array(
-            [SECTOR_DELTA_MAX] * N_SECTORS
-            + [agg_max - AGGRESSIVENESS_NEUTRAL, 1.0, 1.0],
+            [SECTOR_DELTA_MAX] * N_SECTORS + [1.0],
             dtype=np.float32,
         )
         self.action_space = spaces.Box(low=low_a, high=high_a, dtype=np.float32)
@@ -242,32 +238,8 @@ class SectorAllocationEnv(_GymBase):
                 -SECTOR_DELTA_MAX,
                 SECTOR_DELTA_MAX,
             )
-        agg_min, agg_max = _aggressiveness_bounds(None)
-        aggressiveness_slot = float(
-            np.clip(
-                float(action.get("aggressiveness", AGGRESSIVENESS_NEUTRAL))
-                - AGGRESSIVENESS_NEUTRAL,
-                agg_min - AGGRESSIVENESS_NEUTRAL,
-                agg_max - AGGRESSIVENESS_NEUTRAL,
-            )
-        )
-        cash_slot = _encode_bucket_slot(
-            value=float(action.get("cash_target", CASH_TARGET_NEUTRAL)),
-            buckets=_cash_buckets(None),
-            neutral_value=CASH_TARGET_NEUTRAL,
-        )
-        turnover_value = action.get("turnover_cap")
-        if turnover_value is None:
-            turnover_value = _neutral_turnover_cap(None)
-        turnover_slot = _encode_bucket_slot(
-            value=float(turnover_value),
-            buckets=_turnover_buckets(None),
-            neutral_value=float(_neutral_turnover_cap(None)),
-        )
-        return np.array(
-            list(raw_sector) + [aggressiveness_slot, cash_slot, turnover_slot],
-            dtype=np.float32,
-        )
+        posture_slot = _encode_posture_slot(action)
+        return np.array(list(raw_sector) + [posture_slot], dtype=np.float32)
 
     @staticmethod
     def decode_action(action: np.ndarray, cfg: dict | None = None) -> dict:
@@ -284,40 +256,15 @@ class SectorAllocationEnv(_GymBase):
             SECTORS[i]: float(np.clip(1.0 + sector_delta[i], 1.0 - SECTOR_DELTA_MAX, 1.0 + SECTOR_DELTA_MAX))
             for i in range(N_SECTORS)
         }
-        agg_min, agg_max = _aggressiveness_bounds(cfg)
-        aggressiveness = float(
-            np.clip(
-                AGGRESSIVENESS_NEUTRAL + raw_action[N_SECTORS],
-                agg_min,
-                agg_max,
-            )
-        )
-        cash_target = (
-            _decode_bucket_slot(
-                raw_action[N_SECTORS + 1],
-                _cash_buckets(cfg),
-                neutral_value=CASH_TARGET_NEUTRAL,
-                cfg=cfg,
-            )
-            if _cash_control_enabled(cfg)
-            else CASH_TARGET_NEUTRAL
-        )
-        turnover_cap = (
-            _decode_bucket_slot(
-                raw_action[N_SECTORS + 2],
-                _turnover_buckets(cfg),
-                neutral_value=float(_neutral_turnover_cap(cfg) or 0.40),
-                cfg=cfg,
-            )
-            if _turnover_control_enabled(cfg)
-            else _neutral_turnover_cap(cfg)
-        )
+        posture = _decode_posture_slot(raw_action[N_SECTORS], cfg)
+        controls = _controls_for_posture(posture, cfg)
 
         return {
             "sector_tilts": sector_tilts,
-            "cash_target": cash_target,
-            "aggressiveness": aggressiveness,
-            "turnover_cap": turnover_cap,
+            "posture": posture,
+            "cash_target": float(controls["cash_target"]),
+            "aggressiveness": float(controls["aggressiveness"]),
+            "turnover_cap": float(controls["turnover_cap"]),
             "should_rebalance": True,
         }
 
@@ -326,9 +273,10 @@ class SectorAllocationEnv(_GymBase):
         """Default no-tilt action for non-RL baseline."""
         return {
             "sector_tilts": {s: 1.0 for s in SECTORS},
-            "cash_target": CASH_TARGET_NEUTRAL,
-            "aggressiveness": AGGRESSIVENESS_NEUTRAL,
-            "turnover_cap": _neutral_turnover_cap(cfg),
+            "posture": "neutral",
+            "cash_target": float(_controls_for_posture("neutral", cfg)["cash_target"]),
+            "aggressiveness": float(_controls_for_posture("neutral", cfg)["aggressiveness"]),
+            "turnover_cap": float(_controls_for_posture("neutral", cfg)["turnover_cap"]),
             "should_rebalance": True,
         }
 
@@ -370,15 +318,12 @@ class HistoricalSectorAllocationEnv(_GymBase):
         self._warm_start_cache: dict[int, tuple[Any, list[tuple[Any, float]]]] = {}
 
         if HAS_GYM:
-            agg_min, agg_max = _aggressiveness_bounds(self.cfg)
             low_a = np.array(
-                [-SECTOR_DELTA_MAX] * N_SECTORS
-                + [agg_min - AGGRESSIVENESS_NEUTRAL, -1.0, -1.0],
+                [-SECTOR_DELTA_MAX] * N_SECTORS + [-1.0],
                 dtype=np.float32,
             )
             high_a = np.array(
-                [SECTOR_DELTA_MAX] * N_SECTORS
-                + [agg_max - AGGRESSIVENESS_NEUTRAL, 1.0, 1.0],
+                [SECTOR_DELTA_MAX] * N_SECTORS + [1.0],
                 dtype=np.float32,
             )
             self.action_space = spaces.Box(low=low_a, high=high_a, dtype=np.float32)
@@ -518,6 +463,10 @@ def _rl_cfg(cfg: dict | None) -> dict:
     return (cfg or {}).get("rl", {}) if isinstance(cfg, dict) else {}
 
 
+def _posture_control_enabled(cfg: dict | None) -> bool:
+    return bool(_rl_cfg(cfg).get("enable_posture_control", False))
+
+
 def _cash_control_enabled(cfg: dict | None) -> bool:
     return bool(_rl_cfg(cfg).get("enable_cash_control", False))
 
@@ -545,6 +494,83 @@ def _aggressiveness_bounds(cfg: dict | None) -> tuple[float, float]:
     if agg_min > agg_max:
         agg_min, agg_max = agg_max, agg_min
     return agg_min, agg_max
+
+
+def _posture_neutral_band(cfg: dict | None) -> float:
+    band = float(_rl_cfg(cfg).get("posture_neutral_band", 0.25))
+    return float(np.clip(band, 0.0, 0.95))
+
+
+def _posture_profiles(cfg: dict | None) -> dict[str, dict[str, float]]:
+    rl_cfg = _rl_cfg(cfg)
+    configured = rl_cfg.get("posture_profiles", {}) if isinstance(rl_cfg, dict) else {}
+    defaults = {
+        "risk_off": {"cash_target": 0.20, "aggressiveness": 0.90, "turnover_cap": 0.25},
+        "neutral": {"cash_target": 0.05, "aggressiveness": 1.00, "turnover_cap": 0.40},
+        "risk_on": {"cash_target": 0.03, "aggressiveness": 1.05, "turnover_cap": 0.40},
+    }
+    profiles: dict[str, dict[str, float]] = {}
+    for posture in POSTURE_LABELS:
+        source = configured.get(posture, {}) if isinstance(configured, dict) else {}
+        profile = dict(defaults[posture])
+        if isinstance(source, dict):
+            profile.update({k: float(v) for k, v in source.items()})
+        agg_min, agg_max = _aggressiveness_bounds(cfg)
+        profiles[posture] = {
+            "cash_target": float(np.clip(profile["cash_target"], 0.0, 0.30)),
+            "aggressiveness": float(np.clip(profile["aggressiveness"], agg_min, agg_max)),
+            "turnover_cap": float(max(0.05, profile["turnover_cap"])),
+        }
+    return profiles
+
+
+def _controls_for_posture(posture: str, cfg: dict | None) -> dict[str, float]:
+    profiles = _posture_profiles(cfg)
+    return dict(profiles.get(posture, profiles["neutral"]))
+
+
+def _encode_posture_slot(action: dict[str, Any]) -> float:
+    posture = str(action.get("posture") or _infer_posture_label(action, None))
+    if posture == "risk_off":
+        return -1.0
+    if posture == "risk_on":
+        return 1.0
+    return 0.0
+
+
+def _decode_posture_slot(raw_value: float, cfg: dict | None) -> str:
+    if not _posture_control_enabled(cfg):
+        return "neutral"
+    band = _posture_neutral_band(cfg)
+    normalized = float(np.clip(raw_value, -1.0, 1.0))
+    if normalized <= -band:
+        return "risk_off"
+    if normalized >= band:
+        return "risk_on"
+    return "neutral"
+
+
+def _infer_posture_label(action: dict[str, Any], cfg: dict | None) -> str:
+    posture = action.get("posture")
+    if posture in POSTURE_LABELS:
+        return str(posture)
+    profiles = _posture_profiles(cfg)
+    cash_target = float(action.get("cash_target", CASH_TARGET_NEUTRAL) or CASH_TARGET_NEUTRAL)
+    aggressiveness = float(action.get("aggressiveness", AGGRESSIVENESS_NEUTRAL) or AGGRESSIVENESS_NEUTRAL)
+    turnover_cap = action.get("turnover_cap")
+    turnover_value = float(turnover_cap) if turnover_cap is not None else profiles["neutral"]["turnover_cap"]
+    best_posture = "neutral"
+    best_distance = float("inf")
+    for label, profile in profiles.items():
+        distance = (
+            abs(cash_target - profile["cash_target"]) / 0.25
+            + abs(aggressiveness - profile["aggressiveness"]) / 0.40
+            + abs(turnover_value - profile["turnover_cap"]) / 0.20
+        )
+        if distance < best_distance:
+            best_posture = label
+            best_distance = distance
+    return best_posture
 
 
 def _bucket_activation_threshold(cfg: dict | None) -> float:

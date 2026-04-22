@@ -169,6 +169,7 @@ def _run_holdout_policy(
                     if decision.get("turnover_cap") is not None
                     else None
                 ),
+                "posture": str(decision.get("posture", "neutral")),
                 "aggressiveness": float(decision.get("aggressiveness", 1.0)),
                 "should_rebalance": bool(decision.get("should_rebalance", True)),
                 "selected_sectors": list(result.selected_sectors),
@@ -235,6 +236,7 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
     neutral_aggressiveness = float(
         SectorAllocationEnv.neutral_action(cfg).get("aggressiveness", 1.0)
     )
+    neutral_posture = str(SectorAllocationEnv.neutral_action(cfg).get("posture", "neutral"))
 
     def usage_rate(key: str, neutral_value: float | None) -> float:
         values = [entry.get(key) for entry in trace]
@@ -263,6 +265,18 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
         )
         return values
 
+    postures = [str(entry.get("posture", "neutral")) for entry in trace]
+    posture_change_rate = 0.0
+    if len(postures) > 1:
+        posture_change_rate = float(
+            np.mean(
+                [
+                    1.0 if postures[idx] != postures[idx - 1] else 0.0
+                    for idx in range(1, len(postures))
+                ]
+            )
+        )
+
     return {
         "mean_abs_tilt_deviation": float(np.mean(np.abs(arr - 1.0))),
         "mean_min_tilt": float(np.mean(np.min(arr, axis=1))),
@@ -284,8 +298,12 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
         "cash_usage_rate": usage_rate("cash_target", neutral_cash),
         "turnover_cap_usage_rate": usage_rate("turnover_cap", neutral_turnover_cap),
         "aggressiveness_usage_rate": usage_rate("aggressiveness", neutral_aggressiveness),
+        "posture_usage_rate": float(
+            np.mean([1.0 if posture != neutral_posture else 0.0 for posture in postures])
+        ),
         "unique_cash_targets": unique_values("cash_target"),
         "unique_turnover_caps": unique_values("turnover_cap"),
+        "unique_postures": sorted(set(postures)),
         "rebalance_rate": float(
             np.mean([1.0 if entry["should_rebalance"] else 0.0 for entry in trace])
         ),
@@ -296,6 +314,7 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             np.mean([entry["selected_stock_count"] for entry in trace])
         ),
         "policy_change_rate": change_rate,
+        "posture_change_rate": posture_change_rate,
         "unique_selected_sector_sets": int(
             len({tuple(sorted(entry["selected_sectors"])) for entry in trace})
         ),

@@ -139,8 +139,9 @@ def evaluate_full_neutral_policy_comparison(
         },
         "neutral_policy_definition": {
             "sector_tilts": "all 1.0",
-            "cash_target": 0.05,
-            "aggressiveness": 1.0,
+            "posture": "neutral",
+            "cash_target": float(SectorAllocationEnv.neutral_action(cfg_eval).get("cash_target", 0.05)),
+            "aggressiveness": float(SectorAllocationEnv.neutral_action(cfg_eval).get("aggressiveness", 1.0)),
             "should_rebalance": True,
             "execution_mode": "full_rl_stack_with_fixed_neutral_action",
         },
@@ -209,6 +210,7 @@ def _run_full_window_policy(
                     if decision.get("turnover_cap") is not None
                     else None
                 ),
+                "posture": str(decision.get("posture", "neutral")),
                 "aggressiveness": float(decision.get("aggressiveness", 1.0)),
                 "should_rebalance": bool(decision.get("should_rebalance", True)),
                 "selected_sectors": list(result.selected_sectors),
@@ -291,6 +293,7 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
     neutral_cash = float(neutral.get("cash_target", 0.05))
     neutral_turnover_cap = neutral.get("turnover_cap")
     neutral_aggressiveness = float(neutral.get("aggressiveness", 1.0))
+    neutral_posture = str(neutral.get("posture", "neutral"))
 
     def usage_rate(key: str, neutral_value: float | None) -> float:
         values = [entry.get(key) for entry in trace]
@@ -319,6 +322,14 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             }
         )
 
+    postures = [str(entry.get("posture", "neutral")) for entry in trace]
+    posture_change_rate = 0.0
+    if len(postures) > 1:
+        posture_change_rate = float(
+            sum(1.0 if postures[idx] != postures[idx - 1] else 0.0 for idx in range(1, len(postures)))
+            / (len(postures) - 1)
+        )
+
     return {
         "mean_cash_target": mean("cash_target"),
         "mean_turnover_cap": mean("turnover_cap"),
@@ -327,8 +338,12 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
         "cash_usage_rate": usage_rate("cash_target", neutral_cash),
         "turnover_cap_usage_rate": usage_rate("turnover_cap", neutral_turnover_cap),
         "aggressiveness_usage_rate": usage_rate("aggressiveness", neutral_aggressiveness),
+        "posture_usage_rate": float(
+            sum(1.0 if posture != neutral_posture else 0.0 for posture in postures) / len(postures)
+        ),
         "unique_cash_targets": unique_values("cash_target"),
         "unique_turnover_caps": unique_values("turnover_cap"),
+        "unique_postures": sorted(set(postures)),
         "mean_selected_sector_count": float(
             sum(len(entry["selected_sectors"]) for entry in trace) / len(trace)
         ),
@@ -344,6 +359,7 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             "defensive_posture",
             trace,
         ),
+        "posture_change_rate": posture_change_rate,
         "mean_reward": mean("reward"),
         "rebalance_rate": float(
             sum(1.0 if entry["should_rebalance"] else 0.0 for entry in trace) / len(trace)

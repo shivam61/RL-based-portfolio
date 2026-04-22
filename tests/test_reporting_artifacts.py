@@ -187,6 +187,7 @@ def test_report_generator_writes_minimal_manifest_without_model_dir(tmp_path):
         "backtest_start_date",
         "backtest_end_date",
         "report_generated_at_utc",
+        "posture",
         "selected_sector_count",
         "selected_stock_count",
         "turnover_cap_pct",
