@@ -141,15 +141,24 @@ Status:
   - clipped/default control features
   - finite RL observation vectors
   - report schema carrying `turnover_cap_pct`
-- first 2016 holdout smoke on the new control surface did not clear the promotion gate:
-  - candidate RL CAGR `28.01%` vs neutral `32.39%`
-  - candidate RL Sharpe `1.236` vs neutral `1.465`
-  - candidate RL MaxDD `-15.15%` vs neutral `-15.00%`
-  - candidate RL avg turnover `26.18%` vs neutral `25.54%`
+- action-activation fix is now in place:
+  - non-neutral cash usage rate
+  - non-neutral turnover-cap usage rate
+  - non-neutral aggressiveness usage rate
+  are tracked directly in holdout/full diagnostics
+- latest 2016 holdout still does not clear the promotion gate:
+  - candidate RL CAGR `24.07%` vs neutral `32.39%`
+  - candidate RL Sharpe `1.094` vs neutral `1.465`
+  - candidate RL MaxDD `-14.58%` vs neutral `-15.00%`
+  - candidate RL avg turnover `23.25%` vs neutral `25.54%`
+  - policy behavior:
+    - cash fixed at `15%` for all holdout rebalances
+    - turnover cap fixed at `30%` for all holdout rebalances
+    - aggressiveness fixed around `0.96–1.01`
 - decision:
   - keep the implementation and validation work
   - do not promote this policy as the new incumbent
-  - keep Stage 1 open until economics and stress behavior improve
+  - keep Stage 1 open until controls become state-conditional rather than constant
 
 #### Stage 2 — Add a posture layer
 

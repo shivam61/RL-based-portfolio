@@ -122,8 +122,8 @@ def evaluate_holdout(
         "trained_policy": trained.metrics,
         "neutral_policy": neutral.metrics,
         "uplift": _compute_uplift(trained.metrics, neutral.metrics),
-        "trained_policy_diagnostics": _summarize_trace(trained.trace),
-        "neutral_policy_diagnostics": _summarize_trace(neutral.trace),
+        "trained_policy_diagnostics": _summarize_trace(trained.trace, cfg_eval),
+        "neutral_policy_diagnostics": _summarize_trace(neutral.trace, cfg_eval),
         "trained_policy_trace": trained.trace,
         "neutral_policy_trace": neutral.trace,
     }
@@ -213,7 +213,7 @@ def _compute_uplift(trained: dict[str, Any], neutral: dict[str, Any]) -> dict[st
     return uplift
 
 
-def _summarize_trace(trace: list[dict[str, Any]]) -> dict[str, Any]:
+def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> dict[str, Any]:
     if not trace:
         return {}
     tilt_vectors = []
@@ -230,6 +230,38 @@ def _summarize_trace(trace: list[dict[str, Any]]) -> dict[str, Any]:
     if len(arr) > 1:
         diffs = np.abs(np.diff(arr, axis=0)).sum(axis=1)
         change_rate = float(np.mean(diffs > 1e-6))
+    neutral_cash = float(SectorAllocationEnv.neutral_action(cfg).get("cash_target", 0.05))
+    neutral_turnover_cap = SectorAllocationEnv.neutral_action(cfg).get("turnover_cap")
+    neutral_aggressiveness = float(
+        SectorAllocationEnv.neutral_action(cfg).get("aggressiveness", 1.0)
+    )
+
+    def usage_rate(key: str, neutral_value: float | None) -> float:
+        values = [entry.get(key) for entry in trace]
+        if not values:
+            return 0.0
+        if neutral_value is None:
+            return float(
+                np.mean([1.0 if value is not None else 0.0 for value in values])
+            )
+        return float(
+            np.mean(
+                [
+                    1.0 if value is not None and abs(float(value) - float(neutral_value)) > 1e-6 else 0.0
+                    for value in values
+                ]
+            )
+        )
+
+    def unique_values(key: str) -> list[float]:
+        values = sorted(
+            {
+                round(float(value), 6)
+                for value in [entry.get(key) for entry in trace]
+                if value is not None
+            }
+        )
+        return values
 
     return {
         "mean_abs_tilt_deviation": float(np.mean(np.abs(arr - 1.0))),
@@ -249,6 +281,11 @@ def _summarize_trace(trace: list[dict[str, Any]]) -> dict[str, Any]:
             np.mean([entry["aggressiveness"] for entry in trace])
         ),
         "mean_turnover": float(np.mean([entry["turnover"] for entry in trace])),
+        "cash_usage_rate": usage_rate("cash_target", neutral_cash),
+        "turnover_cap_usage_rate": usage_rate("turnover_cap", neutral_turnover_cap),
+        "aggressiveness_usage_rate": usage_rate("aggressiveness", neutral_aggressiveness),
+        "unique_cash_targets": unique_values("cash_target"),
+        "unique_turnover_caps": unique_values("turnover_cap"),
         "rebalance_rate": float(
             np.mean([1.0 if entry["should_rebalance"] else 0.0 for entry in trace])
         ),

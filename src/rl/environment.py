@@ -297,6 +297,7 @@ class SectorAllocationEnv(_GymBase):
                 raw_action[N_SECTORS + 1],
                 _cash_buckets(cfg),
                 neutral_value=CASH_TARGET_NEUTRAL,
+                cfg=cfg,
             )
             if _cash_control_enabled(cfg)
             else CASH_TARGET_NEUTRAL
@@ -306,6 +307,7 @@ class SectorAllocationEnv(_GymBase):
                 raw_action[N_SECTORS + 2],
                 _turnover_buckets(cfg),
                 neutral_value=float(_neutral_turnover_cap(cfg) or 0.40),
+                cfg=cfg,
             )
             if _turnover_control_enabled(cfg)
             else _neutral_turnover_cap(cfg)
@@ -545,6 +547,11 @@ def _aggressiveness_bounds(cfg: dict | None) -> tuple[float, float]:
     return agg_min, agg_max
 
 
+def _bucket_activation_threshold(cfg: dict | None) -> float:
+    threshold = float(_rl_cfg(cfg).get("bucket_activation_threshold", 0.10))
+    return float(np.clip(threshold, 0.0, 0.95))
+
+
 def _neutral_turnover_cap(cfg: dict | None) -> float | None:
     if cfg is not None and not _turnover_control_enabled(cfg):
         return None
@@ -571,17 +578,28 @@ def _encode_bucket_slot(value: float, buckets: list[float], neutral_value: float
     return float(-((neutral_idx - idx) / max_down))
 
 
-def _decode_bucket_slot(raw_value: float, buckets: list[float], neutral_value: float) -> float:
+def _decode_bucket_slot(
+    raw_value: float,
+    buckets: list[float],
+    neutral_value: float,
+    *,
+    cfg: dict | None = None,
+) -> float:
     if len(buckets) <= 1:
         return float(buckets[0])
     normalized = float(np.clip(raw_value, -1.0, 1.0))
+    threshold = _bucket_activation_threshold(cfg)
     neutral_idx = int(np.argmin([abs(float(neutral_value) - bucket) for bucket in buckets]))
+    if abs(normalized) <= threshold:
+        return float(buckets[neutral_idx])
     if normalized >= 0:
         max_up = max(1, len(buckets) - 1 - neutral_idx)
-        idx = neutral_idx + int(np.rint(normalized * max_up))
+        adjusted = (normalized - threshold) / max(1e-9, 1.0 - threshold)
+        idx = neutral_idx + max(1, int(np.ceil(adjusted * max_up)))
     else:
         max_down = max(1, neutral_idx)
-        idx = neutral_idx - int(np.rint(abs(normalized) * max_down))
+        adjusted = (abs(normalized) - threshold) / max(1e-9, 1.0 - threshold)
+        idx = neutral_idx - max(1, int(np.ceil(adjusted * max_down)))
     idx = int(np.clip(idx, 0, len(buckets) - 1))
     return float(buckets[idx])
 

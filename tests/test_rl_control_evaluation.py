@@ -122,11 +122,15 @@ def test_evaluate_control_from_artifacts_builds_canonical_stage0_report(tmp_path
                     "mean_cash_target": 0.05,
                     "mean_aggressiveness": 1.08,
                     "mean_turnover": 0.24,
+                    "cash_usage_rate": 0.25,
+                    "turnover_cap_usage_rate": 0.10,
                 },
                 "neutral_policy_diagnostics": {
                     "mean_cash_target": 0.05,
                     "mean_aggressiveness": 1.0,
                     "mean_turnover": 0.25,
+                    "cash_usage_rate": 0.0,
+                    "turnover_cap_usage_rate": 0.0,
                 },
             }
         )
@@ -185,6 +189,7 @@ def test_evaluate_control_from_artifacts_builds_canonical_stage0_report(tmp_path
     assert result["reference_modes"]["neutral_full_stack"]["cagr"] == 0.1785
     assert result["reference_modes"]["optimizer_only"]["cagr"] == 0.0948
     assert result["holdout"]["current_rl_vs_neutral"]["uplift"]["cagr"] == 0.0029
+    assert result["holdout"]["drawdown_behavior"]["current_rl"]["cash_usage_rate"] == 0.25
     covid = result["stress_windows"]["2020_covid"]
     assert covid["current_rl"]["observations"] == 3
     assert covid["neutral_full_stack"]["observations"] == 3
@@ -192,4 +197,3 @@ def test_evaluate_control_from_artifacts_builds_canonical_stage0_report(tmp_path
     assert round(covid["neutral_full_stack"]["avg_cash_pct"], 2) == 14.0
     assert covid["delta_rl_minus_neutral"]["avg_cash_pct"] == -2.0
     assert result["drawdown_behavior"]["current_rl"]["observations"] >= 1
-

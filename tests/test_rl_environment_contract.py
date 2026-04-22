@@ -29,9 +29,10 @@ def _cfg() -> dict:
         "rl": {
             "training_backend": "disabled",
             "enable_cash_control": True,
-            "cash_buckets": [0.0, 0.1, 0.2, 0.3],
+            "cash_buckets": [0.0, 0.05, 0.15, 0.3],
             "enable_turnover_control": True,
             "turnover_buckets": [0.2, 0.3, 0.4],
+            "bucket_activation_threshold": 0.10,
             "aggressiveness_min": 0.60,
             "aggressiveness_max": 1.40,
             "reward_lambda_dd": 2.0,
@@ -132,11 +133,62 @@ def test_decode_action_maps_cash_and_turnover_to_buckets():
     assert decoded["aggressiveness"] == pytest.approx(0.80)
 
 
+def test_decode_action_exits_neutral_bucket_after_activation_threshold():
+    cfg = _cfg()
+    action = np.array([0.0] * len(SECTORS) + [0.0, 0.12, -0.12], dtype=np.float32)
+
+    decoded = SectorAllocationEnv.decode_action(action, cfg)
+
+    assert decoded["cash_target"] == pytest.approx(0.15)
+    assert decoded["turnover_cap"] == pytest.approx(0.30)
+
+
 def test_encode_observation_emits_finite_vector_with_control_features():
     observation = SectorAllocationEnv.encode_observation(**_transition_step()["state"])
 
     assert observation.shape == (STATE_DIM,)
     assert np.isfinite(observation).all()
+
+
+def test_historical_executor_stress_signal_rises_with_stress_features():
+    high_stress = HistoricalPeriodExecutor._stress_signal(
+        {
+            "macro_state": {"macro_stress_score": 0.8},
+            "portfolio_state": {
+                "current_drawdown": -0.10,
+                "drawdown_slope_1m": -0.03,
+                "vol_shock_1m_3m": 0.4,
+                "breadth_deterioration": 0.7,
+                "emergency_flag": 1.0,
+            },
+        }
+    )
+    low_stress = HistoricalPeriodExecutor._stress_signal(
+        {
+            "macro_state": {"macro_stress_score": 0.1},
+            "portfolio_state": {
+                "current_drawdown": -0.01,
+                "drawdown_slope_1m": 0.0,
+                "vol_shock_1m_3m": 0.0,
+                "breadth_deterioration": 0.1,
+                "emergency_flag": 0.0,
+            },
+        }
+    )
+
+    assert 0.0 <= low_stress < high_stress <= 1.0
+
+
+def test_historical_executor_defensive_posture_reflects_cash_risk_and_turnover():
+    defensive = HistoricalPeriodExecutor._defensive_posture(
+        {"cash_target": 0.15, "aggressiveness": 0.90, "turnover_cap": 0.30}
+    )
+    neutral = HistoricalPeriodExecutor._defensive_posture(
+        {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.40}
+    )
+
+    assert defensive > neutral
+    assert neutral == pytest.approx(0.0)
 
 
 def test_rl_agent_trains_fresh_policy_on_causal_env(monkeypatch):

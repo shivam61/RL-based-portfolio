@@ -326,6 +326,11 @@ class HistoricalPeriodExecutor:
             ),
             prepared.sector_map,
         )
+        next_state = self._build_state_for_date(
+            prepared.next_date,
+            next_portfolio,
+            updated_nav_points,
+        )
         reward, reward_components = self._compute_reward(
             pre_nav=pre_nav,
             end_nav=end_nav,
@@ -337,11 +342,8 @@ class HistoricalPeriodExecutor:
             current_date=prepared.current_date,
             next_date=prepared.next_date,
             decision=decision,
-        )
-        next_state = self._build_state_for_date(
-            prepared.next_date,
-            next_portfolio,
-            updated_nav_points,
+            current_state=prepared.transition_state,
+            next_state=next_state,
         )
         self._recent_turnovers.append(float(exec_result.total_turnover))
         if pre_nav > 0:
@@ -418,6 +420,8 @@ class HistoricalPeriodExecutor:
         current_date: pd.Timestamp,
         next_date: pd.Timestamp,
         decision: dict[str, Any],
+        current_state: dict[str, Any],
+        next_state: dict[str, Any],
     ) -> tuple[float, dict[str, float | bool | None]]:
         rl_cfg = self.engine.cfg.get("rl", {})
         risk_cfg = self.engine.cfg.get("risk", {})
@@ -472,6 +476,19 @@ class HistoricalPeriodExecutor:
         action_deviation_penalty = float(
             rl_cfg.get("reward_lambda_action_dev", 0.0)
         ) * self._action_deviation(decision)
+        current_stress = self._stress_signal(current_state)
+        next_stress = self._stress_signal(next_state)
+        stress_signal = float(max(current_stress, next_stress))
+        defensive_posture = self._defensive_posture(decision)
+        defense_gap_penalty = float(
+            rl_cfg.get("reward_lambda_defense_gap", 0.0)
+        ) * max(0.0, stress_signal - defensive_posture)
+        overdefense_penalty = float(
+            rl_cfg.get("reward_lambda_overdefense", 0.0)
+        ) * max(0.0, defensive_posture - stress_signal)
+        stress_turnover_penalty = float(
+            rl_cfg.get("reward_lambda_stress_turnover", 0.0)
+        ) * stress_signal * max(0.0, float(exec_result.total_turnover) - 0.20)
 
         reward = (
             active_return
@@ -480,6 +497,9 @@ class HistoricalPeriodExecutor:
             - concentration_penalty
             - liquidity_penalty
             - action_deviation_penalty
+            - defense_gap_penalty
+            - overdefense_penalty
+            - stress_turnover_penalty
         )
         return float(reward), {
             "period_return": float(period_return),
@@ -498,6 +518,11 @@ class HistoricalPeriodExecutor:
             "liquidity_penalty": float(liquidity_penalty),
             "liquidity_stress": bool(liquidity_stress),
             "action_deviation_penalty": float(action_deviation_penalty),
+            "stress_signal": float(stress_signal),
+            "defensive_posture": float(defensive_posture),
+            "defense_gap_penalty": float(defense_gap_penalty),
+            "overdefense_penalty": float(overdefense_penalty),
+            "stress_turnover_penalty": float(stress_turnover_penalty),
             "reward": float(reward),
         }
 
@@ -535,6 +560,69 @@ class HistoricalPeriodExecutor:
         if not components:
             return 0.0
         return float(np.mean(components))
+
+    @staticmethod
+    def _stress_signal(state: dict[str, Any]) -> float:
+        macro_state = state.get("macro_state", {}) if isinstance(state, dict) else {}
+        portfolio_state = state.get("portfolio_state", {}) if isinstance(state, dict) else {}
+        drawdown_component = np.clip(
+            abs(min(0.0, float(portfolio_state.get("current_drawdown", 0.0) or 0.0))) / 0.12,
+            0.0,
+            1.0,
+        )
+        slope_component = np.clip(
+            abs(min(0.0, float(portfolio_state.get("drawdown_slope_1m", 0.0) or 0.0))) / 0.05,
+            0.0,
+            1.0,
+        )
+        vol_component = np.clip(
+            max(0.0, float(portfolio_state.get("vol_shock_1m_3m", 0.0) or 0.0)) / 0.5,
+            0.0,
+            1.0,
+        )
+        breadth_component = np.clip(
+            float(portfolio_state.get("breadth_deterioration", 0.0) or 0.0),
+            0.0,
+            1.0,
+        )
+        macro_component = np.clip(
+            float(macro_state.get("macro_stress_score", 0.0) or 0.0),
+            0.0,
+            1.0,
+        )
+        emergency_component = np.clip(
+            float(portfolio_state.get("emergency_flag", 0.0) or 0.0),
+            0.0,
+            1.0,
+        )
+        signal = (
+            0.30 * drawdown_component
+            + 0.15 * slope_component
+            + 0.15 * vol_component
+            + 0.15 * breadth_component
+            + 0.15 * macro_component
+            + 0.10 * emergency_component
+        )
+        return float(np.clip(signal, 0.0, 1.0))
+
+    @staticmethod
+    def _defensive_posture(decision: dict[str, Any]) -> float:
+        cash_target = float(decision.get("cash_target", 0.05) or 0.05)
+        aggressiveness = float(decision.get("aggressiveness", 1.0) or 1.0)
+        turnover_cap = decision.get("turnover_cap")
+        cash_component = np.clip((cash_target - 0.05) / 0.25, 0.0, 1.0)
+        aggressiveness_component = np.clip((1.0 - aggressiveness) / 0.40, 0.0, 1.0)
+        turnover_component = (
+            np.clip((0.40 - float(turnover_cap)) / 0.20, 0.0, 1.0)
+            if turnover_cap is not None
+            else 0.0
+        )
+        posture = (
+            0.45 * cash_component
+            + 0.35 * aggressiveness_component
+            + 0.20 * turnover_component
+        )
+        return float(np.clip(posture, 0.0, 1.0))
 
     def _build_alpha_scores(
         self,

@@ -227,3 +227,72 @@ Copy this block for each future change:
     - portfolio control features are finite and clipped
     - RL observation vectors stay finite at the new state dimension
     - reporting preserves `turnover_cap_pct` for future control audits
+
+## Iteration 3 — Stage 1 Action Activation And Control-Usage Diagnostics
+
+- Date:
+  - `2026-04-22`
+- Scope:
+  - reduce neutral-stickiness in cash and turnover bucket decoding
+  - expose direct action-usage diagnostics in holdout and full neutral traces
+  - add stress-aware reward alignment so constant defensive posture is no longer treated the same as responsive defense
+- Control levers changed:
+  - cash bucket activation threshold
+  - turnover-cap activation threshold
+  - control usage diagnostics:
+    - `cash_usage_rate`
+    - `turnover_cap_usage_rate`
+    - `aggressiveness_usage_rate`
+    - unique executed cash / turnover-cap states
+  - reward alignment:
+    - defense-gap penalty
+    - overdefense penalty
+    - stress-turnover penalty
+- Config flags:
+  - `bucket_activation_threshold`
+  - `reward_lambda_defense_gap`
+  - `reward_lambda_overdefense`
+  - `reward_lambda_stress_turnover`
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not re-run in this iteration
+- Holdout result vs `neutral_full_stack`:
+  - window: `2016-01-28` to `2016-12-01`
+  - candidate RL:
+    - CAGR `24.07%`
+    - Sharpe `1.094`
+    - Sortino `1.373`
+    - MaxDD `-14.58%`
+    - avg turnover `23.25%`
+  - neutral full-stack:
+    - CAGR `32.39%`
+    - Sharpe `1.465`
+    - Sortino `1.817`
+    - MaxDD `-15.00%`
+    - avg turnover `25.54%`
+  - uplift:
+    - CAGR `-8.32 pts`
+    - Sharpe `-0.371`
+    - MaxDD `+0.42 pts`
+    - turnover `-2.28 pts`
+- Stress-window behavior:
+  - not promoted to the named-window review set yet
+  - this iteration is still holdout-gated
+- Decision:
+  - keep the action-activation fix and the diagnostics
+  - reject promotion of the resulting policy
+  - Stage 1 remains open
+- Learning:
+  - the action mapping fix worked mechanically:
+    - `cash_usage_rate = 1.0`
+    - `turnover_cap_usage_rate = 1.0`
+  - the new failure mode is cleaner than before:
+    - RL no longer ignores the new controls
+    - instead it collapses into a constant defensive posture
+  - latest trained policy held:
+    - cash fixed at `15%`
+    - turnover cap fixed at `30%`
+    - aggressiveness around `0.96–1.01`
+    for every holdout rebalance
+  - this is still not portfolio control; it is static de-risking with mild sector styling

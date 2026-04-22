@@ -132,6 +132,7 @@ rl:
   cash_buckets: [0.00, 0.05, 0.15, 0.30]
   enable_turnover_control: true
   turnover_buckets: [0.20, 0.30, 0.40]
+  bucket_activation_threshold: 0.10
   aggressiveness_min: 0.60
   aggressiveness_max: 1.40
   learning_rate: 3.0e-4
@@ -147,6 +148,9 @@ rl:
   reward_lambda_conc: 0.3       # concentration penalty
   reward_lambda_liq: 0.2        # liquidity penalty
   reward_lambda_action_dev: 0.05  # discourage extreme departures from the neutral policy
+  reward_lambda_defense_gap: 0.02   # penalize being too risk-on when state stress is high
+  reward_lambda_overdefense: 0.015  # penalize staying too defensive when state stress is low
+  reward_lambda_stress_turnover: 0.01  # extra churn penalty during stressed periods
   retrain_every_rebalances: 3   # 3 x 4-week rebalances = 12 calendar weeks
   min_history_rebalances: 12    # require about one year of prior rebalance windows before causal PPO training
   use_rl: true                  # set false to disable RL overlay

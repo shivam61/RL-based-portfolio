@@ -116,6 +116,33 @@ Each task should record:
     - rebalance reports now preserve turnover-cap metadata for audit
   - the next Stage 1 work should focus on the economics of how the policy uses these levers, not on widening authority further
 
+### Task: Stage 1 action activation and stress-aware control diagnostics
+- Scope:
+  - make cash / turnover bucket actions easier to activate from PPO outputs
+  - add direct control-usage diagnostics to holdout and neutral comparison traces
+  - add stress-aware reward alignment so constant defensive posture is penalized relative to state stress
+- Validation:
+  - `./.venv/bin/python -m py_compile src/rl/environment.py src/rl/holdout.py src/rl/full_comparison.py src/rl/control_evaluation.py src/rl/historical_executor.py`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `14 passed`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q` -> `121 passed, 1 skipped`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 64`
+    - candidate RL -> `24.07% CAGR`, `1.094 Sharpe`, `-14.58% MaxDD`, `23.25% avg turnover`
+    - neutral full-stack -> `32.39% CAGR`, `1.465 Sharpe`, `-15.00% MaxDD`, `25.54% avg turnover`
+    - control diagnostics:
+      - cash usage rate `1.0`
+      - turnover-cap usage rate `1.0`
+      - executed cash fixed at `15%`
+      - executed turnover cap fixed at `30%`
+- Decision:
+  - keep the action-activation and diagnostics work
+  - do not promote the resulting policy as the new RL incumbent
+- Learning:
+  - the control-lever activation problem is fixed
+  - the next problem is now explicit:
+    - policy uses the controls
+    - but uses them statically rather than conditionally
+  - that is a better failure mode to debug than silent neutral collapse, but it is still below the economic gate
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block

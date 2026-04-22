@@ -249,7 +249,7 @@ def _run_full_window_policy(
     metrics["sector_fwd_window_days"] = int(executor.engine.cfg["sector_model"].get("fwd_window_days", 28))
     return {
         "metrics": metrics,
-        "diagnostics": _summarize_trace(trace),
+        "diagnostics": _summarize_trace(trace, executor.engine.cfg),
         "trace": trace,
     }
 
@@ -276,19 +276,58 @@ def _benchmark_series(
     return price_matrix[bm_ticker].loc[start:end].dropna()
 
 
-def _summarize_trace(trace: list[dict[str, Any]]) -> dict[str, Any]:
+def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> dict[str, Any]:
     if not trace:
         return {}
+
     def mean(key: str) -> float | None:
         values = [entry.get(key) for entry in trace if entry.get(key) is not None]
         if not values:
             return None
         return float(sum(float(value) for value in values) / len(values))
+
+    neutral = SectorAllocationEnv.neutral_action(cfg)
+    neutral_cash = float(neutral.get("cash_target", 0.05))
+    neutral_turnover_cap = neutral.get("turnover_cap")
+    neutral_aggressiveness = float(neutral.get("aggressiveness", 1.0))
+
+    def usage_rate(key: str, neutral_value: float | None) -> float:
+        values = [entry.get(key) for entry in trace]
+        if not values:
+            return 0.0
+        if neutral_value is None:
+            return float(
+                sum(1.0 if value is not None else 0.0 for value in values) / len(values)
+            )
+        return float(
+            sum(
+                1.0
+                if value is not None and abs(float(value) - float(neutral_value)) > 1e-6
+                else 0.0
+                for value in values
+            )
+            / len(values)
+        )
+
+    def unique_values(key: str) -> list[float]:
+        return sorted(
+            {
+                round(float(value), 6)
+                for value in [entry.get(key) for entry in trace]
+                if value is not None
+            }
+        )
+
     return {
         "mean_cash_target": mean("cash_target"),
         "mean_turnover_cap": mean("turnover_cap"),
         "mean_aggressiveness": mean("aggressiveness"),
         "mean_turnover": mean("turnover"),
+        "cash_usage_rate": usage_rate("cash_target", neutral_cash),
+        "turnover_cap_usage_rate": usage_rate("turnover_cap", neutral_turnover_cap),
+        "aggressiveness_usage_rate": usage_rate("aggressiveness", neutral_aggressiveness),
+        "unique_cash_targets": unique_values("cash_target"),
+        "unique_turnover_caps": unique_values("turnover_cap"),
         "mean_selected_sector_count": float(
             sum(len(entry["selected_sectors"]) for entry in trace) / len(trace)
         ),

@@ -69,3 +69,5 @@ def test_evaluate_holdout_returns_trained_vs_neutral_comparison(monkeypatch):
         result["trained_policy_diagnostics"]["mean_cash_target"]
         > result["neutral_policy_diagnostics"]["mean_cash_target"]
     )
+    assert result["trained_policy_diagnostics"]["cash_usage_rate"] > 0.0
+    assert result["trained_policy_diagnostics"]["aggressiveness_usage_rate"] > 0.0
