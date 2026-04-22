@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
+import pandas as pd
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -326,6 +327,107 @@ def test_historical_executor_posture_guidance_steps_toward_target():
     assert guidance["target_posture"] == "risk_off"
     assert guided["posture"] == "neutral"
     assert guided["cash_target"] == pytest.approx(0.05)
+
+
+def test_historical_executor_reward_uses_bounded_weights_and_soft_regret(monkeypatch):
+    executor = HistoricalPeriodExecutor.__new__(HistoricalPeriodExecutor)
+    cfg = _cfg()
+    cfg["rl"].update(
+        {
+            "enable_soft_posture_regret": True,
+            "reward_regret_lambda": 0.2,
+            "reward_regret_temperature": 0.05,
+            "reward_return_weight_low": 1.15,
+            "reward_return_weight_high": 0.70,
+            "reward_drawdown_weight_low": 0.80,
+            "reward_drawdown_weight_high": 1.35,
+            "reward_turnover_weight_low": 0.85,
+            "reward_turnover_weight_high": 1.20,
+            "reward_return_weight_low_reduced": 1.0,
+            "reward_return_weight_high_reduced": 0.80,
+            "reward_drawdown_weight_low_reduced": 0.75,
+            "reward_drawdown_weight_high_reduced": 1.15,
+            "reward_turnover_weight_low_reduced": 0.90,
+            "reward_turnover_weight_high_reduced": 1.05,
+            "reward_regret_variance_threshold": 1.0e-5,
+        }
+    )
+    executor.engine = type("Engine", (), {"cfg": cfg})()
+    executor.bm_prices = None
+    monkeypatch.setattr(
+        HistoricalPeriodExecutor,
+        "_compute_posture_value_map",
+        lambda self, **kwargs: (
+            {"risk_on": 0.03, "neutral": 0.02, "risk_off": 0.01},
+            {"horizon_steps": 3, "policy_count": 7},
+        ),
+    )
+
+    portfolio = PortfolioState(
+        date=pd.Timestamp("2024-01-01").date(),
+        cash=50000.0,
+        holdings={"AAA": 100.0},
+        weights={"AAA": 0.90, "CASH": 0.10},
+        nav=100000.0,
+        sector_weights={"IT": 0.90},
+    )
+    reward, components = HistoricalPeriodExecutor._compute_reward(
+        executor,
+        step_idx=0,
+        starting_portfolio=portfolio,
+        starting_nav_points=[(pd.Timestamp("2024-01-01"), 100000.0)],
+        pre_nav=100000.0,
+        end_nav=103000.0,
+        nav_points=[(pd.Timestamp("2024-01-01"), 100000.0)],
+        period_nav=[(pd.Timestamp("2024-01-15"), 99000.0), (pd.Timestamp("2024-01-29"), 103000.0)],
+        exec_result=SimpleNamespace(total_cost=200.0, total_turnover=0.15),
+        next_portfolio=portfolio,
+        liquidity_stress=False,
+        current_date=pd.Timestamp("2024-01-01"),
+        next_date=pd.Timestamp("2024-01-29"),
+        decision={
+            "sector_tilts": {sector: 1.0 for sector in SECTORS},
+            "posture": "neutral",
+            "cash_target": 0.05,
+            "aggressiveness": 1.0,
+            "turnover_cap": 0.40,
+            "should_rebalance": True,
+        },
+        current_state={
+            "macro_state": {"macro_stress_score": 0.4},
+            "portfolio_state": {
+                "current_drawdown": -0.08,
+                "drawdown_slope_1m": -0.02,
+                "vol_shock_1m_3m": 0.2,
+                "breadth_deterioration": 0.3,
+                "emergency_flag": 0.0,
+                "previous_posture_score": 0.0,
+                "previous_target_posture_score": 0.0,
+                "target_posture_streak": 2.0,
+            },
+        },
+        next_state={
+            "macro_state": {"macro_stress_score": 0.5},
+            "portfolio_state": {
+                "current_drawdown": -0.06,
+                "drawdown_slope_1m": -0.01,
+                "vol_shock_1m_3m": 0.2,
+                "breadth_deterioration": 0.3,
+                "emergency_flag": 0.0,
+            },
+        },
+        compute_regret=True,
+    )
+
+    assert 0.70 <= components["return_weight"] <= 1.15
+    assert 0.80 <= components["drawdown_weight"] <= 1.35
+    assert 0.85 <= components["turnover_weight"] <= 1.20
+    assert components["decision_quality_basis"] == "counterfactual_soft_regret_v1"
+    assert components["soft_regret"] >= 0.0
+    assert components["soft_regret_penalty"] >= 0.0
+    assert components["posture_utility_variance"] > 0.0
+    assert components["regret_policy_count"] == 7
+    assert reward == pytest.approx(components["reward"])
 
 
 def test_rl_agent_trains_fresh_policy_on_causal_env(monkeypatch):

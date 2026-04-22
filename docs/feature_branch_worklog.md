@@ -280,6 +280,32 @@ Each task should record:
   - the current candidate is still statically defensive, but now that failure is measurable in economic terms
   - the next reward change should target posture correctness directly, not enforce switching frequency
 
+### Task: Stage 2 bounded utility and soft-regret reward prototype
+- Scope:
+  - replace the Stage 2 reward backbone with bounded regime-weighted utility
+  - add soft regret over posture counterfactuals using:
+    - static postures
+    - one-switch posture baselines
+  - switch holdout diagnostics from target-proxy decision quality to reward-native decision quality
+- Validation:
+  - `./.venv/bin/python -m py_compile src/rl/historical_executor.py src/rl/holdout.py src/rl/control_evaluation.py tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `19 passed`
+  - real holdout runs with the new reward did not complete on a practical research timescale:
+    - `scripts/evaluate_rl_holdout.py --timesteps 128`
+    - `scripts/evaluate_rl_holdout.py --timesteps 8`
+    both remained materially slower than the prior objective because every reward step now launches multiple counterfactual rollouts
+- Decision:
+  - keep the implementation as a prototype, not as the new default research loop
+  - do not promote the reward yet
+  - next step is to reduce counterfactual cost before trusting economics from this objective
+- Learning:
+  - the reward shape is now closer to the intended control problem:
+    - bounded regime weights
+    - no forced posture-switch gate
+    - soft regret instead of hard max
+  - the first operational bottleneck is compute, not correctness
+  - the counterfactual term needs approximation, caching, or a smaller candidate set before full holdout evaluation is practical
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block

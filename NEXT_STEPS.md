@@ -234,6 +234,10 @@ Current Stage 2A result:
   - the target-aware state is working mechanically
   - the controller still collapses to one posture, now `risk_off`
   - next Stage 2 step should make posture correctness economically dominant, not force posture switching as a fixed condition
+  - the first bounded-utility / soft-regret prototype is now implemented, but not yet promoted:
+    - targeted tests pass
+    - real holdout runtime is currently too slow because every reward step launches multiple counterfactual posture rollouts
+    - next refinement should cut regret compute cost before wider evaluation
 
 #### Stage 3 — Add breadth control
 

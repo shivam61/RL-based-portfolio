@@ -157,6 +157,41 @@ Copy this block for each future change:
   - mean proxy regret is `0.583`
   - the next Stage 2 change should make posture correctness economically dominant rather than behaviorally enforced
 
+## Iteration 8 — Stage 2 Bounded Utility And Soft-Regret Prototype
+
+- Date:
+  - `2026-04-22`
+- Scope:
+  - replace the reward backbone with bounded regime-weighted utility
+  - add soft regret over posture counterfactuals using:
+    - static postures
+    - one-switch posture baselines
+  - move holdout diagnostics to reward-native decision-quality metrics
+- Control levers changed:
+  - none
+  - this slice changes the objective and diagnostics only
+- Config flags:
+  - `enable_soft_posture_regret`
+  - bounded return / drawdown / turnover weights
+  - regime-aware regret horizons
+  - soft-regret temperature and lambda
+- Evaluation artifacts:
+  - targeted unit and holdout-contract tests only
+- Full-window result vs `neutral_full_stack`:
+  - not run
+- Holdout result vs `neutral_full_stack`:
+  - a real 2016 holdout run with the new reward was started
+  - economics were not promoted because runtime became impractical before a clean iteration-grade result was available
+- Stress-window behavior:
+  - not evaluated in this slice
+- Decision:
+  - keep as prototype
+  - do not promote as the default research objective yet
+- Learning:
+  - the objective now matches the intended design better than the prior posture-shaping reward
+  - the immediate blocker is compute cost from per-step counterfactual rollouts
+  - next work should make the regret term cheaper before relying on full holdout economics
+
 ## Iteration 1 — Stage 0 Control Evaluation Harness
 
 - Date:

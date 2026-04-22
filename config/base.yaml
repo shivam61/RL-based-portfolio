@@ -163,13 +163,36 @@ rl:
   reward_lambda_conc: 0.3       # concentration penalty
   reward_lambda_liq: 0.2        # liquidity penalty
   reward_lambda_action_dev: 0.05  # discourage extreme departures from the neutral policy
+  reward_return_weight_low: 1.15
+  reward_return_weight_high: 0.70
+  reward_drawdown_weight_low: 0.80
+  reward_drawdown_weight_high: 1.35
+  reward_turnover_weight_low: 0.85
+  reward_turnover_weight_high: 1.20
+  reward_return_weight_low_reduced: 1.00
+  reward_return_weight_high_reduced: 0.80
+  reward_drawdown_weight_low_reduced: 0.75
+  reward_drawdown_weight_high_reduced: 1.15
+  reward_turnover_weight_low_reduced: 0.90
+  reward_turnover_weight_high_reduced: 1.05
+  reward_regret_concentration_scale: 0.50
+  reward_regret_liquidity_scale: 0.50
+  enable_soft_posture_regret: true
+  reward_regret_lambda: 0.15
+  reward_regret_temperature: 0.05
+  reward_regret_horizon_low: 4
+  reward_regret_horizon_medium: 3
+  reward_regret_horizon_high: 2
+  reward_regret_switch_anchor_fracs: [0.4, 0.7]
+  reward_regret_switch_jitter_steps: 1
+  reward_regret_variance_threshold: 1.0e-5
   reward_lambda_defense_gap: 0.02   # penalize being too risk-on when state stress is high
   reward_lambda_overdefense: 0.015  # penalize staying too defensive when state stress is low
   reward_lambda_stress_turnover: 0.01  # extra churn penalty during stressed periods
   reward_lambda_target_posture: 0.10   # penalize deviation from the stress-conditioned target posture
   reward_lambda_posture_progress: 0.06 # reward moving closer to the current target posture
   reward_lambda_posture_stale: 0.03    # penalize staying in a mismatched posture when the target persists
-  reward_lambda_posture_flip: 0.02     # penalize posture flips that do not improve target alignment
+  reward_lambda_posture_flip: 0.00     # keep off in the first regret iteration to avoid blocking exploration
   enable_target_posture_guidance: true
   target_posture_guidance_min_streak: 2
   target_posture_guidance_min_stress: 0.16

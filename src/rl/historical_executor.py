@@ -228,6 +228,7 @@ class HistoricalPeriodExecutor:
         rl_decision: dict[str, Any] | None = None,
         *,
         done: bool = False,
+        compute_regret: bool = True,
     ) -> HistoricalStepResult:
         decision = self._normalize_decision(prepared.snapshot.sectors, rl_decision)
         decision, control_guidance = self._apply_target_control_guidance(
@@ -360,6 +361,9 @@ class HistoricalPeriodExecutor:
             updated_nav_points,
         )
         reward, reward_components = self._compute_reward(
+            step_idx=prepared.idx,
+            starting_portfolio=portfolio,
+            starting_nav_points=nav_points,
             pre_nav=pre_nav,
             end_nav=end_nav,
             nav_points=nav_points,
@@ -372,6 +376,7 @@ class HistoricalPeriodExecutor:
             decision=decision,
             current_state=prepared.transition_state,
             next_state=next_state,
+            compute_regret=compute_regret,
         )
         self._recent_turnovers.append(float(exec_result.total_turnover))
         if pre_nav > 0:
@@ -412,6 +417,7 @@ class HistoricalPeriodExecutor:
                     if decision.get("turnover_cap") is not None
                     else None
                 ),
+                "aggressiveness": float(decision.get("aggressiveness", 1.0)),
                 "posture": str(decision.get("posture", "neutral")),
                 "control_guidance": control_guidance,
                 "reward_components": reward_components,
@@ -440,6 +446,9 @@ class HistoricalPeriodExecutor:
     def _compute_reward(
         self,
         *,
+        step_idx: int,
+        starting_portfolio: PortfolioState,
+        starting_nav_points: list[tuple[pd.Timestamp, float]],
         pre_nav: float,
         end_nav: float,
         nav_points: list[tuple[pd.Timestamp, float]],
@@ -452,7 +461,8 @@ class HistoricalPeriodExecutor:
         decision: dict[str, Any],
         current_state: dict[str, Any],
         next_state: dict[str, Any],
-    ) -> tuple[float, dict[str, float | bool | None]]:
+        compute_regret: bool = True,
+    ) -> tuple[float, dict[str, Any]]:
         rl_cfg = self.engine.cfg.get("rl", {})
         risk_cfg = self.engine.cfg.get("risk", {})
 
@@ -496,19 +506,32 @@ class HistoricalPeriodExecutor:
         )
         concentration_hhi = float(np.sum(weights ** 2)) if len(weights) else 1.0
         hhi_threshold = float(risk_cfg.get("max_concentration_hhi", 0.15))
-        concentration_penalty = float(rl_cfg.get("reward_lambda_conc", 0.0)) * max(
-            0.0,
-            concentration_hhi - hhi_threshold,
-        )
-        liquidity_penalty = (
-            float(rl_cfg.get("reward_lambda_liq", 0.0)) if liquidity_stress else 0.0
-        )
+        concentration_excess = max(0.0, concentration_hhi - hhi_threshold)
+        liquidity_penalty = float(rl_cfg.get("reward_lambda_liq", 0.0)) if liquidity_stress else 0.0
         action_deviation_penalty = float(
             rl_cfg.get("reward_lambda_action_dev", 0.0)
         ) * self._action_deviation(decision)
         current_stress = self._stress_signal(current_state)
         next_stress = self._stress_signal(next_state)
         stress_signal = float(max(current_stress, next_stress))
+        full_utility, full_utility_components = self._compose_utility(
+            active_return=active_return,
+            realized_drawdown=realized_drawdown,
+            cost_ratio=cost_ratio,
+            concentration_excess=concentration_excess,
+            liquidity_stress=liquidity_stress,
+            stress_signal=stress_signal,
+            reduced=False,
+        )
+        reduced_utility, reduced_utility_components = self._compose_utility(
+            active_return=active_return,
+            realized_drawdown=realized_drawdown,
+            cost_ratio=cost_ratio,
+            concentration_excess=concentration_excess,
+            liquidity_stress=liquidity_stress,
+            stress_signal=stress_signal,
+            reduced=True,
+        )
         portfolio_state = current_state.get("portfolio_state", {}) if isinstance(current_state, dict) else {}
         defensive_posture = self._defensive_posture(decision)
         target_posture_label = self._target_posture_for_stress(stress_signal, self.engine.cfg)
@@ -524,15 +547,6 @@ class HistoricalPeriodExecutor:
         target_streak = max(0.0, float(portfolio_state.get("target_posture_streak", 0.0) or 0.0))
         prev_distance = self._posture_distance(prev_posture_label, target_posture_label)
         current_distance = self._posture_distance(decision_posture, target_posture_label)
-        defense_gap_penalty = float(
-            rl_cfg.get("reward_lambda_defense_gap", 0.0)
-        ) * max(0.0, stress_signal - defensive_posture)
-        overdefense_penalty = float(
-            rl_cfg.get("reward_lambda_overdefense", 0.0)
-        ) * max(0.0, defensive_posture - stress_signal)
-        stress_turnover_penalty = float(
-            rl_cfg.get("reward_lambda_stress_turnover", 0.0)
-        ) * stress_signal * max(0.0, float(exec_result.total_turnover) - 0.20)
         target_posture_penalty = float(
             rl_cfg.get("reward_lambda_target_posture", 0.0)
         ) * self._target_control_gap(decision, target_controls)
@@ -555,21 +569,50 @@ class HistoricalPeriodExecutor:
             and current_distance >= prev_distance
             else 0.0
         )
+        posture_value_map: dict[str, float] = {}
+        chosen_posture_utility = float(reduced_utility)
+        soft_regret = 0.0
+        soft_regret_penalty = 0.0
+        soft_regret_baseline = float(reduced_utility)
+        best_posture = decision_posture
+        posture_utility_variance = 0.0
+        posture_utility_spread = 0.0
+        posture_utility_variance_threshold = float(
+            rl_cfg.get("reward_regret_variance_threshold", 1.0e-5)
+        )
+        regret_horizon = 1
+        regret_policy_count = 0
+        if compute_regret and bool(rl_cfg.get("enable_soft_posture_regret", True)):
+            posture_value_map, regret_meta = self._compute_posture_value_map(
+                step_idx=step_idx,
+                portfolio=starting_portfolio,
+                nav_points=starting_nav_points,
+                base_decision=decision,
+                stress_signal=stress_signal,
+            )
+            if posture_value_map:
+                values = np.asarray(list(posture_value_map.values()), dtype=float)
+                chosen_posture_utility = float(
+                    posture_value_map.get(decision_posture, float(np.mean(values)))
+                )
+                soft_regret_baseline = self._soft_utility_baseline(
+                    values,
+                    float(rl_cfg.get("reward_regret_temperature", 0.05)),
+                )
+                soft_regret = float(max(0.0, soft_regret_baseline - chosen_posture_utility))
+                soft_regret_penalty = float(
+                    rl_cfg.get("reward_regret_lambda", 0.15)
+                ) * soft_regret
+                best_posture = max(posture_value_map.items(), key=lambda item: item[1])[0]
+                posture_utility_variance = float(np.var(values)) if len(values) else 0.0
+                posture_utility_spread = float(np.max(values) - np.min(values)) if len(values) else 0.0
+                regret_horizon = int(regret_meta.get("horizon_steps", 1))
+                regret_policy_count = int(regret_meta.get("policy_count", 0))
 
         reward = (
-            active_return
-            - drawdown_penalty
-            - turnover_penalty
-            - concentration_penalty
-            - liquidity_penalty
+            full_utility
             - action_deviation_penalty
-            - defense_gap_penalty
-            - overdefense_penalty
-            - stress_turnover_penalty
-            - target_posture_penalty
-            + posture_progress_bonus
-            - posture_stale_penalty
-            - posture_flip_penalty
+            - soft_regret_penalty
         )
         return float(reward), {
             "period_return": float(period_return),
@@ -577,18 +620,24 @@ class HistoricalPeriodExecutor:
                 float(benchmark_return) if benchmark_return is not None else None
             ),
             "active_return": float(active_return),
-            "drawdown_penalty": float(drawdown_penalty),
+            "utility_full": float(full_utility),
+            "utility_reduced": float(reduced_utility),
+            "regime_weighted_return": float(full_utility_components["weighted_return"]),
+            "drawdown_penalty": float(full_utility_components["drawdown_penalty"]),
             "realized_drawdown": float(realized_drawdown),
             "transaction_cost": float(exec_result.total_cost),
             "transaction_cost_ratio": float(cost_ratio),
             "realized_turnover": float(exec_result.total_turnover),
-            "turnover_penalty": float(turnover_penalty),
+            "turnover_penalty": float(full_utility_components["turnover_penalty"]),
             "concentration_hhi": float(concentration_hhi),
-            "concentration_penalty": float(concentration_penalty),
-            "liquidity_penalty": float(liquidity_penalty),
+            "concentration_penalty": float(full_utility_components["concentration_penalty"]),
+            "liquidity_penalty": float(full_utility_components["liquidity_penalty"]),
             "liquidity_stress": bool(liquidity_stress),
             "action_deviation_penalty": float(action_deviation_penalty),
             "stress_signal": float(stress_signal),
+            "return_weight": float(full_utility_components["return_weight"]),
+            "drawdown_weight": float(full_utility_components["drawdown_weight"]),
+            "turnover_weight": float(full_utility_components["turnover_weight"]),
             "defensive_posture": float(defensive_posture),
             "posture": str(decision_posture),
             "target_posture": str(target_posture_label),
@@ -601,15 +650,309 @@ class HistoricalPeriodExecutor:
             "target_cash_target": float(target_controls["cash_target"]),
             "target_aggressiveness": float(target_controls["aggressiveness"]),
             "target_turnover_cap": float(target_controls["turnover_cap"]),
-            "defense_gap_penalty": float(defense_gap_penalty),
-            "overdefense_penalty": float(overdefense_penalty),
-            "stress_turnover_penalty": float(stress_turnover_penalty),
             "target_posture_penalty": float(target_posture_penalty),
             "posture_progress_bonus": float(posture_progress_bonus),
             "posture_stale_penalty": float(posture_stale_penalty),
             "posture_flip_penalty": float(posture_flip_penalty),
+            "decision_quality_basis": "counterfactual_soft_regret_v1",
+            "soft_regret": float(soft_regret),
+            "soft_regret_penalty": float(soft_regret_penalty),
+            "soft_regret_baseline": float(soft_regret_baseline),
+            "chosen_posture_utility": float(chosen_posture_utility),
+            "best_posture": str(best_posture),
+            "posture_optimality": float(1.0 if decision_posture == best_posture else 0.0),
+            "posture_value_map": {
+                posture: float(value) for posture, value in posture_value_map.items()
+            },
+            "posture_utility_variance": float(posture_utility_variance),
+            "posture_utility_spread": float(posture_utility_spread),
+            "posture_utility_variance_threshold": float(posture_utility_variance_threshold),
+            "posture_utility_variance_above_threshold": bool(
+                posture_utility_variance > posture_utility_variance_threshold
+            ),
+            "regret_horizon_steps": int(regret_horizon),
+            "regret_policy_count": int(regret_policy_count),
             "reward": float(reward),
         }
+
+    def _compose_utility(
+        self,
+        *,
+        active_return: float,
+        realized_drawdown: float,
+        cost_ratio: float,
+        concentration_excess: float,
+        liquidity_stress: bool,
+        stress_signal: float,
+        reduced: bool,
+    ) -> tuple[float, dict[str, float]]:
+        rl_cfg = self.engine.cfg.get("rl", {})
+        return_weight, drawdown_weight, turnover_weight = self._regime_weights(
+            stress_signal,
+            reduced=reduced,
+        )
+        concentration_scale = float(
+            rl_cfg.get(
+                "reward_regret_concentration_scale" if reduced else "reward_concentration_scale",
+                0.50 if reduced else 1.0,
+            )
+        )
+        liquidity_scale = float(
+            rl_cfg.get(
+                "reward_regret_liquidity_scale" if reduced else "reward_liquidity_scale",
+                0.50 if reduced else 1.0,
+            )
+        )
+        drawdown_penalty = (
+            drawdown_weight
+            * float(rl_cfg.get("reward_lambda_dd", 0.0))
+            * abs(realized_drawdown)
+        )
+        turnover_penalty = (
+            turnover_weight
+            * float(rl_cfg.get("reward_lambda_to", 0.0))
+            * cost_ratio
+        )
+        concentration_penalty = (
+            concentration_scale
+            * float(rl_cfg.get("reward_lambda_conc", 0.0))
+            * concentration_excess
+        )
+        liquidity_penalty = (
+            liquidity_scale * float(rl_cfg.get("reward_lambda_liq", 0.0))
+            if liquidity_stress
+            else 0.0
+        )
+        weighted_return = return_weight * active_return
+        utility = (
+            weighted_return
+            - drawdown_penalty
+            - turnover_penalty
+            - concentration_penalty
+            - liquidity_penalty
+        )
+        return float(utility), {
+            "weighted_return": float(weighted_return),
+            "drawdown_penalty": float(drawdown_penalty),
+            "turnover_penalty": float(turnover_penalty),
+            "concentration_penalty": float(concentration_penalty),
+            "liquidity_penalty": float(liquidity_penalty),
+            "return_weight": float(return_weight),
+            "drawdown_weight": float(drawdown_weight),
+            "turnover_weight": float(turnover_weight),
+        }
+
+    def _regime_weights(
+        self,
+        stress_signal: float,
+        *,
+        reduced: bool,
+    ) -> tuple[float, float, float]:
+        rl_cfg = self.engine.cfg.get("rl", {})
+        suffix = "_reduced" if reduced else ""
+        clipped = float(np.clip(stress_signal, 0.0, 1.0))
+        return (
+            self._interpolate_weight(
+                clipped,
+                low=float(rl_cfg.get(f"reward_return_weight_low{suffix}", 1.15 if not reduced else 1.0)),
+                high=float(rl_cfg.get(f"reward_return_weight_high{suffix}", 0.70 if not reduced else 0.80)),
+            ),
+            self._interpolate_weight(
+                clipped,
+                low=float(rl_cfg.get(f"reward_drawdown_weight_low{suffix}", 0.80 if not reduced else 0.75)),
+                high=float(rl_cfg.get(f"reward_drawdown_weight_high{suffix}", 1.35 if not reduced else 1.15)),
+            ),
+            self._interpolate_weight(
+                clipped,
+                low=float(rl_cfg.get(f"reward_turnover_weight_low{suffix}", 0.85 if not reduced else 0.90)),
+                high=float(rl_cfg.get(f"reward_turnover_weight_high{suffix}", 1.20 if not reduced else 1.05)),
+            ),
+        )
+
+    @staticmethod
+    def _interpolate_weight(stress_signal: float, *, low: float, high: float) -> float:
+        return float(low + (high - low) * np.clip(stress_signal, 0.0, 1.0))
+
+    def _compute_posture_value_map(
+        self,
+        *,
+        step_idx: int,
+        portfolio: PortfolioState,
+        nav_points: list[tuple[pd.Timestamp, float]],
+        base_decision: dict[str, Any],
+        stress_signal: float,
+    ) -> tuple[dict[str, float], dict[str, int]]:
+        horizon_steps = self._regret_horizon_steps(stress_signal)
+        if horizon_steps <= 0:
+            return {}, {"horizon_steps": 0, "policy_count": 0}
+        switch_candidates = self._regret_switch_candidates(step_idx, horizon_steps)
+        postures = ("risk_on", "neutral", "risk_off")
+        posture_values: dict[str, float] = {}
+        policy_count = 0
+        for posture in postures:
+            candidate_values = [
+                self._simulate_posture_sequence_utility(
+                    step_idx=step_idx,
+                    portfolio=portfolio,
+                    nav_points=nav_points,
+                    base_decision=base_decision,
+                    posture_sequence=[posture] * horizon_steps,
+                )
+            ]
+            policy_count += 1
+            for switch_idx in switch_candidates:
+                for target_posture in postures:
+                    if target_posture == posture:
+                        continue
+                    sequence = [
+                        posture if offset < switch_idx else target_posture
+                        for offset in range(horizon_steps)
+                    ]
+                    candidate_values.append(
+                        self._simulate_posture_sequence_utility(
+                            step_idx=step_idx,
+                            portfolio=portfolio,
+                            nav_points=nav_points,
+                            base_decision=base_decision,
+                            posture_sequence=sequence,
+                        )
+                    )
+                    policy_count += 1
+            posture_values[posture] = float(max(candidate_values))
+        return posture_values, {
+            "horizon_steps": int(horizon_steps),
+            "policy_count": int(policy_count),
+        }
+
+    def _simulate_posture_sequence_utility(
+        self,
+        *,
+        step_idx: int,
+        portfolio: PortfolioState,
+        nav_points: list[tuple[pd.Timestamp, float]],
+        base_decision: dict[str, Any],
+        posture_sequence: list[str],
+    ) -> float:
+        original_risk_engine = self.engine.risk_engine
+        counterfactual = HistoricalPeriodExecutor(
+            self.engine,
+            mode=self.mode,
+            allow_model_retraining=False,
+        )
+        counterfactual.reset_runtime_state(list(nav_points))
+        counterfactual._recent_turnovers = list(self._recent_turnovers)
+        counterfactual._recent_cost_ratios = list(self._recent_cost_ratios)
+        counterfactual._prev_posture = self._prev_posture
+        counterfactual._prev_target_posture = self._prev_target_posture
+        counterfactual._prev_stress_signal = self._prev_stress_signal
+        counterfactual._target_posture_streak = self._target_posture_streak
+        counterfactual._prev_posture_mismatch = self._prev_posture_mismatch
+        local_portfolio = self._copy_portfolio_state(portfolio)
+        local_nav_points = list(nav_points)
+        utilities: list[float] = []
+        try:
+            for offset, posture in enumerate(posture_sequence):
+                idx = step_idx + offset
+                if idx >= len(counterfactual.rebalance_dates) - 1:
+                    break
+                prepared = counterfactual.prepare_step(idx, local_portfolio, local_nav_points)
+                decision = counterfactual._counterfactual_decision(base_decision, posture)
+                result = counterfactual.execute_prepared_step(
+                    prepared,
+                    local_portfolio,
+                    local_nav_points,
+                    rl_decision=decision,
+                    done=False,
+                    compute_regret=False,
+                )
+                utilities.append(
+                    float(
+                        result.transition.get("info", {})
+                        .get("reward_components", {})
+                        .get("utility_reduced", 0.0)
+                    )
+                )
+                counterfactual.engine.risk_engine.update(
+                    result.post_trade_portfolio.nav,
+                    result.post_trade_portfolio.date,
+                )
+                local_portfolio = result.next_portfolio
+                local_nav_points = result.updated_nav_points
+        finally:
+            self.engine.risk_engine = original_risk_engine
+        if not utilities:
+            return 0.0
+        return float(np.mean(utilities))
+
+    def _counterfactual_decision(
+        self,
+        base_decision: dict[str, Any],
+        posture: str,
+    ) -> dict[str, Any]:
+        decision = dict(base_decision)
+        posture_controls = self._target_controls_for_posture(posture, self.engine.cfg)
+        decision["posture"] = posture
+        decision["cash_target"] = float(posture_controls["cash_target"])
+        decision["aggressiveness"] = float(posture_controls["aggressiveness"])
+        decision["turnover_cap"] = float(posture_controls["turnover_cap"])
+        return decision
+
+    def _regret_horizon_steps(self, stress_signal: float) -> int:
+        rl_cfg = self.engine.cfg.get("rl", {})
+        bucket = self._stress_bucket_label(stress_signal, self.engine.cfg)
+        if bucket == "high":
+            return max(1, int(rl_cfg.get("reward_regret_horizon_high", 2)))
+        if bucket == "medium":
+            return max(1, int(rl_cfg.get("reward_regret_horizon_medium", 3)))
+        return max(1, int(rl_cfg.get("reward_regret_horizon_low", 4)))
+
+    def _regret_switch_candidates(self, step_idx: int, horizon_steps: int) -> list[int]:
+        if horizon_steps <= 1:
+            return []
+        rl_cfg = self.engine.cfg.get("rl", {})
+        fractions = rl_cfg.get("reward_regret_switch_anchor_fracs", [0.4, 0.7])
+        jitter_steps = int(max(0, rl_cfg.get("reward_regret_switch_jitter_steps", 1)))
+        candidates: set[int] = set()
+        for anchor_idx, fraction in enumerate(fractions):
+            base = int(round(float(fraction) * max(1, horizon_steps - 1)))
+            jitter = 0
+            if jitter_steps > 0:
+                seed = (step_idx + 1) * 97 + (anchor_idx + 1) * 17
+                jitter = int((seed % (2 * jitter_steps + 1)) - jitter_steps)
+            candidate = int(np.clip(base + jitter, 1, horizon_steps - 1))
+            candidates.add(candidate)
+        return sorted(candidates)
+
+    @staticmethod
+    def _soft_utility_baseline(values: np.ndarray, temperature: float) -> float:
+        if values.size == 0:
+            return 0.0
+        temp = max(float(temperature), 1.0e-6)
+        scaled = values / temp
+        max_scaled = float(np.max(scaled))
+        return float(temp * (np.log(np.sum(np.exp(scaled - max_scaled))) + max_scaled))
+
+    @staticmethod
+    def _stress_bucket_label(stress_signal: float, cfg: dict | None = None) -> str:
+        rl_cfg = (cfg or {}).get("rl", {}) if isinstance(cfg, dict) else {}
+        moderate_threshold = float(rl_cfg.get("stress_target_moderate", 0.18))
+        high_threshold = float(rl_cfg.get("stress_target_high", 0.35))
+        if stress_signal >= high_threshold:
+            return "high"
+        if stress_signal >= moderate_threshold:
+            return "medium"
+        return "low"
+
+    @staticmethod
+    def _copy_portfolio_state(portfolio: PortfolioState) -> PortfolioState:
+        return PortfolioState(
+            date=portfolio.date,
+            cash=float(portfolio.cash),
+            holdings=dict(portfolio.holdings),
+            weights=dict(portfolio.weights),
+            nav=float(portfolio.nav),
+            sector_weights=dict(portfolio.sector_weights),
+        )
 
     def _benchmark_period_return(
         self,

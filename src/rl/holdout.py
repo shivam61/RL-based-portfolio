@@ -155,25 +155,25 @@ def _run_holdout_policy(
             rl_decision=decision,
             done=idx == end_idx,
         )
+        info = result.transition.get("info", {})
+        reward_components = dict(info.get("reward_components", {}))
         trace.append(
             {
                 "date": str(result.current_date.date()),
                 "reward": float(result.reward),
                 "period_return": float(
-                    result.transition.get("info", {})
-                    .get("reward_components", {})
-                    .get("period_return", 0.0)
+                    reward_components.get("period_return", 0.0)
                 ),
                 "turnover": float(result.exec_result.total_turnover),
                 "transaction_cost": float(result.exec_result.total_cost),
-                "cash_target": float(result.cash_target),
+                "cash_target": float(info.get("cash_target", result.cash_target)),
                 "turnover_cap": (
-                    float(decision.get("turnover_cap"))
-                    if decision.get("turnover_cap") is not None
+                    float(info.get("turnover_cap"))
+                    if info.get("turnover_cap") is not None
                     else None
                 ),
-                "posture": str(decision.get("posture", "neutral")),
-                "aggressiveness": float(decision.get("aggressiveness", 1.0)),
+                "posture": str(info.get("posture", decision.get("posture", "neutral"))),
+                "aggressiveness": float(info.get("aggressiveness", decision.get("aggressiveness", 1.0))),
                 "should_rebalance": bool(decision.get("should_rebalance", True)),
                 "selected_sectors": list(result.selected_sectors),
                 "selected_sector_count": int(len(result.selected_sectors)),
@@ -182,9 +182,7 @@ def _run_holdout_policy(
                     str(sector): float(tilt)
                     for sector, tilt in decision.get("sector_tilts", {}).items()
                 },
-                "reward_components": dict(
-                    result.transition.get("info", {}).get("reward_components", {})
-                ),
+                "reward_components": reward_components,
             }
         )
         executor.engine.risk_engine.update(
@@ -312,6 +310,7 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
     target_by_bucket: dict[str, dict[str, int]] = {"low": {}, "medium": {}, "high": {}}
     regrets: list[float] = []
     optimal_hits: list[float] = []
+    utility_dispersion: list[float] = []
     for entry, posture, target_posture in zip(trace, postures, target_postures):
         reward_components = entry.get("reward_components", {})
         stress_signal = float(reward_components.get("stress_signal", 0.0))
@@ -322,9 +321,23 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
         target_by_bucket[bucket][target_posture] = (
             target_by_bucket[bucket].get(target_posture, 0) + 1
         )
-        regret = float(reward_components.get("posture_distance_to_target", 0.0))
+        regret = float(
+            reward_components.get(
+                "soft_regret",
+                reward_components.get("posture_distance_to_target", 0.0),
+            )
+        )
         regrets.append(regret)
-        optimal_hits.append(1.0 if posture == target_posture else 0.0)
+        best_posture = str(reward_components.get("best_posture", target_posture))
+        optimal_hits.append(1.0 if posture == best_posture else 0.0)
+        utility_dispersion.append(
+            float(
+                reward_components.get(
+                    "posture_utility_variance",
+                    0.0,
+                )
+            )
+        )
 
     control_by_posture = {
         posture: {
@@ -349,7 +362,52 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             float(
                 np.mean(
                     [
-                        float(entry.get("reward_components", {}).get("posture_distance_to_target", 0.0))
+                        float(
+                            entry.get("reward_components", {}).get(
+                                "soft_regret",
+                                entry.get("reward_components", {}).get(
+                                    "posture_distance_to_target", 0.0
+                                ),
+                            )
+                        )
+                        for entry in entries
+                    ]
+                )
+            )
+            if entries
+            else None
+        )
+        for bucket, entries in bucket_rows.items()
+    }
+    utility_dispersion_by_stress_bucket = {
+        bucket: (
+            float(
+                np.mean(
+                    [
+                        float(entry.get("reward_components", {}).get("posture_utility_variance", 0.0))
+                        for entry in entries
+                    ]
+                )
+            )
+            if entries
+            else None
+        )
+        for bucket, entries in bucket_rows.items()
+    }
+    posture_optimality_by_stress_bucket = {
+        bucket: (
+            float(
+                np.mean(
+                    [
+                        1.0
+                        if str(entry.get("posture", "neutral"))
+                        == str(
+                            entry.get("reward_components", {}).get(
+                                "best_posture",
+                                entry.get("reward_components", {}).get("target_posture", "neutral"),
+                            )
+                        )
+                        else 0.0
                         for entry in entries
                     ]
                 )
@@ -390,6 +448,7 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
         "posture_counts": posture_counts(postures),
         "target_posture_counts": posture_counts(target_postures),
         "posture_by_stress_bucket": posture_by_bucket,
+        "target_posture_by_stress_bucket": target_by_bucket,
         "rebalance_rate": float(
             np.mean([1.0 if entry["should_rebalance"] else 0.0 for entry in trace])
         ),
@@ -469,10 +528,20 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
                 ]
             )
         ),
-        "decision_quality_basis": "target_posture_proxy",
+        "decision_quality_basis": (
+            "counterfactual_soft_regret_v1"
+            if any(
+                "soft_regret" in entry.get("reward_components", {})
+                for entry in trace
+            )
+            else "target_posture_proxy"
+        ),
         "posture_optimality_rate": float(np.mean(optimal_hits)),
         "mean_regret": float(np.mean(regrets)),
         "regret_by_stress_bucket": regret_by_stress_bucket,
+        "posture_optimality_rate_by_stress_bucket": posture_optimality_by_stress_bucket,
+        "mean_posture_utility_dispersion": float(np.mean(utility_dispersion)),
+        "posture_utility_dispersion_by_stress_bucket": utility_dispersion_by_stress_bucket,
         "stress_posture_correlation": _correlation(
             [
                 float(entry.get("reward_components", {}).get("stress_signal", 0.0))
