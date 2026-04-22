@@ -219,6 +219,38 @@ Each task should record:
   - posture now activates, but still does not switch conditionally
   - the immediate next problem is regime discrimination / posture switching quality, not missing action activation
 
+### Task: Stage 2 target-aware switching state and reward
+- Scope:
+  - expose control-target features directly in RL state:
+    - current target posture
+    - previous posture
+    - previous target posture
+    - stress persistence
+    - mismatch memory
+  - add switching-quality reward terms:
+    - bonus for moving closer to target posture
+    - penalty for staying in a mismatched posture while the target persists
+    - penalty for posture flips that do not improve alignment
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_portfolio_features.py tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `18 passed`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q` -> `123 passed, 1 skipped`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `27.04% CAGR`, `1.299 Sharpe`, `-14.08% MaxDD`, `19.64% avg turnover`
+    - neutral full-stack -> `32.39% CAGR`, `1.465 Sharpe`, `-15.00% MaxDD`, `25.54% avg turnover`
+    - posture diagnostics:
+      - `unique_postures = ['risk_off']`
+      - `posture_usage_rate = 1.0`
+      - `posture_change_rate = 0.0`
+      - `mean_posture_progress_bonus = -0.0025`
+      - `mean_posture_stale_penalty = 0.0213`
+- Decision:
+  - keep the state / reward instrumentation
+  - do not promote the resulting policy as the new RL incumbent
+- Learning:
+  - the state now carries enough explicit posture-target information to diagnose switching quality directly
+  - the remaining failure is not hidden anymore: policy still collapses to one posture, now `risk_off`
+  - the next Stage 2 build should introduce explicit posture-usage gates or constrained supervision rather than only more reward shaping
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block

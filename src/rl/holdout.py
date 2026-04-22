@@ -351,6 +351,38 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
                 ]
             )
         ),
+        "mean_posture_progress_bonus": float(
+            np.mean(
+                [
+                    float(entry.get("reward_components", {}).get("posture_progress_bonus", 0.0))
+                    for entry in trace
+                ]
+            )
+        ),
+        "mean_posture_stale_penalty": float(
+            np.mean(
+                [
+                    float(entry.get("reward_components", {}).get("posture_stale_penalty", 0.0))
+                    for entry in trace
+                ]
+            )
+        ),
+        "mean_posture_flip_penalty": float(
+            np.mean(
+                [
+                    float(entry.get("reward_components", {}).get("posture_flip_penalty", 0.0))
+                    for entry in trace
+                ]
+            )
+        ),
+        "mean_posture_distance_to_target": float(
+            np.mean(
+                [
+                    float(entry.get("reward_components", {}).get("posture_distance_to_target", 0.0))
+                    for entry in trace
+                ]
+            )
+        ),
         "stress_posture_correlation": _correlation(
             [
                 float(entry.get("reward_components", {}).get("stress_signal", 0.0))

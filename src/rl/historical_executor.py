@@ -93,6 +93,11 @@ class HistoricalPeriodExecutor:
         )
         self._recent_turnovers: list[float] = []
         self._recent_cost_ratios: list[float] = []
+        self._prev_posture: str = "neutral"
+        self._prev_target_posture: str = "neutral"
+        self._prev_stress_signal: float = 0.0
+        self._target_posture_streak: int = 0
+        self._prev_posture_mismatch: float = 0.0
 
     def initial_portfolio(self, idx: int = 0) -> PortfolioState:
         start = self.rebalance_dates[idx]
@@ -115,6 +120,11 @@ class HistoricalPeriodExecutor:
         self.engine.risk_engine = RiskEngine(self.engine.cfg)
         self._recent_turnovers = []
         self._recent_cost_ratios = []
+        self._prev_posture = "neutral"
+        self._prev_target_posture = "neutral"
+        self._prev_stress_signal = 0.0
+        self._target_posture_streak = 0
+        self._prev_posture_mismatch = 0.0
         for ts, nav in nav_points or self.initial_nav_points():
             self.engine.risk_engine.update(float(nav), pd.Timestamp(ts).date())
 
@@ -176,17 +186,14 @@ class HistoricalPeriodExecutor:
             ),
             volume_matrix=self.engine.volume_matrix.loc[:current_date],
         )
-        portfolio_features = compute_portfolio_features(
-            portfolio,
-            recent_returns,
-            bm_rets_recent,
-            control_context=build_control_context(
-                sector_feats_now,
-                risk_signal=risk_signal,
-                risk_action=risk_action,
-                recent_turnovers=self._recent_turnovers,
-                recent_cost_ratios=self._recent_cost_ratios,
-            ),
+        portfolio_features = self._build_portfolio_features(
+            portfolio=portfolio,
+            recent_returns=recent_returns,
+            benchmark_returns=bm_rets_recent,
+            sector_feats=sector_feats_now,
+            risk_signal=risk_signal,
+            risk_action=risk_action,
+            macro_state=macro_now,
         )
 
         transition_state = build_state(
@@ -320,6 +327,23 @@ class HistoricalPeriodExecutor:
         )
         if not period_nav:
             updated_nav_points.append((prepared.next_date, float(end_nav)))
+
+        current_target_posture = self._target_posture_for_stress(
+            self._stress_signal(prepared.transition_state),
+            self.engine.cfg,
+        )
+        self._target_posture_streak = (
+            self._target_posture_streak + 1
+            if current_target_posture == self._prev_target_posture
+            else 1
+        )
+        self._prev_posture_mismatch = self._posture_distance(
+            str(decision.get("posture", "neutral")),
+            current_target_posture,
+        )
+        self._prev_posture = str(decision.get("posture", "neutral"))
+        self._prev_target_posture = current_target_posture
+        self._prev_stress_signal = float(self._stress_signal(prepared.transition_state))
 
         next_prices = self.engine._get_prices(prepared.next_date)
         next_portfolio = self._with_sector_weights(
@@ -485,10 +509,21 @@ class HistoricalPeriodExecutor:
         current_stress = self._stress_signal(current_state)
         next_stress = self._stress_signal(next_state)
         stress_signal = float(max(current_stress, next_stress))
+        portfolio_state = current_state.get("portfolio_state", {}) if isinstance(current_state, dict) else {}
         defensive_posture = self._defensive_posture(decision)
         target_posture_label = self._target_posture_for_stress(stress_signal, self.engine.cfg)
         target_controls = self._target_controls_for_posture(target_posture_label, self.engine.cfg)
         target_posture = self._defensive_posture(target_controls)
+        decision_posture = str(decision.get("posture", "neutral"))
+        prev_posture_label = self._label_from_score(
+            float(portfolio_state.get("previous_posture_score", 0.0) or 0.0)
+        )
+        prev_target_posture_label = self._label_from_score(
+            float(portfolio_state.get("previous_target_posture_score", 0.0) or 0.0)
+        )
+        target_streak = max(0.0, float(portfolio_state.get("target_posture_streak", 0.0) or 0.0))
+        prev_distance = self._posture_distance(prev_posture_label, target_posture_label)
+        current_distance = self._posture_distance(decision_posture, target_posture_label)
         defense_gap_penalty = float(
             rl_cfg.get("reward_lambda_defense_gap", 0.0)
         ) * max(0.0, stress_signal - defensive_posture)
@@ -501,6 +536,25 @@ class HistoricalPeriodExecutor:
         target_posture_penalty = float(
             rl_cfg.get("reward_lambda_target_posture", 0.0)
         ) * self._target_control_gap(decision, target_controls)
+        posture_progress_bonus = float(
+            rl_cfg.get("reward_lambda_posture_progress", 0.0)
+        ) * (prev_distance - current_distance)
+        posture_stale_penalty = float(
+            rl_cfg.get("reward_lambda_posture_stale", 0.0)
+        ) * (
+            current_distance
+            * max(0.0, target_streak - 1.0)
+            * (1.0 if decision_posture == prev_posture_label and current_distance > 0.0 else 0.0)
+        )
+        posture_flip_penalty = float(
+            rl_cfg.get("reward_lambda_posture_flip", 0.0)
+        ) * (
+            1.0
+            if decision_posture != prev_posture_label
+            and target_posture_label == prev_target_posture_label
+            and current_distance >= prev_distance
+            else 0.0
+        )
 
         reward = (
             active_return
@@ -513,6 +567,9 @@ class HistoricalPeriodExecutor:
             - overdefense_penalty
             - stress_turnover_penalty
             - target_posture_penalty
+            + posture_progress_bonus
+            - posture_stale_penalty
+            - posture_flip_penalty
         )
         return float(reward), {
             "period_return": float(period_return),
@@ -533,8 +590,13 @@ class HistoricalPeriodExecutor:
             "action_deviation_penalty": float(action_deviation_penalty),
             "stress_signal": float(stress_signal),
             "defensive_posture": float(defensive_posture),
-            "posture": str(decision.get("posture", "neutral")),
+            "posture": str(decision_posture),
             "target_posture": str(target_posture_label),
+            "prev_posture": str(prev_posture_label),
+            "prev_target_posture": str(prev_target_posture_label),
+            "target_posture_streak": float(target_streak),
+            "posture_distance_to_target": float(current_distance),
+            "prev_posture_distance_to_target": float(prev_distance),
             "target_defensive_posture": float(target_posture),
             "target_cash_target": float(target_controls["cash_target"]),
             "target_aggressiveness": float(target_controls["aggressiveness"]),
@@ -543,6 +605,9 @@ class HistoricalPeriodExecutor:
             "overdefense_penalty": float(overdefense_penalty),
             "stress_turnover_penalty": float(stress_turnover_penalty),
             "target_posture_penalty": float(target_posture_penalty),
+            "posture_progress_bonus": float(posture_progress_bonus),
+            "posture_stale_penalty": float(posture_stale_penalty),
+            "posture_flip_penalty": float(posture_flip_penalty),
             "reward": float(reward),
         }
 
@@ -731,6 +796,29 @@ class HistoricalPeriodExecutor:
                 best_distance = distance
         return best_label
 
+    @staticmethod
+    def _posture_score(posture: str) -> float:
+        mapping = {"risk_on": -1.0, "neutral": 0.0, "risk_off": 1.0}
+        return float(mapping.get(posture, 0.0))
+
+    @staticmethod
+    def _label_from_score(score: float) -> str:
+        if score <= -0.5:
+            return "risk_on"
+        if score >= 0.5:
+            return "risk_off"
+        return "neutral"
+
+    @staticmethod
+    def _posture_distance(left: str, right: str) -> float:
+        return float(
+            abs(
+                HistoricalPeriodExecutor._posture_score(left)
+                - HistoricalPeriodExecutor._posture_score(right)
+            )
+            / 2.0
+        )
+
     def _apply_target_control_guidance(
         self,
         decision: dict[str, Any],
@@ -855,17 +943,14 @@ class HistoricalPeriodExecutor:
             ),
             volume_matrix=self.engine.volume_matrix.loc[:as_of],
         )
-        portfolio_state = compute_portfolio_features(
-            portfolio,
-            recent_returns,
-            bm_rets_recent,
-            control_context=build_control_context(
-                sector_feats_now,
-                risk_signal=risk_signal,
-                risk_action=risk_action,
-                recent_turnovers=self._recent_turnovers,
-                recent_cost_ratios=self._recent_cost_ratios,
-            ),
+        portfolio_state = self._build_portfolio_features(
+            portfolio=portfolio,
+            recent_returns=recent_returns,
+            benchmark_returns=bm_rets_recent,
+            sector_feats=sector_feats_now,
+            risk_signal=risk_signal,
+            risk_action=risk_action,
+            macro_state=macro_now,
         )
         return build_state(
             macro_state=macro_now,
@@ -911,6 +996,78 @@ class HistoricalPeriodExecutor:
         if "turnover_cap" not in rl_decision or rl_decision.get("turnover_cap") is None:
             decision["turnover_cap"] = float(posture_controls["turnover_cap"])
         return decision
+
+    def _build_portfolio_features(
+        self,
+        *,
+        portfolio: PortfolioState,
+        recent_returns: pd.Series,
+        benchmark_returns: pd.Series | None,
+        sector_feats: pd.DataFrame,
+        risk_signal: RiskSignal,
+        risk_action: RiskAction,
+        macro_state: dict[str, Any],
+    ) -> dict[str, float]:
+        base_context = self._build_control_context(
+            sector_feats,
+            risk_signal=risk_signal,
+            risk_action=risk_action,
+        )
+        features = compute_portfolio_features(
+            portfolio,
+            recent_returns,
+            benchmark_returns,
+            control_context=base_context,
+        )
+        provisional_state = build_state(
+            macro_state=macro_state,
+            sector_state=build_sector_state(sector_feats),
+            portfolio_state=dict(features),
+        )
+        current_stress = self._stress_signal(provisional_state)
+        target_posture = self._target_posture_for_stress(current_stress, self.engine.cfg)
+        target_streak = (
+            self._target_posture_streak + 1
+            if target_posture == self._prev_target_posture
+            else 1
+        )
+        enriched_context = self._build_control_context(
+            sector_feats,
+            risk_signal=risk_signal,
+            risk_action=risk_action,
+            posture_context={
+                "current_stress_signal": current_stress,
+                "previous_stress_signal": self._prev_stress_signal,
+                "target_posture_score": self._posture_score(target_posture),
+                "previous_posture_score": self._posture_score(self._prev_posture),
+                "previous_target_posture_score": self._posture_score(self._prev_target_posture),
+                "target_posture_streak": float(target_streak),
+                "previous_posture_mismatch": self._prev_posture_mismatch,
+            },
+        )
+        return compute_portfolio_features(
+            portfolio,
+            recent_returns,
+            benchmark_returns,
+            control_context=enriched_context,
+        )
+
+    def _build_control_context(
+        self,
+        sector_feats: pd.DataFrame,
+        *,
+        risk_signal: RiskSignal,
+        risk_action: RiskAction,
+        posture_context: dict[str, float] | None = None,
+    ) -> dict[str, float]:
+        return build_control_context(
+            sector_feats,
+            risk_signal=risk_signal,
+            risk_action=risk_action,
+            recent_turnovers=self._recent_turnovers,
+            recent_cost_ratios=self._recent_cost_ratios,
+            posture_context=posture_context,
+        )
 
     def _with_sector_weights(
         self,

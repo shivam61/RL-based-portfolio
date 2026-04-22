@@ -31,6 +31,7 @@ def build_control_context(
     risk_action: object | None = None,
     recent_turnovers: Sequence[float] | None = None,
     recent_cost_ratios: Sequence[float] | None = None,
+    posture_context: dict[str, float] | None = None,
 ) -> dict[str, float]:
     """Build validated control-state features used by the RL overlay."""
     breadth = 1.0
@@ -42,13 +43,19 @@ def build_control_context(
     turnovers = [float(v) for v in (recent_turnovers or []) if np.isfinite(float(v))]
     costs = [float(v) for v in (recent_cost_ratios or []) if np.isfinite(float(v))]
 
-    return {
+    context = {
         "market_breadth_3m": breadth,
         "recent_turnover_3p": float(np.mean(turnovers[-3:])) if turnovers else 0.0,
         "recent_cost_ratio_3p": float(np.mean(costs[-3:])) if costs else 0.0,
         "risk_cash_floor": float(getattr(risk_action, "cash_floor", 0.0) or 0.0),
         "emergency_rebalance": float(bool(getattr(risk_signal, "emergency_rebalance", False))),
     }
+    if posture_context:
+        for key, value in posture_context.items():
+            if value is None:
+                continue
+            context[key] = float(value)
+    return context
 
 
 def default_decision(sectors: list[str]) -> dict[str, object]:

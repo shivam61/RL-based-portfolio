@@ -52,7 +52,7 @@ POSTURE_LABELS = ["risk_off", "neutral", "risk_on"]
 # State dimensions
 MACRO_DIM = 12          # macro features
 SECTOR_DIM = N_SECTORS * 4  # per-sector: mom_1m, mom_3m, rel_str_1m, breadth_3m
-PORT_DIM = 17           # portfolio state + control features
+PORT_DIM = 24           # portfolio state + control features
 # REALIZED_SECTOR_DIM kept here for future use when more live experience exists
 REALIZED_SECTOR_DIM = N_SECTORS  # not added to STATE_DIM until RL has 500+ training steps
 STATE_DIM = MACRO_DIM + SECTOR_DIM + PORT_DIM  # 12+60+17 = 89
@@ -190,8 +190,11 @@ class SectorAllocationEnv(_GymBase):
             "cash_ratio", "ret_1m", "vol_1m", "current_drawdown",
             "max_drawdown", "drawdown_slope_1m", "vol_shock_1m_3m",
             "breadth_deterioration", "recent_turnover_3p", "recent_cost_ratio_3p",
-            "risk_cash_floor", "emergency_flag", "hhi", "max_weight",
-            "sharpe_3m", "active_ret_1m", "n_stocks",
+            "risk_cash_floor", "emergency_flag", "current_stress_signal",
+            "previous_stress_signal", "target_posture_score", "previous_posture_score",
+            "previous_target_posture_score", "target_posture_streak",
+            "previous_posture_mismatch", "hhi", "max_weight", "sharpe_3m",
+            "active_ret_1m", "n_stocks",
         ]
         for i, k in enumerate(port_keys[:PORT_DIM]):
             v = portfolio_state.get(k, 0.0)

@@ -456,3 +456,65 @@ Copy this block for each future change:
   - posture activation is no longer stuck at neutral
   - the failure mode simply moved from “always neutral” to “always risk-on”
   - the next Stage 2 improvement should target conditional posture switching rather than more generic action activation
+
+## Iteration 7 — Stage 2 Target-Aware Switching State And Reward
+
+- Date:
+  - `2026-04-22`
+- Scope:
+  - expose target-posture and prior-posture memory directly in the RL state
+  - add switching-quality reward terms so posture is scored on movement toward the current target, not just absolute target mismatch
+- Control levers changed:
+  - new state features:
+    - current stress signal
+    - previous stress signal
+    - current target posture score
+    - previous posture score
+    - previous target posture score
+    - target-posture streak
+    - previous posture mismatch
+  - new reward terms:
+    - posture progress bonus
+    - stale-mismatch penalty
+    - non-improving flip penalty
+- Config flags:
+  - `reward_lambda_posture_progress`
+  - `reward_lambda_posture_stale`
+  - `reward_lambda_posture_flip`
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not re-run in this iteration
+- Holdout result vs `neutral_full_stack`:
+  - candidate RL:
+    - CAGR `27.04%`
+    - Sharpe `1.299`
+    - MaxDD `-14.08%`
+    - avg turnover `19.64%`
+  - neutral full-stack:
+    - CAGR `32.39%`
+    - Sharpe `1.465`
+    - MaxDD `-15.00%`
+    - avg turnover `25.54%`
+- Stress-window behavior:
+  - holdout-only review in this iteration
+  - posture diagnostics:
+    - `unique_postures = ['risk_off']`
+    - `posture_usage_rate = 1.0`
+    - `posture_change_rate = 0.0`
+    - `mean_posture_progress_bonus = -0.0025`
+    - `mean_posture_stale_penalty = 0.0213`
+    - `mean_posture_flip_penalty = 0.0017`
+    - `mean_posture_distance_to_target = 0.625`
+    - target posture still varied across `risk_on / neutral / risk_off`
+- Decision:
+  - keep the state / reward instrumentation
+  - reject promotion of the resulting policy as a working Stage 2 controller
+- Learning:
+  - the target-aware state is wired correctly and the new diagnostics are informative
+  - the failure mode moved again:
+    - from always `neutral`
+    - to always `risk_on`
+    - to now always `risk_off`
+  - this confirms the core remaining problem is not missing signal transport anymore
+  - the next Stage 2 step should add explicit posture-usage gates or constrained supervision so PPO cannot satisfy the objective with one static posture

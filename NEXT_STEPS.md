@@ -200,6 +200,34 @@ Status:
   - do not promote the resulting policy as a valid regime controller yet
   - next Stage 2 work must focus on conditional posture switching, not more generic action activation
 
+Recommended Stage 2 build order from here:
+- `2A` target-aware posture state
+  - expose current target posture, prior posture, prior target posture, stress persistence, and mismatch state directly in the RL observation
+- `2B` switching-quality reward
+  - reward improvement toward the current target posture
+  - penalize stale mismatch when the target persists
+  - penalize posture flips that do not improve alignment
+- `2C` posture-guided evaluation gate
+  - reject any policy that stays in one posture for most of the holdout
+  - require posture changes to line up with target-posture variation
+
+Current Stage 2A result:
+- implementation landed and validated
+- latest 2016 holdout:
+  - candidate RL CAGR `27.04%` vs neutral `32.39%`
+  - candidate RL Sharpe `1.299` vs neutral `1.465`
+  - candidate RL MaxDD `-14.08%` vs neutral `-15.00%`
+  - candidate RL avg turnover `19.64%` vs neutral `25.54%`
+- posture behavior:
+  - `unique_postures = ['risk_off']`
+  - `posture_usage_rate = 1.0`
+  - `posture_change_rate = 0.0`
+  - target posture still varied across `risk_on / neutral / risk_off`
+- interpretation:
+  - the target-aware state is working mechanically
+  - the controller still collapses to one posture, now `risk_off`
+  - next Stage 2 step should add explicit posture-usage gates and stronger conditional supervision, not more generic reward tuning
+
 #### Stage 3 — Add breadth control
 
 Add constrained stock-count / concentration buckets:

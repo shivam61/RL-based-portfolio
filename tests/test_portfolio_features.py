@@ -41,6 +41,13 @@ def test_compute_portfolio_features_emits_control_features_without_nans():
             "recent_cost_ratio_3p": 0.002,
             "risk_cash_floor": 0.15,
             "emergency_rebalance": 1.0,
+            "current_stress_signal": 0.45,
+            "previous_stress_signal": 0.20,
+            "target_posture_score": 1.0,
+            "previous_posture_score": 0.0,
+            "previous_target_posture_score": 1.0,
+            "target_posture_streak": 3.0,
+            "previous_posture_mismatch": 0.5,
         },
     )
 
@@ -52,6 +59,13 @@ def test_compute_portfolio_features_emits_control_features_without_nans():
         "recent_cost_ratio_3p",
         "risk_cash_floor",
         "emergency_flag",
+        "current_stress_signal",
+        "previous_stress_signal",
+        "target_posture_score",
+        "previous_posture_score",
+        "previous_target_posture_score",
+        "target_posture_streak",
+        "previous_posture_mismatch",
     }
     assert expected <= set(features)
     assert all(np.isfinite(float(features[key])) for key in expected)
@@ -59,6 +73,9 @@ def test_compute_portfolio_features_emits_control_features_without_nans():
     assert features["recent_turnover_3p"] == pytest.approx(0.31)
     assert features["risk_cash_floor"] == pytest.approx(0.15)
     assert features["emergency_flag"] == pytest.approx(1.0)
+    assert features["current_stress_signal"] == pytest.approx(0.45)
+    assert features["target_posture_score"] == pytest.approx(1.0)
+    assert features["target_posture_streak"] == pytest.approx(3.0)
 
 
 def test_compute_portfolio_features_defaults_and_clips_control_inputs():
@@ -83,6 +100,13 @@ def test_compute_portfolio_features_defaults_and_clips_control_inputs():
             "recent_cost_ratio_3p": -0.001,
             "risk_cash_floor": -0.3,
             "emergency_rebalance": 0.0,
+            "current_stress_signal": 2.0,
+            "previous_stress_signal": -1.0,
+            "target_posture_score": 2.0,
+            "previous_posture_score": -2.0,
+            "previous_target_posture_score": 3.0,
+            "target_posture_streak": 12.0,
+            "previous_posture_mismatch": 2.0,
         },
     )
 
@@ -91,3 +115,10 @@ def test_compute_portfolio_features_defaults_and_clips_control_inputs():
     assert features["recent_cost_ratio_3p"] == pytest.approx(0.0)
     assert features["risk_cash_floor"] == pytest.approx(0.0)
     assert features["emergency_flag"] == pytest.approx(0.0)
+    assert features["current_stress_signal"] == pytest.approx(1.0)
+    assert features["previous_stress_signal"] == pytest.approx(0.0)
+    assert features["target_posture_score"] == pytest.approx(1.0)
+    assert features["previous_posture_score"] == pytest.approx(-1.0)
+    assert features["previous_target_posture_score"] == pytest.approx(1.0)
+    assert features["target_posture_streak"] == pytest.approx(6.0)
+    assert features["previous_posture_mismatch"] == pytest.approx(1.0)

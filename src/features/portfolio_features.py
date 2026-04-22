@@ -131,5 +131,26 @@ def compute_portfolio_features(
     feats["recent_cost_ratio_3p"] = float(max(0.0, ctx.get("recent_cost_ratio_3p", 0.0) or 0.0))
     feats["risk_cash_floor"] = float(max(0.0, ctx.get("risk_cash_floor", 0.0) or 0.0))
     feats["emergency_flag"] = float(1.0 if ctx.get("emergency_rebalance", 0.0) else 0.0)
+    feats["current_stress_signal"] = float(
+        np.clip(ctx.get("current_stress_signal", 0.0) or 0.0, 0.0, 1.0)
+    )
+    feats["previous_stress_signal"] = float(
+        np.clip(ctx.get("previous_stress_signal", 0.0) or 0.0, 0.0, 1.0)
+    )
+    feats["target_posture_score"] = float(
+        np.clip(ctx.get("target_posture_score", 0.0) or 0.0, -1.0, 1.0)
+    )
+    feats["previous_posture_score"] = float(
+        np.clip(ctx.get("previous_posture_score", 0.0) or 0.0, -1.0, 1.0)
+    )
+    feats["previous_target_posture_score"] = float(
+        np.clip(ctx.get("previous_target_posture_score", 0.0) or 0.0, -1.0, 1.0)
+    )
+    feats["target_posture_streak"] = float(
+        np.clip(ctx.get("target_posture_streak", 0.0) or 0.0, 0.0, 6.0)
+    )
+    feats["previous_posture_mismatch"] = float(
+        np.clip(ctx.get("previous_posture_mismatch", 0.0) or 0.0, 0.0, 1.0)
+    )
 
     return feats
