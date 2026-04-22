@@ -79,8 +79,9 @@ sector_model:
   subsample: 0.8
   colsample_bytree: 0.8
   min_child_samples: 20
-  retrain_freq_weeks: 12        # Ablation 2 optimal: 12w beats 4/6/8/26w on clean data
+  retrain_every_rebalances: 3   # 3 x 4-week rebalances = 12 calendar weeks
   target: "fwd_4w_return_rank"  # cross-sectional rank of 4-week forward return
+  fwd_window_days: 28           # sector scorer horizon (~4 trading weeks)
 
 # ── Stock ranking model ───────────────────────────────────────────────────────
 stock_model:
@@ -93,7 +94,7 @@ stock_model:
   subsample: 0.8
   colsample_bytree: 0.8
   min_child_samples: 30
-  retrain_freq_weeks: 12        # Ablation 2 optimal: 12w beats 4/6/8/26w on clean data
+  retrain_every_rebalances: 3   # 3 x 4-week rebalances = 12 calendar weeks
   top_k_per_sector: 5           # stocks selected per sector
   fwd_window_days: 56           # truth baseline label horizon for stock ranking (~8 weeks)
 
@@ -123,6 +124,7 @@ risk:
 # ── RL agent ─────────────────────────────────────────────────────────────────
 rl:
   algorithm: "PPO"
+  training_backend: "disabled"   # disabled | causal_historical_env_v1 ; invalid replay training is blocked by default
   total_timesteps: 20000         # 20k confirmed optimal (50k = 23.37% vs 20k = 23.57%)
   learning_rate: 3.0e-4
   n_steps: 36                   # match minimum buffer size (36 periods before first retrain)
@@ -132,11 +134,13 @@ rl:
   gae_lambda: 0.95
   clip_range: 0.2
   ent_coef: 0.01
-  reward_lambda_dd: 2.0         # drawdown penalty weight
+  reward_lambda_dd: 0.25        # drawdown penalty weight; calibrated so active return is not swamped
   reward_lambda_to: 0.5         # turnover penalty weight
   reward_lambda_conc: 0.3       # concentration penalty
   reward_lambda_liq: 0.2        # liquidity penalty
-  retrain_freq_weeks: 12        # Ablation 2 optimal: 12w beats 4/6/8/26w on clean data
+  reward_lambda_action_dev: 0.05  # discourage extreme departures from the neutral policy
+  retrain_every_rebalances: 3   # 3 x 4-week rebalances = 12 calendar weeks
+  min_history_rebalances: 12    # require about one year of prior rebalance windows before causal PPO training
   use_rl: true                  # set false to disable RL overlay
 
 # ── Adaptive retrain triggers ─────────────────────────────────────────────────

@@ -39,11 +39,11 @@ class StockFeatureBuilder:
 
     def _logic_version(self) -> str:
         payload = {
-            "base": "stock_features_v9_blocks_interactions",
+            "base": "stock_features_v10_pruned_risk_contract",
             "blocks": list(self.blocks),
         }
         digest = hashlib.md5(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:8]
-        return f"stock_features_v9_{digest}"
+        return f"stock_features_v10_{digest}"
 
     def _sector_broadcast(self, frame: pd.DataFrame, sector_map: dict[str, str]) -> pd.DataFrame:
         out = pd.DataFrame(index=frame.index, columns=frame.columns, dtype=float)
@@ -174,7 +174,6 @@ class StockFeatureBuilder:
 
         if "risk" in self.blocks:
             feat_dict["vol_3m"] = vol_3m
-            feat_dict["max_dd_3m"] = max_dd_3m
 
         if "liquidity" in self.blocks and amihud_1m is not None:
             feat_dict["amihud_1m"] = amihud_1m

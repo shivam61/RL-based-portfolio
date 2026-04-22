@@ -1,0 +1,19 @@
+{
+  "periods": 147,
+  "avg_selected_count": 41.394557823129254,
+  "top_k_avg_forward_return": 0.013940561704336532,
+  "universe_avg_forward_return": 0.015018669177490207,
+  "top_k_minus_universe": -0.0010781074731536756,
+  "top_k_minus_sector_median": 0.0029150256946655685,
+  "intra_sector_dispersion": 0.057118856776203236,
+  "top_bottom_spread": 0.003683048340349716,
+  "precision_at_k": 0.5589341582444235,
+  "rank_ic": -0.0025898723595598333,
+  "stability": 0.5903675231482026,
+  "within_sector_ic": 0.04075966123856069,
+  "within_sector_ic_weighted": 0.04219608576305035,
+  "within_sector_top_bottom_spread": 0.0022499884202560804,
+  "within_sector_top_bottom_spread_weighted": 0.0022238693069116114,
+  "within_sector_top_k_minus_sector_median": 0.0023362658921288197,
+  "within_sector_top_k_minus_sector_median_weighted": 0.0024175611866179628
+}

@@ -1,0 +1,475 @@
+{
+  "config": {
+    "sha256": "f337bf7729b8480b4ea9797328bd597cc3ffdb2b1dcde1a89b7f93f21f3fa008",
+    "snapshot": {
+      "backtest": {
+        "benchmark_ticker": "^NSEI",
+        "emergency_rebalance": true,
+        "end_date": "2026-04-17",
+        "initial_capital": 500000,
+        "min_train_years": 2,
+        "random_seed": 42,
+        "rebalance_freq_weeks": 4,
+        "slippage_bps": 10,
+        "start_date": "2013-01-01",
+        "transaction_cost_bps": 25
+      },
+      "features": {
+        "lookback_long": 252,
+        "lookback_medium": 63,
+        "lookback_short": 21,
+        "macro_lag": 1,
+        "stock_lag": 1
+      },
+      "logging": {
+        "format": "%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        "level": "INFO"
+      },
+      "optimizer": {
+        "max_cash": 0.3,
+        "max_sector_weight": 0.35,
+        "max_stock_weight": 0.08,
+        "max_turnover_per_rebalance": 0.4,
+        "min_cash": 0.0,
+        "min_stock_weight": 0.005,
+        "no_trade_band": 0.005,
+        "objective": "mean_variance",
+        "risk_aversion": 2.0,
+        "solver": "CLARABEL"
+      },
+      "paths": {
+        "artifact_dir": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts",
+        "feature_data": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/data/features",
+        "log_dir": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/logs",
+        "model_dir": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/models",
+        "processed_data": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/data/processed",
+        "raw_data": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/data/raw",
+        "report_dir": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports"
+      },
+      "risk": {
+        "max_concentration_hhi": 0.15,
+        "max_drawdown_hard": 0.18,
+        "max_drawdown_soft": 0.12,
+        "max_realized_vol_ann": 0.3,
+        "min_liquidity_days": 10,
+        "regime_vol_threshold": 0.22,
+        "stress_cash_floor": 0.15
+      },
+      "rl": {
+        "algorithm": "PPO",
+        "batch_size": 16,
+        "clip_range": 0.2,
+        "ent_coef": 0.01,
+        "gae_lambda": 0.95,
+        "gamma": 0.99,
+        "learning_rate": 0.0003,
+        "n_epochs": 10,
+        "n_steps": 36,
+        "retrain_every_rebalances": 3,
+        "reward_lambda_conc": 0.3,
+        "reward_lambda_dd": 2.0,
+        "reward_lambda_liq": 0.2,
+        "reward_lambda_to": 0.5,
+        "total_timesteps": 20000,
+        "use_rl": true
+      },
+      "rl_triggers": {
+        "enabled": false,
+        "tier1_portfolio": {
+          "consecutive_losses": 3,
+          "drawdown_threshold": 0.1,
+          "hit_rate_min": 0.45,
+          "hit_rate_window": 10,
+          "period_shock": -0.04
+        },
+        "tier2_macro": {
+          "regime_flip": true,
+          "vix_jump_pct": 0.4,
+          "vix_persistence_periods": 2
+        },
+        "tier3_drift": {
+          "min_buffer_for_drift": 20,
+          "reward_shift_std": 1.5,
+          "rl_entropy_increase_pct": 0.3,
+          "sector_leadership_churn": 0.5,
+          "sector_leadership_window": 4
+        }
+      },
+      "sector_model": {
+        "colsample_bytree": 0.8,
+        "fwd_window_days": 28,
+        "learning_rate": 0.05,
+        "max_depth": 4,
+        "min_child_samples": 20,
+        "n_estimators": 100,
+        "num_leaves": 31,
+        "retrain_every_rebalances": 3,
+        "subsample": 0.8,
+        "target": "fwd_4w_return_rank",
+        "type": "lightgbm"
+      },
+      "stock_features": {
+        "blocks": [
+          "absolute_momentum",
+          "risk",
+          "liquidity",
+          "trend"
+        ]
+      },
+      "stock_model": {
+        "colsample_bytree": 0.8,
+        "fwd_window_days": 56,
+        "learning_rate": 0.08,
+        "max_depth": 4,
+        "min_child_samples": 30,
+        "n_estimators": 60,
+        "num_leaves": 31,
+        "objective": "rank",
+        "retrain_every_rebalances": 3,
+        "subsample": 0.8,
+        "top_k_per_sector": 5,
+        "type": "lightgbm"
+      },
+      "universe": {
+        "cap_buckets": {
+          "large": 0.6,
+          "mid": 0.3,
+          "small": 0.1
+        },
+        "config_file": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/config/universe.yaml",
+        "historical_union": {
+          "candidate_sector_map_file": null,
+          "liquidity_lookback_days": 63,
+          "lookback_years": 10,
+          "min_median_traded_value_cr": 2.0,
+          "min_price_history_days": 252,
+          "output_dir": "data/processed/universe/historical_union_10y",
+          "rebalance_frequency": "4W",
+          "relevance": {
+            "broad_index_membership_file": null,
+            "include_if_in_broad_index": true,
+            "market_cap_proxy_rank_max": 300,
+            "min_history_days_for_relevance": 126,
+            "min_median_traded_value_cr": 8.0
+          },
+          "sanity": {
+            "max_stocks_per_sector": 250,
+            "min_stocks_per_sector": 2
+          },
+          "use_active_window_filter": true
+        },
+        "large_cap_top_n": 100,
+        "max_stocks": 120,
+        "mid_cap_top_n": 150,
+        "min_avg_volume_cr": 1,
+        "min_market_cap_cr": 500,
+        "mode": "static",
+        "small_cap_top_n": 250
+      }
+    }
+  },
+  "models": {
+    "artifacts": [
+      {
+        "artifact_type": "unknown",
+        "entry_count": 3,
+        "exists": true,
+        "generated_in_current_run": false,
+        "group": "model",
+        "is_dir": true,
+        "modified_at_utc": "2026-04-20T17:49:02.171630Z",
+        "name": "rl_agent",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/models/rl_agent",
+        "size_bytes": null,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "unknown",
+        "exists": true,
+        "generated_in_current_run": false,
+        "group": "model",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:29.555572Z",
+        "name": "sector_scorer.pkl",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/models/sector_scorer.pkl",
+        "sha256": "456c2e4983334a35f1a3d00194331868532de4c329d96da2a3b4769ed999433e",
+        "size_bytes": 152626,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "unknown",
+        "exists": true,
+        "generated_in_current_run": false,
+        "group": "model",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:29.574292Z",
+        "name": "stock_ranker.pkl",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/models/stock_ranker.pkl",
+        "sha256": "d393836f307ae5c5b2090e5b10578337a71b9b6207382f022f97b5d2e9d7db25",
+        "size_bytes": 1278173,
+        "stale_relative_to_current_run": false
+      }
+    ],
+    "model_dir": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/models"
+  },
+  "reports": {
+    "artifacts": [
+      {
+        "artifact_type": "unknown",
+        "exists": true,
+        "generated_in_current_run": false,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-18T15:16:44.646558Z",
+        "name": "ablation_retrain_freq.csv",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/ablation_retrain_freq.csv",
+        "sha256": "284781a6dc91897769695330eda37e9663a7ee3d260d1f5ac0b18963e00fe601",
+        "size_bytes": 496,
+        "stale_relative_to_current_run": true
+      },
+      {
+        "artifact_type": "attribution",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.277286Z",
+        "name": "attribution.json",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/attribution.json",
+        "sha256": "6862699a6aa908de9aaf68d3f99dfa56f1413f859dff9ed0da75fcc3ff31a562",
+        "size_bytes": 8882,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "current_portfolio",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.275937Z",
+        "name": "current_portfolio.json",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/current_portfolio.json",
+        "sha256": "2286dcb8e6a127b4eba4b46984002a534b5d8a50e72905a5e6d49dcc142a2918",
+        "size_bytes": 1579,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "drawdown_chart",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.669670Z",
+        "name": "drawdown_chart.png",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/drawdown_chart.png",
+        "sha256": "1dd6bc5d66e355c54bcf76acebfe6a82674cf7e374e4d1af19d2fcfefe8a570a",
+        "size_bytes": 117427,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "unknown",
+        "exists": true,
+        "generated_in_current_run": false,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-18T16:44:00.104001Z",
+        "name": "earnings_coverage.csv",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/earnings_coverage.csv",
+        "sha256": "6410f744d1d6cd0d4c480e61a192043c4454bb573339e1b6f3060ec20debc6b0",
+        "size_bytes": 42109,
+        "stale_relative_to_current_run": true
+      },
+      {
+        "artifact_type": "metrics",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.217834Z",
+        "name": "metrics.json",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/metrics.json",
+        "sha256": "b5d3ad7def95aba6578a9d74b0d2db6e963dce06d745f6be84a708666b611481",
+        "size_bytes": 2326,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "nav_chart",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.554003Z",
+        "name": "nav_chart.png",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/nav_chart.png",
+        "sha256": "89427465235576f8aa2d2ff2f0655fb417bf906e26259dc549874832d1ab73a0",
+        "size_bytes": 207335,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "nav_series",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.226648Z",
+        "name": "nav_series.parquet",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/nav_series.parquet",
+        "sha256": "5f2a72fb59db2680d58247e3a9f86aa7ec133dab3c33010796c1ef2ae9bc013d",
+        "size_bytes": 139243,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "rebalance_log",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.245569Z",
+        "name": "rebalance_log.csv",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/rebalance_log.csv",
+        "sha256": "d2889f2ebb69fbd875e1053d9458812443b1ff1adcc4d4642223f1f8ccc44c53",
+        "size_bytes": 77747,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "rebalance_log",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.242468Z",
+        "name": "rebalance_log.parquet",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/rebalance_log.parquet",
+        "sha256": "ea822d9a7b918c90e9b1c75b363d1eeb924675c392c235cad596f7d9c67fe15d",
+        "size_bytes": 47173,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "rolling_returns_chart",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:35.038738Z",
+        "name": "rolling_returns.png",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/rolling_returns.png",
+        "sha256": "3c2230ae3374a7e0ad4cada84ce3c6a2e717646e46cce2278ca7965aa7f827fe",
+        "size_bytes": 204145,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "sector_attribution_chart",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.836987Z",
+        "name": "sector_attribution.png",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/sector_attribution.png",
+        "sha256": "55f8f208319cf49bfcbb623f7a8475fa69be37513af84f7b0b5b3fab22cdf6d0",
+        "size_bytes": 52521,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "selection_diagnostics",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.254653Z",
+        "name": "selection_diagnostics.json",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/selection_diagnostics.json",
+        "sha256": "dbe84df8fd7020cb79987c56cf74af92518f3b07001c31dfea44c0d786661b59",
+        "size_bytes": 1286,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "selection_rebalance_log",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.263306Z",
+        "name": "selection_rebalance_log.csv",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/selection_rebalance_log.csv",
+        "sha256": "33b86e67da12d95503c4cd59dd622368f79f572749d3bfa3ffb5bf0b909bbdfe",
+        "size_bytes": 97578,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "selection_rebalance_log",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.259364Z",
+        "name": "selection_rebalance_log.parquet",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/selection_rebalance_log.parquet",
+        "sha256": "93dd98627a73e465c163aff965e56901b4e96389c19d98affeeeb40c1358b902",
+        "size_bytes": 44755,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "stock_ranker_feature_importance",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.267609Z",
+        "name": "stock_ranker_feature_importance.csv",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/stock_ranker_feature_importance.csv",
+        "sha256": "8d33123513871997f60a185760c29426265059dd03eaf51a9489946c07a547a3",
+        "size_bytes": 13659,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "stock_ranker_feature_importance",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.275231Z",
+        "name": "stock_ranker_feature_importance.json",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/stock_ranker_feature_importance.json",
+        "sha256": "72d61edcadd9451fd2376274cfc37fcc6b8b9baa3d9172d9180bae8be9757186",
+        "size_bytes": 13126,
+        "stale_relative_to_current_run": false
+      },
+      {
+        "artifact_type": "unknown",
+        "exists": true,
+        "generated_in_current_run": false,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:33.671622Z",
+        "name": "strategy_comparison.csv",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/strategy_comparison.csv",
+        "sha256": "383cf2bfba77788489860b7ef11070d883fb207b85d6f12b03f6418d2f8e383c",
+        "size_bytes": 409,
+        "stale_relative_to_current_run": true
+      },
+      {
+        "artifact_type": "year_returns_chart",
+        "exists": true,
+        "generated_in_current_run": true,
+        "group": "report",
+        "is_dir": false,
+        "modified_at_utc": "2026-04-21T17:17:34.751260Z",
+        "name": "year_returns.png",
+        "path": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports/year_returns.png",
+        "sha256": "37b45112afd4cd5fbc8b989223c021ea28caa1d7e99fe266ad81ea9c250b40bc",
+        "size_bytes": 41319,
+        "stale_relative_to_current_run": false
+      }
+    ],
+    "report_dir": "/Users/shivam.gupta/cursor/dsp-repos/stocks/RL-based-portfolio/artifacts/reports"
+  },
+  "run": {
+    "backtest_end_date": "2026-04-17",
+    "backtest_start_date": "2013-01-01",
+    "mode": "optimizer_only",
+    "report_generated_at_utc": "2026-04-21T17:17:34Z",
+    "run_id": "optimizer_only_2013_01_01_2026_04_17_20260421T171734Z"
+  },
+  "schema_version": 1
+}

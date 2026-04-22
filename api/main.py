@@ -62,11 +62,22 @@ class RebalanceRequest(BaseModel):
     current_holdings: dict[str, float] = {}  # ticker → current value in INR (optional)
 
 
+def _run_recommendation(**kwargs):
+    try:
+        return _recommender.recommend(**kwargs)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model_loaded": _recommender.is_ready()}
+    return {
+        "status": "ok",
+        "model_loaded": _recommender.is_ready(),
+        **_recommender.policy_status(),
+    }
 
 
 @app.get("/suggest")
@@ -75,7 +86,7 @@ def suggest_allocation(capital_inr: float = 500_000, risk_profile: str = "modera
     Suggest a fresh portfolio allocation without tracking state.
     Returns target weights and trades to execute from cash.
     """
-    rec = _recommender.recommend(capital_inr=capital_inr, risk_profile=risk_profile)
+    rec = _run_recommendation(capital_inr=capital_inr, risk_profile=risk_profile)
     return rec
 
 
@@ -86,7 +97,7 @@ def create_portfolio(req: CreatePortfolioRequest):
     Use this ID for subsequent rebalance calls.
     """
     portfolio_id = str(uuid.uuid4())[:8]
-    rec = _recommender.recommend(
+    rec = _run_recommendation(
         capital_inr=req.capital_inr,
         risk_profile=req.risk_profile,
     )
@@ -140,7 +151,7 @@ def rebalance_portfolio(portfolio_id: str, req: RebalanceRequest):
         for t, w in p["allocation"].items()
     }
 
-    rec = _recommender.recommend(
+    rec = _run_recommendation(
         capital_inr=p["capital_inr"],
         risk_profile=p["risk_profile"],
         current_holdings=current_alloc,

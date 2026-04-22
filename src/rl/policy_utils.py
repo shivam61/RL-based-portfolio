@@ -1,0 +1,50 @@
+"""Shared policy helpers for backtest-aligned allocation decisions."""
+from __future__ import annotations
+
+import pandas as pd
+
+
+def build_sector_state(sector_feats: pd.DataFrame) -> dict[str, dict[str, float]]:
+    """Build the sector-state payload expected by the RL policy."""
+    state: dict[str, dict[str, float]] = {}
+    if sector_feats is None or sector_feats.empty:
+        return state
+
+    for _, row in sector_feats.iterrows():
+        sector = str(row.get("sector", "unknown"))
+        state[sector] = {
+            "mom_1m": float(row.get("mom_1m", 0.0) or 0.0),
+            "mom_3m": float(row.get("mom_3m", 0.0) or 0.0),
+            "rel_str_1m": float(row.get("rel_str_1m", 0.0) or 0.0),
+            "breadth_3m": float(row.get("breadth_3m", 0.0) or 0.0),
+        }
+    return state
+
+
+def default_decision(sectors: list[str]) -> dict[str, object]:
+    """Neutral allocation decision used when RL is disabled or unavailable."""
+    return {
+        "sector_tilts": {sector: 1.0 for sector in sectors},
+        "cash_target": 0.05,
+        "aggressiveness": 1.0,
+        "should_rebalance": True,
+    }
+
+
+def select_sectors(
+    sectors: list[str],
+    sector_scores: dict[str, float],
+    rl_decision: dict[str, object],
+    *,
+    full_rl: bool,
+) -> list[str]:
+    """Mirror backtest sector-selection semantics."""
+    ordered = sorted(
+        ((sector, float(sector_scores.get(sector, 0.0))) for sector in sectors),
+        key=lambda item: (-item[1], item[0]),
+    )
+    if full_rl:
+        return [sector for sector, _ in ordered]
+
+    top_n = min(len(ordered), 5)
+    return [sector for sector, _ in ordered[:top_n]]

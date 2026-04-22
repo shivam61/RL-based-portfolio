@@ -20,6 +20,7 @@ import click
 
 from src.config import load_config, setup_logging
 from src.rl.agent import RLSectorAgent
+from src.rl.contract import CAUSAL_TRAINING_BACKEND
 
 
 @click.command()
@@ -31,6 +32,15 @@ def main(timesteps, config, run_eval):
     cfg = load_config(config)
     setup_logging(cfg)
     logger = logging.getLogger(__name__)
+    backend = cfg.get("rl", {}).get("training_backend", "disabled")
+
+    if backend != CAUSAL_TRAINING_BACKEND:
+        logger.error(
+            "Refusing to train RL with backend=%s. Configure rl.training_backend=%s first.",
+            backend,
+            CAUSAL_TRAINING_BACKEND,
+        )
+        sys.exit(2)
 
     model_dir = Path(cfg["paths"]["model_dir"]) / "rl_agent"
 
@@ -60,27 +70,10 @@ def main(timesteps, config, run_eval):
     if run_eval:
         buf = agent._experience_buffer
         if buf:
-            # Simple evaluation: compare RL actions vs neutral actions
-            from src.rl.environment import SectorAllocationEnv
-            import numpy as np
-            rl_rewards, baseline_rewards = [], []
-            for step in buf[-50:]:
-                obs_env = SectorAllocationEnv([step], cfg)
-                obs = obs_env._get_obs(0)
-                if agent.is_trained:
-                    action, _ = agent.model.predict(obs.reshape(1, -1), deterministic=True)
-                    rl_reward = obs_env._compute_reward(step, action[0])
-                    neutral = np.array([1.0] * 15 + [0.05, 1.0, 1.0])
-                    baseline_reward = obs_env._compute_reward(step, neutral)
-                    rl_rewards.append(rl_reward)
-                    baseline_rewards.append(baseline_reward)
-
-            if rl_rewards:
-                logger.info("RL avg reward: %.4f vs Baseline: %.4f",
-                           np.mean(rl_rewards), np.mean(baseline_rewards))
-                improvement = (np.mean(rl_rewards) - np.mean(baseline_rewards))
-                logger.info("RL improvement: %.4f (%s)",
-                           improvement, "+" if improvement > 0 else "-")
+            logger.warning(
+                "Standalone replay-based RL evaluation has been removed. "
+                "Use a causal holdout evaluation once the simulator-backed backend is fully implemented."
+            )
 
 
 if __name__ == "__main__":

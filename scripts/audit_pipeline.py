@@ -86,13 +86,11 @@ def audit_data_integrity(cfg, price_matrix, feature_store):
 
     # A2. Sector scorer label check
     print("\n[A2] Sector scorer label construction (sector_scorer.py:~113)")
-    print("  Formula used: shift(-28).rolling(28).apply(compound)")
-    print("  >> This creates label for date T from returns [T+1..T+28]")
-    print("  >> Training window goes up to as_of date")
-    print("  >> ISSUE: If as_of = 2018-01-01, a feature row dated 2017-12-01")
-    print("     has a forward-return label using prices up to 2018-01-28 — FUTURE!")
-    print("  >> Effective lookahead: up to 28 trading days (~6 weeks)")
-    print("  >> SEVERITY: HIGH — inflates sector model IC significantly")
+    sector_fwd_window = int(cfg["sector_model"].get("fwd_window_days", 28))
+    print(f"  Formula used: shift(-{sector_fwd_window}).rolling({sector_fwd_window}).apply(compound)")
+    print(f"  >> Sector labels use a dedicated {sector_fwd_window}-day horizon")
+    print("  >> Walk-forward training truncates sector features by the sector label horizon")
+    print("  >> STATUS: sector labels and sector feature cutoff now share the same horizon")
 
     # A3. Stock ranker label check
     print("\n[A3] Stock ranker label construction (stock_ranker.py:61)")
@@ -107,13 +105,19 @@ def audit_data_integrity(cfg, price_matrix, feature_store):
     sector_lookback = cfg["sector_model"].get("train_lookback_years", 3)
     stock_lookback  = cfg["stock_model"].get("train_lookback_years", 2)
     min_train_yrs   = cfg["backtest"]["min_train_years"]
-    retrain_weeks   = cfg["sector_model"].get("retrain_freq_weeks", 12)
+    retrain_rebalances = cfg["sector_model"].get("retrain_every_rebalances", None)
+    retrain_weeks = cfg["sector_model"].get("retrain_freq_weeks", None)
     print(f"  Warmup period:         {min_train_yrs} years (first rebalance: 2015-01-01)")
     print(f"  Sector lookback:       {sector_lookback} years")
     print(f"  Stock lookback:        {stock_lookback} years")
-    print(f"  Retrain frequency:     every {retrain_weeks} weeks")
-    print(f"  Sector label issue:    ~{28} trading days of future seepage per training run")
-    print(f"  FIX NEEDED: Truncate training features by fwd_window days before as_of")
+    if retrain_rebalances is not None:
+        print(f"  Retrain frequency:     every {retrain_rebalances} rebalances")
+    elif retrain_weeks is not None:
+        print(f"  Retrain frequency:     legacy config {retrain_weeks} calendar weeks")
+    else:
+        print("  Retrain frequency:     default cadence in engine")
+    print(f"  Sector label horizon:  {sector_fwd_window} trading days")
+    print("  STATUS: training cutoff now uses the sector label horizon")
 
     # A5. Universe point-in-time check
     print("\n[A5] Universe PIT check")

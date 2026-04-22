@@ -1,0 +1,52 @@
+{
+  "_report_metadata": {
+    "artifact_type": "current_portfolio",
+    "backtest_end_date": "2026-04-17",
+    "backtest_start_date": "2013-01-01",
+    "freshness_verified_at_utc": "2026-04-21T17:17:34Z",
+    "manifest_file": "run_manifest.json",
+    "report_generated_at_utc": "2026-04-21T17:17:34Z",
+    "run_id": "optimizer_only_2013_01_01_2026_04_17_20260421T171734Z",
+    "run_mode": "optimizer_only",
+    "schema_version": 1
+  },
+  "as_of": "2026-03-12",
+  "cash": 0.05,
+  "note": "Latest walk-forward portfolio recommendation",
+  "sector_tilts": {
+    "Automobiles": 1.0,
+    "Banking": 1.0,
+    "CapitalGoods": 1.0,
+    "Cement": 1.0,
+    "Chemicals": 1.0,
+    "ConsumerDiscretionary": 1.0,
+    "Energy": 1.0,
+    "FMCG": 1.0,
+    "FinancialServices": 1.0,
+    "Healthcare": 1.0,
+    "IT": 1.0,
+    "Metals": 1.0,
+    "Pharma": 1.0,
+    "RealEstate": 1.0,
+    "Telecom": 1.0
+  },
+  "weights": {
+    "AARTIIND.NS": 0.03713081646102899,
+    "ACC.NS": 0.023889728008161287,
+    "BAJAJFINSV.NS": 0.03628532946428302,
+    "CASH": 0.40774324725160266,
+    "DLF.NS": 0.06900669911578816,
+    "EICHERMOT.NS": 0.03713081645200884,
+    "GODREJPROP.NS": 0.04918687996067463,
+    "GRASIM.NS": 0.015771577143415573,
+    "HDFCAMC.NS": 0.037130816466121,
+    "HDFCLIFE.NS": 0.049186880219446734,
+    "PRESTIGE.NS": 0.03756287334667067,
+    "RAMCOCEM.NS": 0.037130812877121264,
+    "SBILIFE.NS": 0.03713081632775588,
+    "SHREECEM.NS": 0.01432029269771803,
+    "TVSMOTOR.NS": 0.037130781356095446,
+    "ULTRACEMCO.NS": 0.03713081648310942,
+    "VINATIORGA.NS": 0.037130816368998294
+  }
+}

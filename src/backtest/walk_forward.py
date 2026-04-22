@@ -43,7 +43,9 @@ from src.models.sector_scorer import SectorScorer
 from src.models.stock_ranker import StockRanker
 from src.optimizer.portfolio_optimizer import PortfolioOptimizer
 from src.rl.agent import RLSectorAgent
+from src.rl.contract import CAUSAL_TRAINING_BACKEND
 from src.rl.environment import SectorAllocationEnv, SECTORS
+from src.rl.historical_executor import HistoricalPeriodExecutor
 from src.rl.retrain_triggers import EventDetector
 from src.risk.risk_engine import RiskEngine
 
@@ -94,6 +96,9 @@ class WalkForwardEngine:
         self.optimizer = PortfolioOptimizer(self.cfg)
         self.risk_engine = RiskEngine(self.cfg)
         self.simulator = PortfolioSimulator(self.cfg)
+        self.sector_fwd_window_days = int(
+            self.cfg["sector_model"].get("fwd_window_days", 28)
+        )
         self.stock_fwd_window_days = int(self.cfg["stock_model"].get("fwd_window_days", 56))
 
         # Precompute macro features
@@ -108,6 +113,12 @@ class WalkForwardEngine:
         self.sector_scorer = SectorScorer(self.cfg)
         self.stock_ranker = StockRanker(self.cfg)
         self.rl_agent = RLSectorAgent(self.cfg)
+        self.rl_training_backend = str(
+            self.cfg.get("rl", {}).get("training_backend", "disabled")
+        ).strip()
+        self.rl_model_enabled = (
+            self.use_rl and self.rl_training_backend == CAUSAL_TRAINING_BACKEND
+        )
 
         # Adaptive retrain trigger detector
         self.event_detector = EventDetector(self.cfg)
@@ -130,6 +141,9 @@ class WalkForwardEngine:
         logger.info("Initial capital: INR %.0f", self.initial_capital)
         logger.info("Mode: %s", self.mode)
         logger.info("RL overlay: %s", "ENABLED" if self.use_rl else "DISABLED")
+        logger.info("RL training backend: %s", self.rl_training_backend)
+        if self.use_rl and not self.rl_model_enabled:
+            logger.info("RL model execution disabled until a causal backend is configured")
         logger.info("=" * 70)
 
         # ── Feature store: compute-once backfill (skipped on re-runs) ────────────
@@ -186,8 +200,8 @@ class WalkForwardEngine:
             if self._should_retrain_models(i, current_date):
                 self._train_models(current_date, idx=i)
 
-            if self.use_rl and self._should_retrain_rl(i):
-                self._train_rl()
+            if self.rl_model_enabled and self._should_retrain_rl(i):
+                self._train_rl(current_idx=i)
 
             # ── B. Get current universe ───────────────────────────────────────
             _t = time.perf_counter()
@@ -229,9 +243,15 @@ class WalkForwardEngine:
 
             sector_state = self._build_sector_state(sector_feats_now)
 
-            if self.use_rl and self.rl_agent.is_trained:
+            transition_state = {
+                "macro_state": macro_now.to_dict() if isinstance(macro_now, pd.Series) else dict(macro_now),
+                "sector_state": sector_state,
+                "portfolio_state": dict(port_feats),
+            }
+
+            if self.rl_model_enabled and self.rl_agent.is_trained:
                 rl_decision = self.rl_agent.decide(
-                    macro_state=macro_now.to_dict() if isinstance(macro_now, pd.Series) else macro_now,
+                    macro_state=transition_state["macro_state"],
                     sector_state=sector_state,
                     portfolio_state=port_feats,
                     prev_realized_sector_weights=portfolio.sector_weights,
@@ -266,10 +286,6 @@ class WalkForwardEngine:
             selected_stock_rows: list[dict[str, object]] = []
             selected_sectors = self._select_sectors(snapshot.sectors, sector_scores, rl_decision)
             for sector in selected_sectors:
-                tilt = rl_decision["sector_tilts"].get(sector, 1.0)
-                if self.mode == "full_rl" and tilt < 0.4:
-                    continue  # RL decided to avoid sector
-
                 ranking = self.stock_ranker.rank_stocks(
                     stock_feats_now, sector, top_k=top_k
                 )
@@ -514,7 +530,7 @@ class WalkForwardEngine:
             rl_underweights = sorted([(s, t) for s, t in tilts.items() if t < 0.9], key=lambda x: x[1])[:3]
             if self.mode == "selection_only":
                 rl_mode = "Selection"
-            elif self.use_rl and self.rl_agent.is_trained:
+            elif self.rl_model_enabled and self.rl_agent.is_trained:
                 rl_mode = "RL"
             else:
                 rl_mode = "Rule"
@@ -593,19 +609,53 @@ class WalkForwardEngine:
 
             # ── M. Record RL experience ───────────────────────────────────────
             if self.use_rl:
+                transition_info = {
+                    "date": str(current_date.date()),
+                    "mode": rl_mode.lower(),
+                    "target_weights": {ticker: float(weight) for ticker, weight in target_weights.items()},
+                    "pre_risk_target_weights": {
+                        ticker: float(weight)
+                        for ticker, weight in pre_risk_target_weights.items()
+                    },
+                    "realized_sector_weights": {sector: float(weight) for sector, weight in sw.items()},
+                    "total_cost": float(exec_result.total_cost),
+                    "turnover": float(exec_result.total_turnover),
+                    "cash_target": float(cash_target),
+                    "selected_sectors": [str(sector) for sector in selected_sectors],
+                }
+                outcome = {
+                    "portfolio_return": float(period_return),
+                    "max_drawdown_episode": float(risk_signal.drawdown),
+                    "turnover": float(exec_result.total_turnover),
+                    "concentration_hhi": float(risk_signal.hhi),
+                    "liquidity_stress": float(risk_signal.liquidity_stress),
+                    "realized_sector_weights": dict(sw),
+                }
+                next_state = self._build_next_rl_state(
+                    next_date=next_date,
+                    portfolio=portfolio,
+                    nav_points=nav_points,
+                )
                 exp_step = {
                     "date": str(current_date.date()),
-                    "macro_state": macro_now.to_dict() if isinstance(macro_now, pd.Series) else macro_now,
-                    "sector_state": sector_state,
-                    "portfolio_state": port_feats,
-                    "outcome": {
-                        "portfolio_return": period_return,
-                        "max_drawdown_episode": risk_signal.drawdown,
-                        "turnover": exec_result.total_turnover,
-                        "concentration_hhi": risk_signal.hhi,
-                        "liquidity_stress": float(risk_signal.liquidity_stress),
-                        "realized_sector_weights": dict(sw),
+                    "state": transition_state,
+                    "action": {
+                        "sector_tilts": {
+                            sector: float(weight)
+                            for sector, weight in rl_decision.get("sector_tilts", {}).items()
+                        },
+                        "cash_target": float(rl_decision.get("cash_target", cash_target)),
+                        "aggressiveness": float(rl_decision.get("aggressiveness", 1.0)),
                     },
+                    "reward": float(period_return),
+                    "next_state": next_state,
+                    "done": bool(i == len(rebalance_dates) - 2),
+                    "info": transition_info,
+                    # Legacy fields kept temporarily for backward compatibility.
+                    "macro_state": transition_state["macro_state"],
+                    "sector_state": transition_state["sector_state"],
+                    "portfolio_state": transition_state["portfolio_state"],
+                    "outcome": outcome,
                 }
                 self.rl_agent.record_step(exp_step)
 
@@ -625,10 +675,11 @@ class WalkForwardEngine:
                         "tier": ev.tier, "name": ev.name,
                         "severity": ev.severity, "reason": ev.reason,
                     })
-                # Tier 1 triggers always force retrain; Tier 2/3 only if enough buffer
+                # Tier 1 triggers always force retrain; Tier 2/3 only if enough history.
                 highest_tier = min(ev.tier for ev in trigger_events)
-                has_enough_buffer = self.rl_agent.buffer_size() >= 30
-                if self.use_rl and has_enough_buffer and (
+                current_idx = i
+                min_history = int(self.cfg["rl"].get("min_history_rebalances", 3))
+                if self.rl_model_enabled and current_idx >= min_history and (
                     highest_tier == 1 or (highest_tier <= 2 and self._should_retrain_rl(i))
                 ):
                     logger.info(
@@ -636,7 +687,7 @@ class WalkForwardEngine:
                         current_date.date(),
                         "; ".join(f"[T{e.tier}] {e.name}" for e in trigger_events),
                     )
-                    self._train_rl()
+                    self._train_rl(current_idx=i)
                     self.event_detector.notify_retrained()
 
         # ── Build final NAV series ─────────────────────────────────────────────
@@ -745,8 +796,8 @@ class WalkForwardEngine:
         # sector return matrix for labels
         # NOTE: extend price window by fwd_window to allow label computation,
         # but sector_feats are truncated to label_cutoff to prevent lookahead.
-        label_horizon = self.stock_fwd_window_days
-        label_cutoff = as_of - pd.offsets.BDay(label_horizon + 2)
+        sector_label_horizon = self.sector_fwd_window_days
+        label_cutoff = as_of - pd.offsets.BDay(sector_label_horizon + 2)
         extended_prices = self.price_matrix.loc[
             (self.price_matrix.index >= train_start) &
             (self.price_matrix.index < as_of)
@@ -770,7 +821,7 @@ class WalkForwardEngine:
             self.sector_scorer.fit(
                 safe_sector_feats,
                 sec_returns,
-                fwd_window=self.stock_fwd_window_days,
+                fwd_window=self.sector_fwd_window_days,
                 macro_features=self.macro_features.loc[
                     (self.macro_features.index >= train_start) &
                     (self.macro_features.index < as_of)
@@ -786,17 +837,42 @@ class WalkForwardEngine:
 
         logger.info("  [timing] _train_models total → %.2fs", time.perf_counter() - t0_total)
 
-    def _train_rl(self) -> None:
-        if len(self.rl_agent._experience_buffer) >= 30:
-            total_ts = self.cfg["rl"].get("total_timesteps", 8000)
-            logger.info("Retraining RL agent: buffer=%d steps, PPO total_timesteps=%d ...",
-                        self.rl_agent.buffer_size(), total_ts)
-            t0 = time.perf_counter()
-            self.rl_agent.train(total_timesteps=total_ts)
+    def _train_rl(self, current_idx: int) -> None:
+        if not self.rl_model_enabled:
+            return
+        min_history = int(self.cfg["rl"].get("min_history_rebalances", 3))
+        if current_idx < min_history:
+            return
+
+        total_ts = int(self.cfg["rl"].get("total_timesteps", 8000))
+        logger.info(
+            "Retraining RL agent: train_end_idx=%d, PPO total_timesteps=%d ...",
+            current_idx - 1,
+            total_ts,
+        )
+        executor = HistoricalPeriodExecutor(
+            self,
+            mode="full_rl",
+            allow_model_retraining=False,
+        )
+        rl_env = self.rl_agent.build_causal_env(
+            executor,
+            start_idx=0,
+            end_idx=current_idx - 1,
+        )
+        t0 = time.perf_counter()
+        self.rl_agent.train(
+            total_timesteps=total_ts,
+            causal_env=rl_env,
+        )
+        if self.rl_agent.is_trained:
             self._rl_retrain_count += 1
-            logger.info("  [timing] rl_agent.train      → %.2fs  (%.0f ts/s)",
-                        time.perf_counter() - t0,
-                        total_ts / max(time.perf_counter() - t0, 1e-6))
+        elapsed = time.perf_counter() - t0
+        logger.info(
+            "  [timing] rl_agent.train      → %.2fs  (%.0f ts/s)",
+            elapsed,
+            total_ts / max(elapsed, 1e-6),
+        )
 
     # ── Scheduling helpers ────────────────────────────────────────────────────
 
@@ -815,19 +891,35 @@ class WalkForwardEngine:
         return sorted(set(valid))
 
     def _should_retrain_sector_scorer(self, idx: int) -> bool:
-        retrain_weeks = self.cfg["sector_model"].get("retrain_freq_weeks", 4)
-        return idx % retrain_weeks == 0
+        every = self._retrain_every_rebalances("sector_model", fallback_weeks=4)
+        return idx % every == 0
 
     def _should_retrain_stock_ranker(self, idx: int) -> bool:
-        retrain_weeks = self.cfg["stock_model"].get("retrain_freq_weeks", 12)
-        return idx % retrain_weeks == 0
+        every = self._retrain_every_rebalances("stock_model", fallback_weeks=12)
+        return idx % every == 0
 
     def _should_retrain_models(self, idx: int, date: pd.Timestamp) -> bool:
         return self._should_retrain_sector_scorer(idx) or self._should_retrain_stock_ranker(idx)
 
     def _should_retrain_rl(self, idx: int) -> bool:
-        retrain_weeks = self.cfg["rl"].get("retrain_freq_weeks", 12)
-        return idx > 0 and idx % retrain_weeks == 0
+        every = self._retrain_every_rebalances("rl", fallback_weeks=12)
+        return idx > 0 and idx % every == 0
+
+    def _retrain_every_rebalances(self, section: str, fallback_weeks: int) -> int:
+        """
+        Return the scheduled retrain cadence in rebalance units.
+
+        `retrain_every_rebalances` is the canonical setting.
+        Legacy `retrain_freq_weeks` is interpreted as calendar weeks and converted
+        using the configured rebalance cadence so historical configs remain valid.
+        """
+        section_cfg = self.cfg.get(section, {})
+        every = section_cfg.get("retrain_every_rebalances")
+        if every is not None:
+            return max(1, int(every))
+
+        legacy_weeks = int(section_cfg.get("retrain_freq_weeks", fallback_weeks))
+        return max(1, int(round(legacy_weeks / max(self.rebalance_weeks, 1))))
 
     # ── Data helpers ──────────────────────────────────────────────────────────
 
@@ -959,6 +1051,37 @@ class WalkForwardEngine:
             }
         return state
 
+    def _build_next_rl_state(
+        self,
+        next_date: pd.Timestamp,
+        portfolio: PortfolioState,
+        nav_points: list[tuple[pd.Timestamp, float]],
+    ) -> dict:
+        snapshot = self.universe_mgr.get_universe(
+            next_date.date(),
+            price_matrix=self.price_matrix,
+            volume_matrix=self.volume_matrix,
+        )
+        prices_next = self._get_prices(next_date)
+        bm_ticker = self.cfg["backtest"].get("benchmark_ticker", "^NSEI")
+        bm_prices = self.price_matrix[bm_ticker] if bm_ticker in self.price_matrix.columns else None
+        macro_next = self._get_macro_features(next_date)
+        sector_feats_next = self._get_sector_features_now(
+            next_date, snapshot, prices_next, bm_prices
+        )
+        recent_rets = self._get_recent_portfolio_returns(nav_points, next_date)
+        bm_rets_recent = bm_prices.pct_change(fill_method=None) if bm_prices is not None else None
+        portfolio_state = compute_portfolio_features(
+            portfolio, recent_rets, bm_rets_recent
+        )
+        return {
+            "macro_state": (
+                macro_next.to_dict() if isinstance(macro_next, pd.Series) else dict(macro_next)
+            ),
+            "sector_state": self._build_sector_state(sector_feats_next),
+            "portfolio_state": dict(portfolio_state),
+        }
+
     def _compute_sector_contributions(self) -> dict[str, float]:
         contributions: dict[str, float] = {}
         for rec in self.rebalance_records:
@@ -985,11 +1108,7 @@ class WalkForwardEngine:
             key=lambda item: (-item[1], item[0]),
         )
         if self.mode == "full_rl":
-            return [
-                sector
-                for sector, _ in ordered
-                if rl_decision["sector_tilts"].get(sector, 1.0) >= 0.4
-            ]
+            return [sector for sector, _ in ordered]
         top_n = min(len(ordered), 5)
         return [sector for sector, _ in ordered[:top_n]]
 

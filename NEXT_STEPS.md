@@ -1,5 +1,186 @@
 # Next Steps — Improvement Backlog
 
+## Active Program — RL Control Roadmap (2026-04-22)
+
+The current portfolio stack is now split into three permanent reference modes. These are the gates for every future RL change and should not be redefined mid-stream:
+
+- `neutral_full_stack`
+  - same alpha, sector filter, optimizer, and constraints as `full_rl`
+  - fixed neutral action: equal sector tilts, neutral aggressiveness, neutral cash target
+  - full-window reference in `artifacts/reports/rl_full_neutral_comparison.json`
+  - current full-window metrics:
+    - CAGR `17.85%`
+    - Sharpe `0.720`
+    - MaxDD `-32.80%`
+    - avg turnover `27.43%`
+- `current_rl`
+  - current trained PPO overlay on the causal historical env
+  - full-window reference in `artifacts/reports/metrics.json`
+  - current full-window metrics:
+    - CAGR `18.27%`
+    - Sharpe `0.750`
+    - MaxDD `-32.62%`
+    - avg turnover `28.03%`
+- `optimizer_only`
+  - lower-level structural benchmark; useful, but not the main RL gate
+  - reference in `artifacts/reports/rl_full_backtest_comparison.json`
+  - current full-window metrics:
+    - CAGR `9.48%`
+    - Sharpe `0.234`
+    - MaxDD `-34.27%`
+    - avg turnover `48.65%`
+
+Primary RL gate:
+- compare candidate RL against `neutral_full_stack` on:
+  - full backtest
+  - holdout
+  - named stress windows
+
+Current diagnosis:
+- RL is now causally valid and slightly better than neutral, but it is still a weak control policy.
+- Full-window uplift vs true neutral is only:
+  - CAGR `+0.42 pts`
+  - Sharpe `+0.029`
+  - MaxDD `+0.18 pts`
+  - turnover `+0.60 pts` worse
+- Prior holdout uplift vs true neutral is only:
+  - CAGR `+0.29 pts`
+  - Sharpe `+0.044`
+- Stress review from `artifacts/reports/rebalance_log.csv` shows the core weakness:
+  - in stress windows since 2017, trained RL averaged `5.96%` cash vs neutral `9.52%`
+  - trained RL averaged `1.037` aggressiveness vs neutral `1.000`
+  - trained RL averaged `30.52%` turnover vs neutral `29.32%`
+  - RL mostly behaved like a mild tilt engine, not a decisive risk controller
+
+### Permanent Evaluation Outputs
+
+Every promoted RL run must publish a control-evaluation artifact that includes:
+
+- CAGR
+- Sharpe
+- Sortino
+- MaxDD
+- avg turnover
+- avg cash
+- stress-window realized loss vs neutral
+- stress-window recovery time
+- behavior metrics in drawdowns:
+  - avg cash
+  - avg aggressiveness
+  - avg turnover
+  - avg stock count
+  - avg sector count
+
+Named stress windows are fixed:
+
+- `2018_q4`
+- `2020_covid`
+- `2022_rate_shock`
+- `2024_late_drawdown`
+- `2025_prolonged_drawdown`
+- `2026_early_weakness`
+
+The working iteration log for these runs lives in `docs/rl_control_iteration_log.md`.
+
+### Staged RL Build Order
+
+#### Stage 0 — Freeze the current strong baseline
+
+- keep `neutral_full_stack`, `current_rl`, and `optimizer_only` immutable
+- make the control-evaluation artifact mandatory for:
+  - full backtest
+  - holdout
+  - any candidate RL redesign
+- do not merge RL changes without the control review
+
+#### Stage 1 — Risk budget control only
+
+Add first:
+
+- better control-state features:
+  - current drawdown
+  - drawdown slope
+  - realized vol shock
+  - breadth deterioration
+  - rolling correlation spike
+  - trend decay
+  - turnover pressure
+  - transaction-cost pressure
+- explicit cash control:
+  - start with tight buckets or a tight band
+  - example: `0%`, `10%`, `20%`, `30%`
+- stronger aggressiveness effect with clear portfolio impact
+- optional turnover budget / turnover cap
+
+Do not add yet:
+
+- sector inclusion
+- stock-count control
+- top-k sector selection
+
+Stage 1 success criteria:
+
+- more cash in stress
+- less churn in stress
+- same or better full-period CAGR
+- improved drawdown profile vs `current_rl` and `neutral_full_stack`
+- improvement in at least `3/6` named stress windows
+
+#### Stage 2 — Add a posture layer
+
+Only after Stage 1 works:
+
+- use discrete posture selected by RL:
+  - `risk_on`
+  - `neutral`
+  - `risk_off`
+- each posture maps to:
+  - cash band
+  - aggressiveness cap
+  - turnover cap
+
+This is safer than giving RL unconstrained continuous authority too early.
+
+#### Stage 3 — Add breadth control
+
+Add constrained stock-count / concentration buckets:
+
+- `wide`: `18–24` names
+- `medium`: `12–18` names
+- `focused`: `8–12` names
+
+Breadth control changes concentration while still preserving the ranker and optimizer as the base engine.
+
+#### Stage 4 — Add constrained sector inclusion last
+
+Only after RL proves it can manage risk budget, posture, and breadth:
+
+- allow:
+  - include all sectors
+  - exclude up to `1–2` weakest sectors
+  - focus on top-`k` sectors from the sector model
+- do not start with free-form sector choice
+
+### Rollback Rules
+
+Reject a candidate RL change if it:
+
+- materially lowers full-period CAGR
+- worsens MaxDD
+- loses to `neutral_full_stack` on both return and behavior
+- increases stress-window turnover without reducing realized stress losses
+- fails to improve at least `3/6` named stress windows
+- claims better reward while showing weaker cash/aggressiveness response in stress
+
+### Working Principles
+
+- add one control lever at a time
+- keep each new lever behind a config flag
+- prefer discrete buckets over wide continuous freedom at first
+- do not give RL more authority until it proves it can use the current increment responsibly
+
+---
+
 Each item is implemented one at a time, backtested, committed, and measured before moving on.
 Best known result: **run_020 — 22.19% CAGR, Sharpe 0.96, MaxDD −23.5%** (12w retrain, no triggers, dropped zero-importance binary features)
 Stable ceiling on corrected data: **~22–25% CAGR** (12w retrain config — ablation D2 showed 24.98% single-pass; run_020 is 22.19% accumulated)

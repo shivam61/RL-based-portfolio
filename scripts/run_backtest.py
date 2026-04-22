@@ -58,6 +58,18 @@ from src.reporting.report import ReportGenerator
 @click.option("--start", default=None, help="Override backtest start date")
 @click.option("--end", default=None, help="Override backtest end date")
 @click.option(
+    "--rl-training-backend",
+    type=click.Choice(["disabled", "causal_historical_env_v1"], case_sensitive=False),
+    default=None,
+    help="Override RL training backend without editing config/base.yaml",
+)
+@click.option(
+    "--rl-timesteps",
+    type=int,
+    default=None,
+    help="Override RL PPO timesteps for this backtest run",
+)
+@click.option(
     "--stock-fwd-window-days",
     type=int,
     default=None,
@@ -70,7 +82,19 @@ from src.reporting.report import ReportGenerator
 )
 @click.option("--baselines/--no-baselines", default=True, help="Run baseline strategies")
 @click.option("--report/--no-report", default=True, help="Generate report")
-def main(disable_rl, mode, config, start, end, stock_fwd_window_days, stock_feature_blocks, baselines, report):
+def main(
+    disable_rl,
+    mode,
+    config,
+    start,
+    end,
+    rl_training_backend,
+    rl_timesteps,
+    stock_fwd_window_days,
+    stock_feature_blocks,
+    baselines,
+    report,
+):
     """Run the full walk-forward backtest and generate report."""
     cfg = load_config(config)
     setup_logging(cfg)
@@ -87,6 +111,12 @@ def main(disable_rl, mode, config, start, end, stock_fwd_window_days, stock_feat
         cfg["backtest"]["start_date"] = start
     if end:
         cfg["backtest"]["end_date"] = end
+    if rl_training_backend is not None:
+        cfg.setdefault("rl", {})
+        cfg["rl"]["training_backend"] = rl_training_backend
+    if rl_timesteps is not None:
+        cfg.setdefault("rl", {})
+        cfg["rl"]["total_timesteps"] = int(rl_timesteps)
     if stock_fwd_window_days is not None:
         cfg["stock_model"]["fwd_window_days"] = int(stock_fwd_window_days)
     if stock_feature_blocks:
@@ -102,7 +132,8 @@ def main(disable_rl, mode, config, start, end, stock_fwd_window_days, stock_feat
     logger.info("Stock label horizon: %s trading days", cfg["stock_model"].get("fwd_window_days", 56))
     logger.info("Random seed: %s", seed)
     logger.info("Stock feature blocks: %s", cfg.get("stock_features", {}).get("blocks", "default"))
-    logger.info("RL overlay: %s", "ENABLED" if mode == "full_rl" else "DISABLED")
+    logger.info("RL overlay mode: %s", "FULL_RL" if mode == "full_rl" else "DISABLED")
+    logger.info("RL training backend: %s", cfg.get("rl", {}).get("training_backend", "disabled"))
     logger.info("=" * 70)
 
     # ── 1. Load data ──────────────────────────────────────────────────────────
@@ -145,9 +176,13 @@ def main(disable_rl, mode, config, start, end, stock_fwd_window_days, stock_feat
     metrics = engine.run()
     engine.save_state()
     metrics["mode"] = mode
+    metrics["sector_fwd_window_days"] = int(
+        cfg["sector_model"].get("fwd_window_days", 28)
+    )
     metrics["stock_fwd_window_days"] = int(cfg["stock_model"].get("fwd_window_days", 56))
     metrics["random_seed"] = seed
     metrics["stock_feature_blocks"] = cfg.get("stock_features", {}).get("blocks", [])
+    metrics["rl_training_backend"] = cfg.get("rl", {}).get("training_backend", "disabled")
 
     # Add dates to metrics
     metrics["start_date"] = str(bt_start.date())

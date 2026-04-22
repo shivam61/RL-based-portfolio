@@ -8,6 +8,44 @@ Each task should record:
 - outcome
 - learning
 
+## 2026-04-22
+
+### Task: RL control baseline freeze and evaluation-plan lock
+- Scope:
+  - promote the new causal RL stack into a permanent control-evaluation workflow
+  - freeze three reference modes for future RL work:
+    - `neutral_full_stack`
+    - `current_rl`
+    - `optimizer_only`
+  - add the staged RL-control roadmap to `NEXT_STEPS.md`
+  - add a dedicated iteration log for future RL redesigns in `docs/rl_control_iteration_log.md`
+- Validation:
+  - current full-window references:
+    - `current_rl` -> `18.27% CAGR`, `0.750 Sharpe`, `-32.62% MaxDD`, `28.03% avg turnover`
+    - `neutral_full_stack` -> `17.85% CAGR`, `0.720 Sharpe`, `-32.80% MaxDD`, `27.43% avg turnover`
+    - `optimizer_only` -> `9.48% CAGR`, `0.234 Sharpe`, `-34.27% MaxDD`, `48.65% avg turnover`
+  - current holdout reference:
+    - `current_rl` vs neutral -> `+0.29% CAGR`, `+0.044 Sharpe`
+  - stress-window control review from `rebalance_log.csv`:
+    - trained RL average stress cash since 2017 -> `5.96%`
+    - neutral average stress cash -> `9.52%`
+    - trained RL average stress aggressiveness -> `1.037`
+    - neutral average stress aggressiveness -> `1.000`
+    - trained RL average stress turnover -> `30.52%`
+    - neutral average stress turnover -> `29.32%`
+- Decision:
+  - keep the current RL stack as the incumbent policy
+  - do not widen RL authority yet
+  - Stage 1 should focus only on risk-budget control:
+    - better control-state features
+    - explicit cash control
+    - stronger aggressiveness effect
+    - optional turnover cap / budget
+- Learning:
+  - the causal RL path is now real enough to measure, but still too weak as a controller
+  - the main gating problem is behavior in drawdowns, not headline CAGR
+  - future RL iterations need a permanent audit trail or they will drift back into reward-first evaluation
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block

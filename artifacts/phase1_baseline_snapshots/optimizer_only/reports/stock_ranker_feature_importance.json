@@ -1,0 +1,549 @@
+{
+  "_report_metadata": {
+    "artifact_type": "stock_ranker_feature_importance",
+    "backtest_end_date": "2026-04-17",
+    "backtest_start_date": "2013-01-01",
+    "freshness_verified_at_utc": "2026-04-21T17:17:34Z",
+    "manifest_file": "run_manifest.json",
+    "report_generated_at_utc": "2026-04-21T17:17:34Z",
+    "run_id": "optimizer_only_2013_01_01_2026_04_17_20260421T171734Z",
+    "run_mode": "optimizer_only",
+    "schema_version": 1
+  },
+  "n_features": 84,
+  "n_sectors": 14,
+  "sectors": {
+    "Automobiles": [
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 132.0,
+        "importance_share": 0.20465116279069767,
+        "rank": 1
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 129.0,
+        "importance_share": 0.2,
+        "rank": 2
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 124.0,
+        "importance_share": 0.19224806201550387,
+        "rank": 3
+      },
+      {
+        "feature": "vol_3m",
+        "importance": 124.0,
+        "importance_share": 0.19224806201550387,
+        "rank": 4
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 76.0,
+        "importance_share": 0.11782945736434108,
+        "rank": 5
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 60.0,
+        "importance_share": 0.09302325581395349,
+        "rank": 6
+      }
+    ],
+    "Banking": [
+      {
+        "feature": "vol_3m",
+        "importance": 166.0,
+        "importance_share": 0.23413258110014104,
+        "rank": 1
+      },
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 155.0,
+        "importance_share": 0.21861777150916784,
+        "rank": 2
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 143.0,
+        "importance_share": 0.2016925246826516,
+        "rank": 3
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 93.0,
+        "importance_share": 0.1311706629055007,
+        "rank": 4
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 84.0,
+        "importance_share": 0.11847672778561354,
+        "rank": 5
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 68.0,
+        "importance_share": 0.09590973201692525,
+        "rank": 6
+      }
+    ],
+    "CapitalGoods": [
+      {
+        "feature": "vol_3m",
+        "importance": 153.0,
+        "importance_share": 0.20536912751677852,
+        "rank": 1
+      },
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 144.0,
+        "importance_share": 0.19328859060402684,
+        "rank": 2
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 138.0,
+        "importance_share": 0.18523489932885906,
+        "rank": 3
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 122.0,
+        "importance_share": 0.16375838926174496,
+        "rank": 4
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 104.0,
+        "importance_share": 0.1395973154362416,
+        "rank": 5
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 84.0,
+        "importance_share": 0.11275167785234899,
+        "rank": 6
+      }
+    ],
+    "Cement": [
+      {
+        "feature": "amihud_1m",
+        "importance": 151.0,
+        "importance_share": 0.20798898071625344,
+        "rank": 1
+      },
+      {
+        "feature": "vol_3m",
+        "importance": 144.0,
+        "importance_share": 0.19834710743801653,
+        "rank": 2
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 134.0,
+        "importance_share": 0.18457300275482094,
+        "rank": 3
+      },
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 127.0,
+        "importance_share": 0.174931129476584,
+        "rank": 4
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 90.0,
+        "importance_share": 0.12396694214876033,
+        "rank": 5
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 80.0,
+        "importance_share": 0.11019283746556474,
+        "rank": 6
+      }
+    ],
+    "Chemicals": [
+      {
+        "feature": "vol_3m",
+        "importance": 178.0,
+        "importance_share": 0.2557471264367816,
+        "rank": 1
+      },
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 152.0,
+        "importance_share": 0.21839080459770116,
+        "rank": 2
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 118.0,
+        "importance_share": 0.16954022988505746,
+        "rank": 3
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 100.0,
+        "importance_share": 0.14367816091954022,
+        "rank": 4
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 81.0,
+        "importance_share": 0.11637931034482758,
+        "rank": 5
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 67.0,
+        "importance_share": 0.09626436781609195,
+        "rank": 6
+      }
+    ],
+    "ConsumerDiscretionary": [
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 128.0,
+        "importance_share": 0.2188034188034188,
+        "rank": 1
+      },
+      {
+        "feature": "vol_3m",
+        "importance": 123.0,
+        "importance_share": 0.21025641025641026,
+        "rank": 2
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 105.0,
+        "importance_share": 0.1794871794871795,
+        "rank": 3
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 99.0,
+        "importance_share": 0.16923076923076924,
+        "rank": 4
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 67.0,
+        "importance_share": 0.11452991452991453,
+        "rank": 5
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 63.0,
+        "importance_share": 0.1076923076923077,
+        "rank": 6
+      }
+    ],
+    "Energy": [
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 144.0,
+        "importance_share": 0.19889502762430938,
+        "rank": 1
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 139.0,
+        "importance_share": 0.1919889502762431,
+        "rank": 2
+      },
+      {
+        "feature": "vol_3m",
+        "importance": 135.0,
+        "importance_share": 0.18646408839779005,
+        "rank": 3
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 106.0,
+        "importance_share": 0.1464088397790055,
+        "rank": 4
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 103.0,
+        "importance_share": 0.14226519337016574,
+        "rank": 5
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 97.0,
+        "importance_share": 0.13397790055248618,
+        "rank": 6
+      }
+    ],
+    "FMCG": [
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 164.0,
+        "importance_share": 0.24260355029585798,
+        "rank": 1
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 129.0,
+        "importance_share": 0.1908284023668639,
+        "rank": 2
+      },
+      {
+        "feature": "vol_3m",
+        "importance": 117.0,
+        "importance_share": 0.17307692307692307,
+        "rank": 3
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 101.0,
+        "importance_share": 0.14940828402366865,
+        "rank": 4
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 94.0,
+        "importance_share": 0.1390532544378698,
+        "rank": 5
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 71.0,
+        "importance_share": 0.10502958579881656,
+        "rank": 6
+      }
+    ],
+    "FinancialServices": [
+      {
+        "feature": "vol_3m",
+        "importance": 166.0,
+        "importance_share": 0.24198250728862974,
+        "rank": 1
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 156.0,
+        "importance_share": 0.22740524781341107,
+        "rank": 2
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 136.0,
+        "importance_share": 0.19825072886297376,
+        "rank": 3
+      },
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 88.0,
+        "importance_share": 0.1282798833819242,
+        "rank": 4
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 72.0,
+        "importance_share": 0.10495626822157435,
+        "rank": 5
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 68.0,
+        "importance_share": 0.09912536443148688,
+        "rank": 6
+      }
+    ],
+    "Healthcare": [
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 152.0,
+        "importance_share": 0.22551928783382788,
+        "rank": 1
+      },
+      {
+        "feature": "vol_3m",
+        "importance": 127.0,
+        "importance_share": 0.1884272997032641,
+        "rank": 2
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 125.0,
+        "importance_share": 0.18545994065281898,
+        "rank": 3
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 98.0,
+        "importance_share": 0.14540059347181009,
+        "rank": 4
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 89.0,
+        "importance_share": 0.13204747774480713,
+        "rank": 5
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 83.0,
+        "importance_share": 0.12314540059347182,
+        "rank": 6
+      }
+    ],
+    "IT": [
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 153.0,
+        "importance_share": 0.22270742358078602,
+        "rank": 1
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 125.0,
+        "importance_share": 0.1819505094614265,
+        "rank": 2
+      },
+      {
+        "feature": "vol_3m",
+        "importance": 123.0,
+        "importance_share": 0.17903930131004367,
+        "rank": 3
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 121.0,
+        "importance_share": 0.17612809315866085,
+        "rank": 4
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 86.0,
+        "importance_share": 0.12518195050946143,
+        "rank": 5
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 79.0,
+        "importance_share": 0.11499272197962154,
+        "rank": 6
+      }
+    ],
+    "Metals": [
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 171.0,
+        "importance_share": 0.24498567335243554,
+        "rank": 1
+      },
+      {
+        "feature": "vol_3m",
+        "importance": 145.0,
+        "importance_share": 0.20773638968481375,
+        "rank": 2
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 122.0,
+        "importance_share": 0.17478510028653296,
+        "rank": 3
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 115.0,
+        "importance_share": 0.16475644699140402,
+        "rank": 4
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 81.0,
+        "importance_share": 0.11604584527220631,
+        "rank": 5
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 64.0,
+        "importance_share": 0.09169054441260745,
+        "rank": 6
+      }
+    ],
+    "Pharma": [
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 159.0,
+        "importance_share": 0.2314410480349345,
+        "rank": 1
+      },
+      {
+        "feature": "vol_3m",
+        "importance": 137.0,
+        "importance_share": 0.19941775836972345,
+        "rank": 2
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 128.0,
+        "importance_share": 0.18631732168850074,
+        "rank": 3
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 120.0,
+        "importance_share": 0.17467248908296942,
+        "rank": 4
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 77.0,
+        "importance_share": 0.11208151382823872,
+        "rank": 5
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 66.0,
+        "importance_share": 0.09606986899563319,
+        "rank": 6
+      }
+    ],
+    "RealEstate": [
+      {
+        "feature": "ma_50_200_ratio",
+        "importance": 154.0,
+        "importance_share": 0.25538971807628524,
+        "rank": 1
+      },
+      {
+        "feature": "vol_3m",
+        "importance": 98.0,
+        "importance_share": 0.1625207296849088,
+        "rank": 2
+      },
+      {
+        "feature": "mom_12m_skip1m",
+        "importance": 97.0,
+        "importance_share": 0.16086235489220563,
+        "rank": 3
+      },
+      {
+        "feature": "amihud_1m",
+        "importance": 97.0,
+        "importance_share": 0.16086235489220563,
+        "rank": 4
+      },
+      {
+        "feature": "mom_accel_3m_6m",
+        "importance": 88.0,
+        "importance_share": 0.14593698175787728,
+        "rank": 5
+      },
+      {
+        "feature": "ret_3m",
+        "importance": 69.0,
+        "importance_share": 0.11442786069651742,
+        "rank": 6
+      }
+    ]
+  }
+}

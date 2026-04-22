@@ -4,11 +4,12 @@ All outputs are dashboard-ready (parquet + PNG).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -37,6 +38,9 @@ class ReportGenerator:
         self.cfg = cfg
         self.report_dir = Path(cfg["paths"]["report_dir"])
         self.report_dir.mkdir(parents=True, exist_ok=True)
+        self._run_context: dict[str, Any] = {}
+        self._generated_artifacts: list[Path] = []
+        self._preexisting_report_files: set[Path] = set()
 
     def generate_full_report(
         self,
@@ -53,62 +57,79 @@ class ReportGenerator:
         """Generate all report artifacts and return report directory."""
         logger.info("Generating report → %s", self.report_dir)
         prepared_selection = prepare_selection_diagnostics(selection_diagnostics)
+        self._preexisting_report_files = {
+            path.resolve()
+            for path in self.report_dir.glob("*")
+            if path.is_file()
+        }
+        self._run_context = self._build_run_context(metrics, nav_series)
+        self._generated_artifacts = []
 
-        self._save_metrics_json(metrics)
-        self._save_nav_parquet(nav_series, strategy_navs)
-        self._save_rebalance_log(rebalance_records)
-        self._save_selection_diagnostics(prepared_selection)
-        self._save_stock_ranker_importance(stock_ranker)
+        self._generated_artifacts.append(self._save_metrics_json(metrics))
+        self._generated_artifacts.extend(self._save_nav_parquet(nav_series, strategy_navs))
+        self._generated_artifacts.extend(self._save_rebalance_log(rebalance_records))
+        self._generated_artifacts.extend(self._save_selection_diagnostics(prepared_selection))
+        self._generated_artifacts.extend(self._save_stock_ranker_importance(stock_ranker))
         if current_portfolio:
-            self._save_current_portfolio(current_portfolio)
+            self._generated_artifacts.append(self._save_current_portfolio(current_portfolio))
         if attribution:
-            self._save_attribution(attribution)
+            self._generated_artifacts.append(self._save_attribution(attribution))
 
         if HAS_MPL:
-            self._plot_nav(nav_series, benchmark_nav, strategy_navs)
-            self._plot_drawdown(nav_series)
-            self._plot_year_returns(metrics.get("year_returns", {}))
-            self._plot_sector_contributions(
+            self._generated_artifacts.append(
+                self._plot_nav(nav_series, benchmark_nav, strategy_navs)
+            )
+            self._generated_artifacts.append(self._plot_drawdown(nav_series))
+            year_returns_chart = self._plot_year_returns(metrics.get("year_returns", {}))
+            if year_returns_chart is not None:
+                self._generated_artifacts.append(year_returns_chart)
+            sector_chart = self._plot_sector_contributions(
                 metrics.get("sector_contributions", {}),
                 attribution,
             )
-            self._plot_rolling_returns(nav_series, benchmark_nav)
+            if sector_chart is not None:
+                self._generated_artifacts.append(sector_chart)
+            self._generated_artifacts.append(
+                self._plot_rolling_returns(nav_series, benchmark_nav)
+            )
+
+        self._write_run_manifest()
 
         self._print_summary(metrics, attribution, current_portfolio, prepared_selection)
         return self.report_dir
 
     # ── Text / JSON ───────────────────────────────────────────────────────────
 
-    def _save_metrics_json(self, metrics: dict) -> None:
+    def _save_metrics_json(self, metrics: dict) -> Path:
         cleaned = {}
         for k, v in metrics.items():
-            if isinstance(v, (int, float, str, bool)):
-                cleaned[k] = float(v) if isinstance(v, float) else v
-            elif isinstance(v, dict):
-                cleaned[k] = {str(kk): float(vv) if isinstance(vv, float) else vv
-                              for kk, vv in v.items()}
-            elif hasattr(v, "isoformat"):
-                cleaned[k] = v.isoformat()
-            else:
-                cleaned[k] = str(v)
+            cleaned[str(k)] = self._jsonify(v)
+
+        cleaned["run_mode"] = self._run_context["run_mode"]
+        cleaned["backtest_start_date"] = self._run_context["backtest_start_date"]
+        cleaned["backtest_end_date"] = self._run_context["backtest_end_date"]
+        cleaned["report_generated_at_utc"] = self._run_context["report_generated_at_utc"]
+        cleaned = self._with_artifact_metadata(cleaned, artifact_type="metrics")
 
         path = self.report_dir / "metrics.json"
-        with open(path, "w") as f:
-            json.dump(cleaned, f, indent=2)
+        self._write_json(path, cleaned)
         logger.info("Metrics saved → %s", path)
+        return path
 
     def _save_nav_parquet(
         self,
         nav: pd.Series,
         strategy_navs: dict[str, pd.Series] | None,
-    ) -> None:
+    ) -> list[Path]:
         frames = {"portfolio": nav}
         if strategy_navs:
             frames.update(strategy_navs)
-        df = pd.DataFrame(frames)
-        df.to_parquet(self.report_dir / "nav_series.parquet", engine="pyarrow")
+        df = self._attach_frame_metadata(pd.DataFrame(frames))
+        path = self.report_dir / "nav_series.parquet"
+        df.to_parquet(path, engine="pyarrow")
+        return [path]
 
-    def _save_rebalance_log(self, records: list[RebalanceRecord]) -> None:
+    def _save_rebalance_log(self, records: list[RebalanceRecord]) -> list[Path]:
         rows = []
         prev_weights: dict[str, float] = {}
         cum_nav = records[0].pre_nav if records else 1.0
@@ -156,11 +177,14 @@ class ReportGenerator:
             })
             prev_weights = cur_weights
 
-        df = pd.DataFrame(rows)
-        df.to_parquet(self.report_dir / "rebalance_log.parquet", engine="pyarrow")
-        df.to_csv(self.report_dir / "rebalance_log.csv", index=False)
+        df = self._attach_frame_metadata(pd.DataFrame(rows))
+        parquet_path = self.report_dir / "rebalance_log.parquet"
+        csv_path = self.report_dir / "rebalance_log.csv"
+        df.to_parquet(parquet_path, engine="pyarrow")
+        df.to_csv(csv_path, index=False)
         logger.info("Rebalance log saved: %d records", len(records))
         self._print_decision_log(df)
+        return [parquet_path, csv_path]
 
     def _print_decision_log(self, df: pd.DataFrame) -> None:
         print("\n" + "=" * 90)
@@ -192,22 +216,31 @@ class ReportGenerator:
             if rl_info:    print(f"    {'':12}  RL:      {rl_info.strip()}{emerg}")
         print("=" * 90 + "\n")
 
-    def _save_current_portfolio(self, portfolio: dict) -> None:
+    def _save_current_portfolio(self, portfolio: dict) -> Path:
         path = self.report_dir / "current_portfolio.json"
-        with open(path, "w") as f:
-            json.dump(portfolio, f, indent=2)
+        payload = self._with_artifact_metadata(
+            self._jsonify(portfolio),
+            artifact_type="current_portfolio",
+        )
+        self._write_json(path, payload)
         logger.info("Current portfolio saved → %s", path)
+        return path
 
-    def _save_selection_diagnostics(self, prepared: dict | None) -> None:
+    def _save_selection_diagnostics(self, prepared: dict | None) -> list[Path]:
+        outputs: list[Path] = []
         if not prepared:
-            return
+            return outputs
 
         summary = prepared.get("summary")
         if summary:
             path = self.report_dir / "selection_diagnostics.json"
-            with open(path, "w") as f:
-                json.dump(summary, f, indent=2)
+            payload = self._with_artifact_metadata(
+                self._jsonify(summary),
+                artifact_type="selection_diagnostics",
+            )
+            self._write_json(path, payload)
             logger.info("Selection diagnostics saved → %s", path)
+            outputs.append(path)
 
         per_rebalance = prepared.get("per_rebalance")
         if per_rebalance is not None:
@@ -217,13 +250,18 @@ class ReportGenerator:
                 else pd.DataFrame(per_rebalance)
             )
             if not frame.empty:
+                frame = self._attach_frame_metadata(frame)
+                parquet_path = self.report_dir / "selection_rebalance_log.parquet"
+                csv_path = self.report_dir / "selection_rebalance_log.csv"
                 frame.to_parquet(
-                    self.report_dir / "selection_rebalance_log.parquet", engine="pyarrow"
+                    parquet_path, engine="pyarrow"
                 )
-                frame.to_csv(self.report_dir / "selection_rebalance_log.csv", index=False)
+                frame.to_csv(csv_path, index=False)
                 logger.info("Selection diagnostics rebalance log saved: %d records", len(frame))
+                outputs.extend([parquet_path, csv_path])
+        return outputs
 
-    def _save_attribution(self, attr: AttributionResult) -> None:
+    def _save_attribution(self, attr: AttributionResult) -> Path:
         data = {
             "total_return": attr.total_return,
             "sector_allocation_effect": attr.sector_allocation_effect,
@@ -235,18 +273,19 @@ class ReportGenerator:
             "feature_importance": attr.feature_importance,
         }
         path = self.report_dir / "attribution.json"
-        with open(path, "w") as f:
-            json.dump(data, f, indent=2)
+        self._write_json(path, self._with_artifact_metadata(data, artifact_type="attribution"))
+        return path
 
-    def _save_stock_ranker_importance(self, stock_ranker: object | None) -> None:
+    def _save_stock_ranker_importance(self, stock_ranker: object | None) -> list[Path]:
+        outputs: list[Path] = []
         if stock_ranker is None:
-            return
+            return outputs
         if not getattr(stock_ranker, "is_fitted", False):
-            return
+            return outputs
 
         models = getattr(stock_ranker, "models", {})
         if not models:
-            return
+            return outputs
 
         rows: list[dict] = []
         for sector in sorted(models.keys()):
@@ -272,9 +311,9 @@ class ReportGenerator:
                 })
 
         if not rows:
-            return
+            return outputs
 
-        df = pd.DataFrame(rows)
+        df = self._attach_frame_metadata(pd.DataFrame(rows))
         df = df.sort_values(["sector", "rank"], ascending=[True, True], kind="mergesort")
         csv_path = self.report_dir / "stock_ranker_feature_importance.csv"
         json_path = self.report_dir / "stock_ranker_feature_importance.json"
@@ -296,9 +335,16 @@ class ReportGenerator:
                 }
                 for _, row in sec_df.iterrows()
             ]
-        with open(json_path, "w") as f:
-            json.dump(summary, f, indent=2)
+        self._write_json(
+            json_path,
+            self._with_artifact_metadata(
+                summary,
+                artifact_type="stock_ranker_feature_importance",
+            ),
+        )
         logger.info("Stock-ranker feature importance saved → %s", csv_path)
+        outputs.extend([csv_path, json_path])
+        return outputs
 
     # ── Charts ────────────────────────────────────────────────────────────────
 
@@ -307,7 +353,7 @@ class ReportGenerator:
         portfolio_nav: pd.Series,
         benchmark_nav: pd.Series | None,
         strategy_navs: dict[str, pd.Series] | None,
-    ) -> None:
+    ) -> Path:
         fig, ax = plt.subplots(figsize=(14, 6))
         initial = float(portfolio_nav.iloc[0])
 
@@ -336,11 +382,13 @@ class ReportGenerator:
         ax.grid(True, alpha=0.3)
         ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1, decimals=0))
         fig.tight_layout()
-        fig.savefig(self.report_dir / "nav_chart.png", dpi=150)
+        path = self.report_dir / "nav_chart.png"
+        fig.savefig(path, dpi=150)
         plt.close(fig)
         logger.info("NAV chart saved")
+        return path
 
-    def _plot_drawdown(self, nav: pd.Series) -> None:
+    def _plot_drawdown(self, nav: pd.Series) -> Path:
         cummax = nav.cummax()
         dd = (nav - cummax) / cummax
 
@@ -353,10 +401,12 @@ class ReportGenerator:
         ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1, decimals=1))
         ax.grid(True, alpha=0.3)
         fig.tight_layout()
-        fig.savefig(self.report_dir / "drawdown_chart.png", dpi=150)
+        path = self.report_dir / "drawdown_chart.png"
+        fig.savefig(path, dpi=150)
         plt.close(fig)
+        return path
 
-    def _plot_year_returns(self, year_returns: dict) -> None:
+    def _plot_year_returns(self, year_returns: dict) -> Path | None:
         if not year_returns:
             return
         years = sorted(year_returns.keys())
@@ -373,12 +423,14 @@ class ReportGenerator:
             ax.text(i, r + (1 if r >= 0 else -2), f"{r:.1f}%",
                     ha="center", va="bottom", fontsize=9)
         fig.tight_layout()
-        fig.savefig(self.report_dir / "year_returns.png", dpi=150)
+        path = self.report_dir / "year_returns.png"
+        fig.savefig(path, dpi=150)
         plt.close(fig)
+        return path
 
     def _plot_sector_contributions(
         self, sector_contributions: dict, attribution: Optional[AttributionResult]
-    ) -> None:
+    ) -> Path | None:
         data = sector_contributions or {}
         if attribution and attribution.stock_selection_effect:
             data = attribution.stock_selection_effect or data
@@ -397,12 +449,14 @@ class ReportGenerator:
         ax.set_xlabel("Contribution (%)")
         ax.grid(True, alpha=0.3, axis="x")
         fig.tight_layout()
-        fig.savefig(self.report_dir / "sector_attribution.png", dpi=150)
+        path = self.report_dir / "sector_attribution.png"
+        fig.savefig(path, dpi=150)
         plt.close(fig)
+        return path
 
     def _plot_rolling_returns(
         self, nav: pd.Series, benchmark: pd.Series | None
-    ) -> None:
+    ) -> Path:
         rets = nav.pct_change().dropna()
 
         fig, axes = plt.subplots(2, 1, figsize=(14, 8))
@@ -427,8 +481,274 @@ class ReportGenerator:
         axes[1].grid(True, alpha=0.3)
 
         fig.tight_layout()
-        fig.savefig(self.report_dir / "rolling_returns.png", dpi=150)
+        path = self.report_dir / "rolling_returns.png"
+        fig.savefig(path, dpi=150)
         plt.close(fig)
+        return path
+
+    def _build_run_context(self, metrics: dict, nav_series: pd.Series) -> dict[str, Any]:
+        generated_at = self._now_utc()
+        start_date = self._resolve_backtest_date(metrics.get("start_date"), nav_series, first=True)
+        end_date = self._resolve_backtest_date(metrics.get("end_date"), nav_series, first=False)
+        run_mode = self._resolve_run_mode(metrics)
+        report_timestamp = self._isoformat_utc(generated_at)
+        return {
+            "schema_version": 1,
+            "run_id": self._build_run_id(run_mode, start_date, end_date, generated_at),
+            "run_mode": run_mode,
+            "backtest_start_date": start_date,
+            "backtest_end_date": end_date,
+            "report_generated_at_utc": report_timestamp,
+            "manifest_filename": "run_manifest.json",
+            "report_dir": str(self.report_dir.resolve()),
+            "report_started_epoch": generated_at.timestamp(),
+        }
+
+    def _resolve_run_mode(self, metrics: dict) -> str:
+        mode = metrics.get("run_mode") or metrics.get("mode") or self.cfg.get("mode")
+        if isinstance(mode, str) and mode.strip():
+            return mode.strip()
+        if self.cfg.get("rl", {}).get("use_rl") is True:
+            return "full_rl"
+        if self.cfg.get("rl", {}).get("use_rl") is False:
+            return "optimizer_only"
+        return "unknown"
+
+    def _resolve_backtest_date(
+        self,
+        value: Any,
+        nav_series: pd.Series,
+        *,
+        first: bool,
+    ) -> str:
+        if value is not None:
+            resolved = self._jsonify(value)
+            if isinstance(resolved, str) and resolved:
+                return resolved
+        if nav_series.empty:
+            return ""
+        idx = nav_series.index.min() if first else nav_series.index.max()
+        if hasattr(idx, "date"):
+            return idx.date().isoformat()
+        return str(idx)
+
+    def _build_run_id(
+        self,
+        run_mode: str,
+        start_date: str,
+        end_date: str,
+        generated_at: datetime,
+    ) -> str:
+        return "_".join(
+            [
+                self._slug(run_mode),
+                self._slug(start_date),
+                self._slug(end_date),
+                generated_at.strftime("%Y%m%dT%H%M%SZ"),
+            ]
+        )
+
+    def _with_artifact_metadata(self, payload: dict[str, Any], *, artifact_type: str) -> dict[str, Any]:
+        enriched = dict(payload)
+        enriched["_report_metadata"] = self._artifact_metadata(artifact_type)
+        return enriched
+
+    def _artifact_metadata(self, artifact_type: str) -> dict[str, Any]:
+        return {
+            "schema_version": self._run_context["schema_version"],
+            "artifact_type": artifact_type,
+            "run_id": self._run_context["run_id"],
+            "run_mode": self._run_context["run_mode"],
+            "backtest_start_date": self._run_context["backtest_start_date"],
+            "backtest_end_date": self._run_context["backtest_end_date"],
+            "report_generated_at_utc": self._run_context["report_generated_at_utc"],
+            "freshness_verified_at_utc": self._isoformat_utc(self._now_utc()),
+            "manifest_file": self._run_context["manifest_filename"],
+        }
+
+    def _attach_frame_metadata(self, frame: pd.DataFrame) -> pd.DataFrame:
+        enriched = frame.copy()
+        metadata = {
+            "run_id": self._run_context["run_id"],
+            "run_mode": self._run_context["run_mode"],
+            "backtest_start_date": self._run_context["backtest_start_date"],
+            "backtest_end_date": self._run_context["backtest_end_date"],
+            "report_generated_at_utc": self._run_context["report_generated_at_utc"],
+        }
+        for key, value in metadata.items():
+            enriched[key] = value
+        ordered = list(metadata.keys()) + [col for col in enriched.columns if col not in metadata]
+        return enriched.loc[:, ordered]
+
+    def _write_run_manifest(self) -> Path:
+        model_dir_raw = self.cfg.get("paths", {}).get("model_dir")
+        model_dir = Path(model_dir_raw) if model_dir_raw else None
+        manifest = {
+            "schema_version": self._run_context["schema_version"],
+            "run": {
+                "run_id": self._run_context["run_id"],
+                "mode": self._run_context["run_mode"],
+                "backtest_start_date": self._run_context["backtest_start_date"],
+                "backtest_end_date": self._run_context["backtest_end_date"],
+                "report_generated_at_utc": self._run_context["report_generated_at_utc"],
+            },
+            "config": {
+                "sha256": self._sha256_text(
+                    json.dumps(self._jsonify(self.cfg), sort_keys=True)
+                ),
+                "snapshot": self._jsonify(self.cfg),
+            },
+            "models": {
+                "model_dir": str(model_dir.resolve()) if model_dir else "",
+                "artifacts": self._collect_model_artifacts(model_dir),
+            },
+            "reports": {
+                "report_dir": str(self.report_dir.resolve()),
+                "artifacts": self._collect_report_artifacts(),
+            },
+        }
+        path = self.report_dir / self._run_context["manifest_filename"]
+        self._write_json(path, manifest)
+        logger.info("Run manifest saved → %s", path)
+        return path
+
+    def _collect_model_artifacts(self, model_dir: Path | None) -> list[dict[str, Any]]:
+        if model_dir is None or not model_dir.exists():
+            return []
+        return [
+            self._describe_path(path, artifact_group="model", generated_in_run=False)
+            for path in sorted(model_dir.iterdir())
+        ]
+
+    def _collect_report_artifacts(self) -> list[dict[str, Any]]:
+        generated = {path.resolve() for path in self._generated_artifacts}
+        artifacts: list[dict[str, Any]] = []
+        for path in sorted(self.report_dir.iterdir()):
+            if not path.is_file():
+                continue
+            if path.name == self._run_context["manifest_filename"]:
+                continue
+            resolved = path.resolve()
+            generated_in_run = resolved in generated
+            artifacts.append(
+                self._describe_path(
+                    path,
+                    artifact_group="report",
+                    generated_in_run=generated_in_run,
+                    stale_relative_to_run=(
+                        not generated_in_run
+                        and resolved in self._preexisting_report_files
+                        and path.stat().st_mtime < self._run_context["report_started_epoch"]
+                    ),
+                )
+            )
+        return artifacts
+
+    def _describe_path(
+        self,
+        path: Path,
+        *,
+        artifact_group: str,
+        generated_in_run: bool,
+        stale_relative_to_run: bool = False,
+    ) -> dict[str, Any]:
+        stat = path.stat()
+        payload = {
+            "group": artifact_group,
+            "name": path.name,
+            "path": str(path.resolve()),
+            "artifact_type": self._artifact_type_for_path(path.name),
+            "exists": True,
+            "is_dir": path.is_dir(),
+            "size_bytes": None if path.is_dir() else int(stat.st_size),
+            "modified_at_utc": self._isoformat_utc(datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)),
+            "generated_in_current_run": generated_in_run,
+            "stale_relative_to_current_run": stale_relative_to_run,
+        }
+        if path.is_file():
+            payload["sha256"] = self._sha256_file(path)
+        else:
+            payload["entry_count"] = len(list(path.iterdir()))
+        return payload
+
+    def _artifact_type_for_path(self, name: str) -> str:
+        mapping = {
+            "metrics.json": "metrics",
+            "nav_series.parquet": "nav_series",
+            "rebalance_log.csv": "rebalance_log",
+            "rebalance_log.parquet": "rebalance_log",
+            "selection_diagnostics.json": "selection_diagnostics",
+            "selection_rebalance_log.csv": "selection_rebalance_log",
+            "selection_rebalance_log.parquet": "selection_rebalance_log",
+            "stock_ranker_feature_importance.csv": "stock_ranker_feature_importance",
+            "stock_ranker_feature_importance.json": "stock_ranker_feature_importance",
+            "current_portfolio.json": "current_portfolio",
+            "attribution.json": "attribution",
+            "rl_holdout_comparison.json": "rl_holdout_comparison",
+            "rl_full_backtest_comparison.json": "rl_full_backtest_comparison",
+            "rl_full_neutral_comparison.json": "rl_full_neutral_comparison",
+            "nav_chart.png": "nav_chart",
+            "drawdown_chart.png": "drawdown_chart",
+            "year_returns.png": "year_returns_chart",
+            "sector_attribution.png": "sector_attribution_chart",
+            "rolling_returns.png": "rolling_returns_chart",
+            "run_manifest.json": "run_manifest",
+        }
+        return mapping.get(name, "unknown")
+
+    def _write_json(self, path: Path, payload: dict[str, Any]) -> None:
+        with open(path, "w") as f:
+            json.dump(self._jsonify(payload), f, indent=2, sort_keys=True)
+
+    def _jsonify(self, value: Any) -> Any:
+        if isinstance(value, dict):
+            return {str(k): self._jsonify(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [self._jsonify(item) for item in value]
+        if isinstance(value, Path):
+            return str(value)
+        if isinstance(value, (datetime, pd.Timestamp)):
+            ts = value.to_pydatetime() if isinstance(value, pd.Timestamp) else value
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            return ts.isoformat()
+        if isinstance(value, date):
+            return value.isoformat()
+        if isinstance(value, np.integer):
+            return int(value)
+        if isinstance(value, np.floating):
+            return float(value)
+        if isinstance(value, np.bool_):
+            return bool(value)
+        if pd.isna(value):
+            return None
+        if isinstance(value, (int, float, str, bool)) or value is None:
+            return value
+        return str(value)
+
+    def _sha256_file(self, path: Path) -> str:
+        digest = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _sha256_text(text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _slug(value: str) -> str:
+        cleaned = "".join(ch.lower() if ch.isalnum() else "_" for ch in str(value))
+        return "_".join(filter(None, cleaned.split("_"))) or "unknown"
+
+    @staticmethod
+    def _now_utc() -> datetime:
+        return datetime.now(timezone.utc).replace(microsecond=0)
+
+    @staticmethod
+    def _isoformat_utc(value: datetime) -> str:
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
     # ── Console summary ───────────────────────────────────────────────────────
 
