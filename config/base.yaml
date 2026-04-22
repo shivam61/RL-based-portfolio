@@ -151,6 +151,18 @@ rl:
   reward_lambda_defense_gap: 0.02   # penalize being too risk-on when state stress is high
   reward_lambda_overdefense: 0.015  # penalize staying too defensive when state stress is low
   reward_lambda_stress_turnover: 0.01  # extra churn penalty during stressed periods
+  reward_lambda_target_posture: 0.04   # penalize deviation from the stress-conditioned target controls
+  enable_target_control_blend: true
+  target_control_blend_min: 0.15
+  target_control_blend_max: 0.85
+  stress_target_moderate: 0.18
+  stress_target_high: 0.35
+  target_cash_moderate: 0.15
+  target_cash_high: 0.30
+  target_aggressiveness_moderate: 0.95
+  target_aggressiveness_high: 0.85
+  target_turnover_cap_moderate: 0.30
+  target_turnover_cap_high: 0.20
   retrain_every_rebalances: 3   # 3 x 4-week rebalances = 12 calendar weeks
   min_history_rebalances: 12    # require about one year of prior rebalance windows before causal PPO training
   use_rl: true                  # set false to disable RL overlay

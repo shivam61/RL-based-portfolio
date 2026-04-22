@@ -143,6 +143,33 @@ Each task should record:
     - but uses them statically rather than conditionally
   - that is a better failure mode to debug than silent neutral collapse, but it is still below the economic gate
 
+### Task: Stage 1 regime-conditioned control guidance
+- Scope:
+  - add stress-conditioned target controls for:
+    - cash
+    - aggressiveness
+    - turnover cap
+  - blend executed RL controls toward those targets at runtime
+  - add alignment diagnostics between stress and realized posture
+- Validation:
+  - `./.venv/bin/python -m py_compile src/rl/historical_executor.py src/rl/holdout.py src/rl/full_comparison.py src/rl/control_evaluation.py`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `16 passed`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q` -> `123 passed, 1 skipped`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 64`
+    - candidate RL -> `21.00% CAGR`, `0.916 Sharpe`, `-14.89% MaxDD`, `24.66% avg turnover`
+    - neutral full-stack -> `32.39% CAGR`, `1.465 Sharpe`, `-15.00% MaxDD`, `25.74% avg turnover`
+    - behavior:
+      - mean cash target `13.36%`
+      - unique cash targets from `5%` to `21.3%`
+      - `stress_posture_correlation = 0.642`
+- Decision:
+  - keep the regime-conditioned guidance implementation
+  - do not promote the resulting policy as the RL incumbent
+- Learning:
+  - the controller is now meaningfully state-conditional on cash
+  - this is the first iteration where posture varies with stress instead of staying flat
+  - but returns degraded further, so the remaining problem is economic quality of control decisions, not missing control movement
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block

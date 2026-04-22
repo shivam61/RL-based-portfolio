@@ -296,3 +296,72 @@ Copy this block for each future change:
     - aggressiveness around `0.96–1.01`
     for every holdout rebalance
   - this is still not portfolio control; it is static de-risking with mild sector styling
+
+## Iteration 4 — Stage 1 Regime-Conditioned Control Guidance
+
+- Date:
+  - `2026-04-22`
+- Scope:
+  - add stress-conditioned target controls for cash, aggressiveness, and turnover cap
+  - blend executed controls toward those targets during execution
+  - expose alignment diagnostics between stress signal and realized defensive posture
+- Control levers changed:
+  - target posture mapping:
+    - neutral
+    - moderate defense
+    - high defense
+  - execution-time control guidance blend
+  - diagnostics:
+    - `mean_stress_signal`
+    - `mean_defensive_posture`
+    - `mean_target_defensive_posture`
+    - `mean_target_posture_penalty`
+    - `stress_posture_correlation`
+- Config flags:
+  - `enable_target_control_blend`
+  - `target_control_blend_min`
+  - `target_control_blend_max`
+  - `reward_lambda_target_posture`
+  - stress target thresholds and target control levels
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not re-run in this iteration
+- Holdout result vs `neutral_full_stack`:
+  - window: `2016-01-28` to `2016-12-01`
+  - candidate RL:
+    - CAGR `21.00%`
+    - Sharpe `0.916`
+    - Sortino `1.149`
+    - MaxDD `-14.89%`
+    - avg turnover `24.66%`
+  - neutral full-stack:
+    - CAGR `32.39%`
+    - Sharpe `1.465`
+    - Sortino `1.817`
+    - MaxDD `-15.00%`
+    - avg turnover `25.74%`
+  - uplift:
+    - CAGR `-11.46 pts`
+    - Sharpe `-0.582`
+    - MaxDD `+0.13 pts`
+    - turnover `-1.08 pts`
+- Stress-window behavior:
+  - holdout-only in this iteration
+  - key behavior change:
+    - cash is no longer fixed
+    - executed cash now moves across several levels from `5%` to `21.3%`
+    - `stress_posture_correlation = 0.642`
+- Decision:
+  - keep the regime-conditioned guidance infrastructure
+  - reject promotion of the resulting policy
+  - Stage 1 remains open
+- Learning:
+  - this iteration crosses an important boundary:
+    - the controller is now state-conditional on cash
+    - the failure is no longer “flat policy”
+  - but the economics are still poor:
+    - active return remains materially below neutral
+    - turnover cap remains effectively fixed at `30%`
+    - the stock universe and sector set remain unchanged, so control still acts on a diluted book
+  - the next likely step is no longer generic reward tuning; it is a constrained posture controller or stronger turnover-cap guidance

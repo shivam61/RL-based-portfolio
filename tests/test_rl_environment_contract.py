@@ -191,6 +191,89 @@ def test_historical_executor_defensive_posture_reflects_cash_risk_and_turnover()
     assert neutral == pytest.approx(0.0)
 
 
+def test_historical_executor_target_controls_scale_with_stress():
+    cfg = _cfg()
+    cfg["rl"].update(
+        {
+            "stress_target_moderate": 0.18,
+            "stress_target_high": 0.35,
+            "target_cash_moderate": 0.15,
+            "target_cash_high": 0.30,
+            "target_aggressiveness_moderate": 0.95,
+            "target_aggressiveness_high": 0.85,
+            "target_turnover_cap_moderate": 0.30,
+            "target_turnover_cap_high": 0.20,
+        }
+    )
+
+    low = HistoricalPeriodExecutor._target_controls_for_stress(0.10, cfg)
+    moderate = HistoricalPeriodExecutor._target_controls_for_stress(0.20, cfg)
+    high = HistoricalPeriodExecutor._target_controls_for_stress(0.40, cfg)
+
+    assert low == {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.40}
+    assert moderate == {"cash_target": 0.15, "aggressiveness": 0.95, "turnover_cap": 0.30}
+    assert high == {"cash_target": 0.30, "aggressiveness": 0.85, "turnover_cap": 0.20}
+
+
+def test_historical_executor_guidance_blends_controls_toward_target():
+    executor = HistoricalPeriodExecutor.__new__(HistoricalPeriodExecutor)
+    executor.engine = type(
+        "Engine",
+        (),
+        {
+            "cfg": {
+                "rl": {
+                    "enable_target_control_blend": True,
+                    "target_control_blend_min": 0.15,
+                    "target_control_blend_max": 0.85,
+                    "stress_target_moderate": 0.18,
+                    "stress_target_high": 0.35,
+                    "target_cash_moderate": 0.15,
+                    "target_cash_high": 0.30,
+                    "target_aggressiveness_moderate": 0.95,
+                    "target_aggressiveness_high": 0.85,
+                    "target_turnover_cap_moderate": 0.30,
+                    "target_turnover_cap_high": 0.20,
+                    "aggressiveness_min": 0.60,
+                    "aggressiveness_max": 1.40,
+                },
+                "optimizer": {"max_turnover_per_rebalance": 0.40},
+            }
+        },
+    )()
+    executor.sectors = list(SECTORS)
+
+    decision = {
+        "sector_tilts": {sector: 1.0 for sector in SECTORS},
+        "cash_target": 0.15,
+        "aggressiveness": 1.0,
+        "turnover_cap": 0.30,
+        "should_rebalance": True,
+    }
+    state = {
+        "macro_state": {"macro_stress_score": 0.5},
+        "portfolio_state": {
+            "current_drawdown": -0.12,
+            "drawdown_slope_1m": -0.04,
+            "vol_shock_1m_3m": 0.4,
+            "breadth_deterioration": 0.6,
+            "emergency_flag": 1.0,
+        },
+    }
+
+    guided, guidance = HistoricalPeriodExecutor._apply_target_control_guidance(
+        executor,
+        decision,
+        state,
+    )
+
+    assert guidance["enabled"] is True
+    assert guidance["blend_weight"] > 0.15
+    assert guided["cash_target"] > decision["cash_target"]
+    assert guided["aggressiveness"] < decision["aggressiveness"]
+    assert guided["turnover_cap"] < decision["turnover_cap"]
+
+
 def test_rl_agent_trains_fresh_policy_on_causal_env(monkeypatch):
     agent = RLSectorAgent(_cfg())
     agent.cfg.setdefault("backtest", {})

@@ -300,6 +300,48 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             len({tuple(sorted(entry["selected_sectors"])) for entry in trace})
         ),
         "mean_reward": float(np.mean([entry["reward"] for entry in trace])),
+        "mean_stress_signal": float(
+            np.mean(
+                [
+                    float(entry.get("reward_components", {}).get("stress_signal", 0.0))
+                    for entry in trace
+                ]
+            )
+        ),
+        "mean_defensive_posture": float(
+            np.mean(
+                [
+                    float(entry.get("reward_components", {}).get("defensive_posture", 0.0))
+                    for entry in trace
+                ]
+            )
+        ),
+        "mean_target_defensive_posture": float(
+            np.mean(
+                [
+                    float(entry.get("reward_components", {}).get("target_defensive_posture", 0.0))
+                    for entry in trace
+                ]
+            )
+        ),
+        "mean_target_posture_penalty": float(
+            np.mean(
+                [
+                    float(entry.get("reward_components", {}).get("target_posture_penalty", 0.0))
+                    for entry in trace
+                ]
+            )
+        ),
+        "stress_posture_correlation": _correlation(
+            [
+                float(entry.get("reward_components", {}).get("stress_signal", 0.0))
+                for entry in trace
+            ],
+            [
+                float(entry.get("reward_components", {}).get("defensive_posture", 0.0))
+                for entry in trace
+            ],
+        ),
         "mean_active_return": float(
             np.mean(
                 [
@@ -341,6 +383,16 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             )
         ),
     }
+
+
+def _correlation(xs: list[float], ys: list[float]) -> float | None:
+    if len(xs) < 2 or len(ys) < 2:
+        return None
+    x_arr = np.asarray(xs, dtype=float)
+    y_arr = np.asarray(ys, dtype=float)
+    if np.allclose(x_arr, x_arr[0]) or np.allclose(y_arr, y_arr[0]):
+        return None
+    return float(np.corrcoef(x_arr, y_arr)[0, 1])
 
 
 def _find_holdout_start_idx(rebalance_dates: list[pd.Timestamp], holdout_start: pd.Timestamp) -> int:

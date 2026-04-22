@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from src.backtest.simulator import PortfolioSimulator
@@ -334,11 +335,51 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
         "mean_selected_stock_count": float(
             sum(entry["selected_stock_count"] for entry in trace) / len(trace)
         ),
+        "mean_stress_signal": mean_from_reward("stress_signal", trace),
+        "mean_defensive_posture": mean_from_reward("defensive_posture", trace),
+        "mean_target_defensive_posture": mean_from_reward("target_defensive_posture", trace),
+        "mean_target_posture_penalty": mean_from_reward("target_posture_penalty", trace),
+        "stress_posture_correlation": _correlation_from_reward(
+            "stress_signal",
+            "defensive_posture",
+            trace,
+        ),
         "mean_reward": mean("reward"),
         "rebalance_rate": float(
             sum(1.0 if entry["should_rebalance"] else 0.0 for entry in trace) / len(trace)
         ),
     }
+
+
+def mean_from_reward(key: str, trace: list[dict[str, Any]]) -> float | None:
+    values = [
+        entry.get("reward_components", {}).get(key)
+        for entry in trace
+        if entry.get("reward_components", {}).get(key) is not None
+    ]
+    if not values:
+        return None
+    return float(sum(float(value) for value in values) / len(values))
+
+
+def _correlation_from_reward(key_x: str, key_y: str, trace: list[dict[str, Any]]) -> float | None:
+    xs = [
+        entry.get("reward_components", {}).get(key_x)
+        for entry in trace
+        if entry.get("reward_components", {}).get(key_x) is not None
+    ]
+    ys = [
+        entry.get("reward_components", {}).get(key_y)
+        for entry in trace
+        if entry.get("reward_components", {}).get(key_y) is not None
+    ]
+    if len(xs) < 2 or len(xs) != len(ys):
+        return None
+    x_arr = np.asarray(xs, dtype=float)
+    y_arr = np.asarray(ys, dtype=float)
+    if np.allclose(x_arr, x_arr[0]) or np.allclose(y_arr, y_arr[0]):
+        return None
+    return float(np.corrcoef(x_arr, y_arr)[0, 1])
 
 
 def _copy_cfg(cfg: dict) -> dict:

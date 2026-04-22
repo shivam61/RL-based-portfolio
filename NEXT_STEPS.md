@@ -147,18 +147,19 @@ Status:
   - non-neutral aggressiveness usage rate
   are tracked directly in holdout/full diagnostics
 - latest 2016 holdout still does not clear the promotion gate:
-  - candidate RL CAGR `24.07%` vs neutral `32.39%`
-  - candidate RL Sharpe `1.094` vs neutral `1.465`
-  - candidate RL MaxDD `-14.58%` vs neutral `-15.00%`
-  - candidate RL avg turnover `23.25%` vs neutral `25.54%`
+  - candidate RL CAGR `21.00%` vs neutral `32.39%`
+  - candidate RL Sharpe `0.916` vs neutral `1.465`
+  - candidate RL MaxDD `-14.89%` vs neutral `-15.00%`
+  - candidate RL avg turnover `24.66%` vs neutral `25.74%`
   - policy behavior:
-    - cash fixed at `15%` for all holdout rebalances
-    - turnover cap fixed at `30%` for all holdout rebalances
-    - aggressiveness fixed around `0.96–1.01`
+    - cash is now state-conditional instead of fixed
+    - stress/posture correlation improved to `0.64`
+    - turnover cap is still effectively fixed at `30%`
+    - sector set is still unchanged at `15` sectors / `~69` names
 - decision:
   - keep the implementation and validation work
   - do not promote this policy as the new incumbent
-  - keep Stage 1 open until controls become state-conditional rather than constant
+  - keep Stage 1 open until conditional control improves economics, not just behavior
 
 #### Stage 2 — Add a posture layer
 

@@ -223,6 +223,10 @@ class HistoricalPeriodExecutor:
         done: bool = False,
     ) -> HistoricalStepResult:
         decision = self._normalize_decision(prepared.snapshot.sectors, rl_decision)
+        decision, control_guidance = self._apply_target_control_guidance(
+            decision,
+            prepared.transition_state,
+        )
         portfolio_mtm = self.engine.simulator.value_portfolio(
             portfolio, prepared.prices_today, prepared.current_date.date()
         )
@@ -384,6 +388,7 @@ class HistoricalPeriodExecutor:
                     if decision.get("turnover_cap") is not None
                     else None
                 ),
+                "control_guidance": control_guidance,
                 "reward_components": reward_components,
             },
         )
@@ -480,6 +485,8 @@ class HistoricalPeriodExecutor:
         next_stress = self._stress_signal(next_state)
         stress_signal = float(max(current_stress, next_stress))
         defensive_posture = self._defensive_posture(decision)
+        target_controls = self._target_controls_for_stress(stress_signal, self.engine.cfg)
+        target_posture = self._defensive_posture(target_controls)
         defense_gap_penalty = float(
             rl_cfg.get("reward_lambda_defense_gap", 0.0)
         ) * max(0.0, stress_signal - defensive_posture)
@@ -489,6 +496,9 @@ class HistoricalPeriodExecutor:
         stress_turnover_penalty = float(
             rl_cfg.get("reward_lambda_stress_turnover", 0.0)
         ) * stress_signal * max(0.0, float(exec_result.total_turnover) - 0.20)
+        target_posture_penalty = float(
+            rl_cfg.get("reward_lambda_target_posture", 0.0)
+        ) * self._target_control_gap(decision, target_controls)
 
         reward = (
             active_return
@@ -500,6 +510,7 @@ class HistoricalPeriodExecutor:
             - defense_gap_penalty
             - overdefense_penalty
             - stress_turnover_penalty
+            - target_posture_penalty
         )
         return float(reward), {
             "period_return": float(period_return),
@@ -520,9 +531,14 @@ class HistoricalPeriodExecutor:
             "action_deviation_penalty": float(action_deviation_penalty),
             "stress_signal": float(stress_signal),
             "defensive_posture": float(defensive_posture),
+            "target_defensive_posture": float(target_posture),
+            "target_cash_target": float(target_controls["cash_target"]),
+            "target_aggressiveness": float(target_controls["aggressiveness"]),
+            "target_turnover_cap": float(target_controls["turnover_cap"]),
             "defense_gap_penalty": float(defense_gap_penalty),
             "overdefense_penalty": float(overdefense_penalty),
             "stress_turnover_penalty": float(stress_turnover_penalty),
+            "target_posture_penalty": float(target_posture_penalty),
             "reward": float(reward),
         }
 
@@ -623,6 +639,95 @@ class HistoricalPeriodExecutor:
             + 0.20 * turnover_component
         )
         return float(np.clip(posture, 0.0, 1.0))
+
+    @staticmethod
+    def _target_controls_for_stress(stress_signal: float, cfg: dict | None = None) -> dict[str, float]:
+        rl_cfg = (cfg or {}).get("rl", {}) if isinstance(cfg, dict) else {}
+        moderate_threshold = float(rl_cfg.get("stress_target_moderate", 0.18))
+        high_threshold = float(rl_cfg.get("stress_target_high", 0.35))
+        if high_threshold < moderate_threshold:
+            moderate_threshold, high_threshold = high_threshold, moderate_threshold
+
+        if stress_signal >= high_threshold:
+            return {
+                "cash_target": float(rl_cfg.get("target_cash_high", 0.30)),
+                "aggressiveness": float(rl_cfg.get("target_aggressiveness_high", 0.85)),
+                "turnover_cap": float(rl_cfg.get("target_turnover_cap_high", 0.20)),
+            }
+        if stress_signal >= moderate_threshold:
+            return {
+                "cash_target": float(rl_cfg.get("target_cash_moderate", 0.15)),
+                "aggressiveness": float(rl_cfg.get("target_aggressiveness_moderate", 0.95)),
+                "turnover_cap": float(rl_cfg.get("target_turnover_cap_moderate", 0.30)),
+            }
+        return {
+            "cash_target": 0.05,
+            "aggressiveness": 1.0,
+            "turnover_cap": 0.40,
+        }
+
+    @staticmethod
+    def _target_control_gap(decision: dict[str, Any], target_controls: dict[str, float]) -> float:
+        cash_gap = abs(
+            float(decision.get("cash_target", 0.05) or 0.05)
+            - float(target_controls.get("cash_target", 0.05))
+        ) / 0.25
+        aggressiveness_gap = abs(
+            float(decision.get("aggressiveness", 1.0) or 1.0)
+            - float(target_controls.get("aggressiveness", 1.0))
+        ) / 0.40
+        turnover_cap = decision.get("turnover_cap")
+        turnover_gap = (
+            abs(float(turnover_cap) - float(target_controls.get("turnover_cap", 0.40))) / 0.20
+            if turnover_cap is not None
+            else 0.0
+        )
+        return float(np.mean([cash_gap, aggressiveness_gap, turnover_gap]))
+
+    def _apply_target_control_guidance(
+        self,
+        decision: dict[str, Any],
+        current_state: dict[str, Any],
+    ) -> tuple[dict[str, Any], dict[str, float | bool]]:
+        rl_cfg = self.engine.cfg.get("rl", {})
+        if not bool(rl_cfg.get("enable_target_control_blend", False)):
+            return decision, {"enabled": False, "blend_weight": 0.0}
+
+        stress_signal = self._stress_signal(current_state)
+        target_controls = self._target_controls_for_stress(stress_signal, self.engine.cfg)
+        min_blend = float(rl_cfg.get("target_control_blend_min", 0.15))
+        max_blend = float(rl_cfg.get("target_control_blend_max", 0.85))
+        if min_blend > max_blend:
+            min_blend, max_blend = max_blend, min_blend
+        blend_weight = float(np.clip(min_blend + (max_blend - min_blend) * stress_signal, 0.0, 1.0))
+
+        guided = dict(decision)
+        guided["cash_target"] = float(
+            (1.0 - blend_weight) * float(decision.get("cash_target", 0.05))
+            + blend_weight * float(target_controls["cash_target"])
+        )
+        guided["aggressiveness"] = float(
+            (1.0 - blend_weight) * float(decision.get("aggressiveness", 1.0))
+            + blend_weight * float(target_controls["aggressiveness"])
+        )
+        turnover_cap = decision.get("turnover_cap")
+        if turnover_cap is not None:
+            guided["turnover_cap"] = float(
+                (1.0 - blend_weight) * float(turnover_cap)
+                + blend_weight * float(target_controls["turnover_cap"])
+            )
+        guided = self._normalize_decision(
+            list(decision.get("sector_tilts", {}).keys()),
+            guided,
+        )
+        return guided, {
+            "enabled": True,
+            "blend_weight": float(blend_weight),
+            "stress_signal": float(stress_signal),
+            "target_cash_target": float(target_controls["cash_target"]),
+            "target_aggressiveness": float(target_controls["aggressiveness"]),
+            "target_turnover_cap": float(target_controls["turnover_cap"]),
+        }
 
     def _build_alpha_scores(
         self,
