@@ -130,6 +130,29 @@ class ReportGenerator:
         return [path]
 
     def _save_rebalance_log(self, records: list[RebalanceRecord]) -> list[Path]:
+        base_columns = [
+            "date",
+            "mode",
+            "pre_nav",
+            "post_nav",
+            "period_return_pct",
+            "cum_return_pct",
+            "n_stocks",
+            "selected_sector_count",
+            "selected_stock_count",
+            "cash_pct",
+            "turnover_pct",
+            "cost_inr",
+            "n_buys",
+            "n_sells",
+            "stocks_added",
+            "stocks_removed",
+            "top5_holdings",
+            "rl_overweight",
+            "rl_underweight",
+            "aggressiveness",
+            "emergency",
+        ]
         rows = []
         prev_weights: dict[str, float] = {}
         cum_nav = records[0].pre_nav if records else 1.0
@@ -161,6 +184,8 @@ class ReportGenerator:
                 "period_return_pct": round(period_ret * 100, 3),
                 "cum_return_pct":    round(cum_ret * 100, 3),
                 "n_stocks":          len(cur_weights),
+                "selected_sector_count": int(getattr(r, "selected_sector_count", 0)),
+                "selected_stock_count": int(getattr(r, "selected_stock_count", 0)),
                 "cash_pct":          round(r.target_weights.get("CASH", 0) * 100, 2),
                 "turnover_pct":      round(r.total_turnover * 100, 2),
                 "cost_inr":          round(r.total_cost, 2),
@@ -177,7 +202,14 @@ class ReportGenerator:
             })
             prev_weights = cur_weights
 
-        df = self._attach_frame_metadata(pd.DataFrame(rows))
+        df = pd.DataFrame(rows)
+        if df.empty:
+            df = pd.DataFrame(columns=base_columns)
+        else:
+            for column in base_columns:
+                if column not in df.columns:
+                    df[column] = np.nan
+        df = self._attach_frame_metadata(df)
         parquet_path = self.report_dir / "rebalance_log.parquet"
         csv_path = self.report_dir / "rebalance_log.csv"
         df.to_parquet(parquet_path, engine="pyarrow")
@@ -687,6 +719,7 @@ class ReportGenerator:
             "rl_holdout_comparison.json": "rl_holdout_comparison",
             "rl_full_backtest_comparison.json": "rl_full_backtest_comparison",
             "rl_full_neutral_comparison.json": "rl_full_neutral_comparison",
+            "rl_control_evaluation.json": "rl_control_evaluation",
             "nav_chart.png": "nav_chart",
             "drawdown_chart.png": "drawdown_chart",
             "year_returns.png": "year_returns_chart",

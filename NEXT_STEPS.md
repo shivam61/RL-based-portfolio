@@ -93,6 +93,11 @@ The working iteration log for these runs lives in `docs/rl_control_iteration_log
   - any candidate RL redesign
 - do not merge RL changes without the control review
 
+Status:
+- implemented
+- canonical artifact: `artifacts/reports/rl_control_evaluation.json`
+- next active build: `Stage 1 — Risk budget control only`
+
 #### Stage 1 — Risk budget control only
 
 Add first:

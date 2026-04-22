@@ -108,3 +108,64 @@ Copy this block for each future change:
 - Decision:
   - keep / reject
 - Learning:
+
+## Iteration 1 — Stage 0 Control Evaluation Harness
+
+- Date:
+  - `2026-04-22`
+- Scope:
+  - add one canonical control-evaluation module and CLI
+  - unify the current RL, neutral full-stack, baseline, and holdout views into a single artifact
+  - extend future rebalance logs with `selected_sector_count` and `selected_stock_count`
+- Control levers changed:
+  - none
+  - this stage is evaluation-only
+- Config flags:
+  - none
+- Evaluation artifacts:
+  - `artifacts/reports/rl_control_evaluation.json`
+  - `artifacts/reports/rl_full_neutral_comparison.json`
+  - `artifacts/reports/rl_full_backtest_comparison.json`
+  - `artifacts/reports/rl_holdout_comparison.json`
+  - `artifacts/reports/rebalance_log.csv`
+- Full-window result vs `neutral_full_stack`:
+  - `current_rl`: CAGR `18.27%`, Sharpe `0.750`, MaxDD `-32.62%`, avg turnover `28.03%`
+  - `neutral_full_stack`: CAGR `17.85%`, Sharpe `0.720`, MaxDD `-32.80%`, avg turnover `27.43%`
+  - uplift:
+    - CAGR `+0.42 pts`
+    - Sharpe `+0.029`
+    - MaxDD `+0.18 pts`
+    - turnover `+0.60 pts` worse
+- Holdout result vs `neutral_full_stack`:
+  - `current_rl`: CAGR `32.68%`, Sharpe `1.509`
+  - `neutral_full_stack`: CAGR `32.39%`, Sharpe `1.465`
+  - uplift:
+    - CAGR `+0.29 pts`
+    - Sharpe `+0.044`
+- Stress-window behavior:
+  - `2018_q4`:
+    - RL `0%` cash, `1.06` aggressiveness, `14.44%` turnover
+    - neutral `6.5%` cash, `1.0` aggressiveness, `16.54%` turnover
+  - `2020_covid`:
+    - RL `12.0%` cash, `1.003` aggressiveness, `37.0%` turnover
+    - neutral `14.0%` cash, `1.0` aggressiveness, `34.65%` turnover
+  - `2022_rate_shock`:
+    - RL `4.0%` cash, `1.06` aggressiveness, `33.26%` turnover
+    - neutral `10.67%` cash, `1.0` aggressiveness, `29.19%` turnover
+  - `2024_late_drawdown`:
+    - RL `0%` cash, `1.095` aggressiveness, `21.27%` turnover
+    - neutral `5.0%` cash, `1.0` aggressiveness, `21.86%` turnover
+  - `2025_prolonged_drawdown`:
+    - RL `8.29%` cash, `0.994` aggressiveness, `32.90%` turnover
+    - neutral `11.0%` cash, `1.0` aggressiveness, `31.76%` turnover
+  - `2026_early_weakness`:
+    - RL `0%` cash, `1.038` aggressiveness, `29.55%` turnover
+    - neutral `6.25%` cash, `1.0` aggressiveness, `30.60%` turnover
+- Decision:
+  - keep
+  - Stage 0 is complete
+  - proceed to Stage 1 risk-budget controls only
+- Learning:
+  - the repo now has one canonical artifact for RL control review instead of split ad hoc JSONs
+  - the measurement confirms the existing RL policy is still under-defensive in stress
+  - the next stage should change only risk-budget behavior, not breadth or sector inclusion yet

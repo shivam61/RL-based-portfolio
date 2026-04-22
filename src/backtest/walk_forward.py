@@ -402,6 +402,8 @@ class WalkForwardEngine:
                 sector_tilts=rl_decision["sector_tilts"],
                 cash_target=cash_target,
                 aggressiveness=rl_decision.get("aggressiveness", 1.0),
+                selected_sector_count=len(selected_sectors),
+                selected_stock_count=len(selected_stock_rows),
                 total_turnover=exec_result.total_turnover,
                 total_cost=exec_result.total_cost,
                 rl_action=rl_decision,

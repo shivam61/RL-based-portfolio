@@ -46,6 +46,42 @@ Each task should record:
   - the main gating problem is behavior in drawdowns, not headline CAGR
   - future RL iterations need a permanent audit trail or they will drift back into reward-first evaluation
 
+### Task: Stage 0 control-evaluation harness
+- Scope:
+  - add a canonical RL control-evaluation artifact and CLI
+  - unify:
+    - full-window RL vs neutral
+    - full-window RL vs optimizer-only baseline
+    - holdout RL vs neutral
+    - named stress-window behavior
+  - extend future rebalance logs with selected sector / stock counts for control analysis
+- Validation:
+  - `./.venv/bin/python -m py_compile src/rl/control_evaluation.py scripts/evaluate_rl_control.py src/reporting/report.py src/backtest/walk_forward.py src/data/contracts.py`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_control_evaluation.py tests/test_reporting_artifacts.py -q` -> `3 passed`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q` -> `113 passed, 1 skipped`
+  - `./.venv/bin/python scripts/evaluate_rl_control.py` generated `artifacts/reports/rl_control_evaluation.json`
+  - current canonical full-window control result:
+    - `current_rl` vs `neutral_full_stack` -> `+0.42 pts` CAGR, `+0.029` Sharpe, turnover worse by `+0.60 pts`
+  - current canonical drawdown-behavior summary at `drawdown <= -8%`:
+    - RL average cash `5.30%`
+    - neutral average cash `9.70%`
+    - RL average aggressiveness `1.024`
+    - neutral average aggressiveness `1.000`
+    - RL average turnover `30.34%`
+    - neutral average turnover `28.96%`
+- Decision:
+  - keep
+  - Stage 0 complete
+  - move to Stage 1:
+    - control-state features
+    - explicit cash control
+    - stronger aggressiveness effect
+    - optional turnover cap / budget
+- Learning:
+  - the new artifact makes the control problem measurable in one place
+  - the current policy still fails the economic smell test in stress even though it is causally valid and slightly additive on returns
+  - future stages can now be rejected quickly when behavior gets worse even if reward improves
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block

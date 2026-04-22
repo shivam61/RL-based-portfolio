@@ -156,12 +156,18 @@ def _run_holdout_policy(
             {
                 "date": str(result.current_date.date()),
                 "reward": float(result.reward),
+                "period_return": float(
+                    result.transition.get("info", {})
+                    .get("reward_components", {})
+                    .get("period_return", 0.0)
+                ),
                 "turnover": float(result.exec_result.total_turnover),
                 "transaction_cost": float(result.exec_result.total_cost),
                 "cash_target": float(result.cash_target),
                 "aggressiveness": float(decision.get("aggressiveness", 1.0)),
                 "should_rebalance": bool(decision.get("should_rebalance", True)),
                 "selected_sectors": list(result.selected_sectors),
+                "selected_sector_count": int(len(result.selected_sectors)),
                 "selected_stock_count": int(len(result.selected_stock_rows)),
                 "sector_tilts": {
                     str(sector): float(tilt)
