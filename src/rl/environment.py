@@ -507,10 +507,13 @@ def _posture_neutral_band(cfg: dict | None) -> float:
 def _posture_profiles(cfg: dict | None) -> dict[str, dict[str, float]]:
     rl_cfg = _rl_cfg(cfg)
     configured = rl_cfg.get("posture_profiles", {}) if isinstance(rl_cfg, dict) else {}
+    optimizer_cfg = (cfg or {}).get("optimizer", {}) if isinstance(cfg, dict) else {}
+    max_cash = float(optimizer_cfg.get("max_cash", 0.40))
+    max_turnover = float(optimizer_cfg.get("max_turnover_per_rebalance", 0.45))
     defaults = {
-        "risk_off": {"cash_target": 0.20, "aggressiveness": 0.90, "turnover_cap": 0.25},
-        "neutral": {"cash_target": 0.05, "aggressiveness": 1.00, "turnover_cap": 0.40},
-        "risk_on": {"cash_target": 0.03, "aggressiveness": 1.05, "turnover_cap": 0.40},
+        "risk_off": {"cash_target": 0.35, "aggressiveness": 0.75, "turnover_cap": 0.15},
+        "neutral": {"cash_target": 0.05, "aggressiveness": 1.00, "turnover_cap": 0.35},
+        "risk_on": {"cash_target": 0.02, "aggressiveness": 1.30, "turnover_cap": 0.45},
     }
     profiles: dict[str, dict[str, float]] = {}
     for posture in POSTURE_LABELS:
@@ -520,9 +523,9 @@ def _posture_profiles(cfg: dict | None) -> dict[str, dict[str, float]]:
             profile.update({k: float(v) for k, v in source.items()})
         agg_min, agg_max = _aggressiveness_bounds(cfg)
         profiles[posture] = {
-            "cash_target": float(np.clip(profile["cash_target"], 0.0, 0.30)),
+            "cash_target": float(np.clip(profile["cash_target"], 0.0, max_cash)),
             "aggressiveness": float(np.clip(profile["aggressiveness"], agg_min, agg_max)),
-            "turnover_cap": float(max(0.05, profile["turnover_cap"])),
+            "turnover_cap": float(np.clip(profile["turnover_cap"], 0.05, max_turnover)),
         }
     return profiles
 

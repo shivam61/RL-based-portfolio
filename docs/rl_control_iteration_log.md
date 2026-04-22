@@ -236,6 +236,60 @@ Copy this block for each future change:
   - the remaining blocker is weak posture utility separation, not compute
   - cached regret improved practicality, but the policy still collapses to static `risk_off`
 
+## Iteration 10 — Stage 2 Stronger Posture Authority And Cash-First Realization
+
+- Date:
+  - `2026-04-22`
+- Scope:
+  - increase posture authority materially without changing reward/regret
+  - make posture realization more distinct by prioritizing cash movement before equity-mix rotation inside the turnover budget
+- Control levers changed:
+  - posture profiles widened:
+    - `risk_on -> cash 0.02, aggressiveness 1.30, turnover_cap 0.45`
+    - `neutral -> cash 0.05, aggressiveness 1.00, turnover_cap 0.35`
+    - `risk_off -> cash 0.35, aggressiveness 0.75, turnover_cap 0.15`
+  - optimizer envelope widened:
+    - `max_cash -> 0.40`
+    - `max_turnover_per_rebalance -> 0.45`
+    - `aggressiveness_effect_scale -> 2.25`
+  - cached posture transform now executes cash shift first, then spends residual turnover on mix migration
+- Config flags:
+  - no new reward flags
+  - posture profiles and optimizer caps only
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not run
+- Holdout result vs `neutral_full_stack`:
+  - candidate RL:
+    - CAGR `20.80%`
+    - Sharpe `1.112`
+    - MaxDD `-12.23%`
+    - avg turnover `18.05%`
+  - neutral full-stack:
+    - CAGR `33.20%`
+    - Sharpe `1.508`
+    - MaxDD `-15.10%`
+    - avg turnover `25.21%`
+- Stress-window behavior:
+  - holdout diagnostics:
+    - `unique_postures = ['neutral', 'risk_off']`
+    - `posture_change_rate = 9.1%`
+    - `posture_counts = {'risk_off': 11, 'neutral': 1}`
+    - `target_posture_counts = {'neutral': 6, 'risk_on': 5, 'risk_off': 1}`
+    - `posture_optimality_rate = 8.3%`
+    - `mean_regret = 0.061`
+    - `mean_posture_utility_dispersion = 8.05e-05`
+    - `posture_utility_dispersion_by_stress_bucket = {'low': 6.13e-05, 'medium': 1.05e-04, 'high': 3.00e-05}`
+- Decision:
+  - keep the realization changes as a measured experiment
+  - reject promotion of this policy as the new Stage 2 controller baseline
+- Learning:
+  - posture separability did improve materially versus Iteration 9, but only from `2.32e-05` to `8.05e-05`
+  - that is still far below the level needed for clean posture learning
+  - stronger authority alone pushed the policy into an even more defensive basin instead of improving regime discrimination
+  - the next fix should target posture realization quality and optimizer feasibility rather than more reward changes
+
 ## Iteration 1 — Stage 0 Control Evaluation Harness
 
 - Date:

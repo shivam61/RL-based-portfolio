@@ -928,22 +928,62 @@ class HistoricalPeriodExecutor:
                 if current_total > 0
                 else target_mix
             )
-            mix_strength = float(np.clip((aggressiveness - 0.60) / 0.80, 0.0, 1.0))
+            aggressive_mode = aggressiveness >= 1.0
+            if aggressive_mode:
+                posture_mix = target_mix
+                mix_strength = float(np.clip((aggressiveness - 1.0) / 0.40, 0.0, 1.0))
+            else:
+                overlap = sorted(set(target_mix) | set(current_mix))
+                blended = {
+                    ticker: 0.65 * current_mix.get(ticker, 0.0) + 0.35 * target_mix.get(ticker, 0.0)
+                    for ticker in overlap
+                }
+                ranked = sorted(
+                    blended.items(),
+                    key=lambda item: (target_mix.get(item[0], 0.0), current_mix.get(item[0], 0.0)),
+                    reverse=True,
+                )
+                focus_ratio = float(np.clip((1.0 - aggressiveness) / 0.40, 0.0, 1.0))
+                keep_count = max(1, int(round(len(ranked) * (1.0 - 0.55 * focus_ratio))))
+                kept = dict(ranked[:keep_count])
+                kept_total = sum(kept.values())
+                posture_mix = (
+                    {ticker: weight / kept_total for ticker, weight in kept.items()}
+                    if kept_total > 0
+                    else target_mix
+                )
+                mix_strength = float(np.clip(0.45 + 0.55 * focus_ratio, 0.0, 1.0))
             equity_budget = float(np.clip(1.0 - cash_target, 0.0, 1.0))
-            tickers = sorted(set(target_mix) | set(current_mix))
+            tickers = sorted(set(posture_mix) | set(current_mix))
             desired = {
                 ticker: equity_budget * (
                     (1.0 - mix_strength) * current_mix.get(ticker, 0.0)
-                    + mix_strength * target_mix.get(ticker, 0.0)
+                    + mix_strength * posture_mix.get(ticker, 0.0)
                 )
                 for ticker in tickers
             }
             desired["CASH"] = cash_target
-        all_tickers = sorted(set(current) | set(desired))
-        raw_turnover = 0.5 * sum(abs(desired.get(ticker, 0.0) - current.get(ticker, 0.0)) for ticker in all_tickers)
-        move_fraction = 1.0 if raw_turnover <= 1e-12 else float(np.clip(turnover_cap / raw_turnover, 0.0, 1.0))
+        current_cash = float(current.get("CASH", 0.0))
+        candidate = dict(current)
+        desired_cash = float(desired.get("CASH", cash_target))
+        cash_shift = float(np.clip(desired_cash - current_cash, -turnover_cap, turnover_cap))
+        candidate["CASH"] = current_cash + cash_shift
+        current_equity_budget = max(1.0e-12, 1.0 - current_cash)
+        candidate_equity_budget = max(0.0, 1.0 - candidate["CASH"])
+        for ticker in list(candidate):
+            if ticker == "CASH":
+                continue
+            candidate[ticker] = max(0.0, candidate.get(ticker, 0.0)) * (candidate_equity_budget / current_equity_budget)
+        all_tickers = sorted(set(candidate) | set(desired))
+        residual_turnover_budget = max(0.0, turnover_cap - abs(cash_shift))
+        raw_turnover = 0.5 * sum(abs(desired.get(ticker, 0.0) - candidate.get(ticker, 0.0)) for ticker in all_tickers)
+        move_fraction = (
+            1.0
+            if raw_turnover <= 1e-12
+            else float(np.clip(residual_turnover_budget / raw_turnover, 0.0, 1.0))
+        )
         candidate = {
-            ticker: current.get(ticker, 0.0) + move_fraction * (desired.get(ticker, 0.0) - current.get(ticker, 0.0))
+            ticker: candidate.get(ticker, 0.0) + move_fraction * (desired.get(ticker, 0.0) - candidate.get(ticker, 0.0))
             for ticker in all_tickers
         }
         total = sum(max(0.0, weight) for weight in candidate.values())
@@ -1136,28 +1176,38 @@ class HistoricalPeriodExecutor:
     @staticmethod
     def _target_controls_for_posture(posture: str, cfg: dict | None = None) -> dict[str, float]:
         rl_cfg = (cfg or {}).get("rl", {}) if isinstance(cfg, dict) else {}
+        optimizer_cfg = (cfg or {}).get("optimizer", {}) if isinstance(cfg, dict) else {}
         profiles = rl_cfg.get("posture_profiles", {}) if isinstance(rl_cfg, dict) else {}
         defaults = {
             "risk_off": {
-                "cash_target": float(rl_cfg.get("target_cash_high", 0.20)),
-                "aggressiveness": float(rl_cfg.get("target_aggressiveness_high", 0.90)),
-                "turnover_cap": float(rl_cfg.get("target_turnover_cap_high", 0.25)),
+                "cash_target": float(rl_cfg.get("target_cash_high", 0.35)),
+                "aggressiveness": float(rl_cfg.get("target_aggressiveness_high", 0.75)),
+                "turnover_cap": float(rl_cfg.get("target_turnover_cap_high", 0.15)),
             },
             "neutral": {
                 "cash_target": 0.05,
                 "aggressiveness": 1.0,
-                "turnover_cap": 0.40,
+                "turnover_cap": 0.35,
             },
             "risk_on": {
-                "cash_target": float(rl_cfg.get("target_cash_risk_on", 0.03)),
-                "aggressiveness": float(rl_cfg.get("target_aggressiveness_risk_on", 1.05)),
-                "turnover_cap": float(rl_cfg.get("target_turnover_cap_risk_on", 0.40)),
+                "cash_target": float(rl_cfg.get("target_cash_risk_on", 0.02)),
+                "aggressiveness": float(rl_cfg.get("target_aggressiveness_risk_on", 1.30)),
+                "turnover_cap": float(rl_cfg.get("target_turnover_cap_risk_on", 0.45)),
             },
         }
         profile = defaults.get(posture, defaults["neutral"]).copy()
         configured = profiles.get(posture, {}) if isinstance(profiles, dict) else {}
         if isinstance(configured, dict):
             profile.update({k: float(v) for k, v in configured.items() if k in profile})
+        agg_min = float(rl_cfg.get("aggressiveness_min", 0.60))
+        agg_max = float(rl_cfg.get("aggressiveness_max", 1.40))
+        if agg_min > agg_max:
+            agg_min, agg_max = agg_max, agg_min
+        max_cash = float(optimizer_cfg.get("max_cash", 0.40))
+        max_turnover = float(optimizer_cfg.get("max_turnover_per_rebalance", 0.45))
+        profile["cash_target"] = float(np.clip(profile["cash_target"], 0.0, max_cash))
+        profile["aggressiveness"] = float(np.clip(profile["aggressiveness"], agg_min, agg_max))
+        profile["turnover_cap"] = float(np.clip(profile["turnover_cap"], 0.05, max_turnover))
         return profile
 
     @staticmethod
@@ -1184,9 +1234,9 @@ class HistoricalPeriodExecutor:
     @staticmethod
     def _nearest_posture_label(controls: dict[str, float]) -> str:
         candidates = {
-            "risk_off": {"cash_target": 0.20, "aggressiveness": 0.90, "turnover_cap": 0.25},
-            "neutral": {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.40},
-            "risk_on": {"cash_target": 0.03, "aggressiveness": 1.05, "turnover_cap": 0.40},
+            "risk_off": {"cash_target": 0.35, "aggressiveness": 0.75, "turnover_cap": 0.15},
+            "neutral": {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.35},
+            "risk_on": {"cash_target": 0.02, "aggressiveness": 1.30, "turnover_cap": 0.45},
         }
         best_label = "neutral"
         best_distance = float("inf")
@@ -1446,7 +1496,8 @@ class HistoricalPeriodExecutor:
             posture = "neutral"
         decision["posture"] = posture
         if "cash_target" in rl_decision:
-            decision["cash_target"] = float(np.clip(rl_decision["cash_target"], 0.0, 0.30))
+            max_cash = float(self.engine.cfg.get("optimizer", {}).get("max_cash", 0.40))
+            decision["cash_target"] = float(np.clip(rl_decision["cash_target"], 0.0, max_cash))
         if "aggressiveness" in rl_decision:
             agg_min = float(self.engine.cfg.get("rl", {}).get("aggressiveness_min", 0.60))
             agg_max = float(self.engine.cfg.get("rl", {}).get("aggressiveness_max", 1.40))

@@ -102,13 +102,13 @@ stock_model:
 optimizer:
   objective: "mean_variance"
   risk_aversion: 2.0
-  aggressiveness_effect_scale: 1.5
+  aggressiveness_effect_scale: 2.25
   max_stock_weight: 0.08
   max_sector_weight: 0.35
   min_stock_weight: 0.005
-  max_cash: 0.30
+  max_cash: 0.40
   min_cash: 0.0
-  max_turnover_per_rebalance: 0.40
+  max_turnover_per_rebalance: 0.45
   no_trade_band: 0.005          # ignore weight changes below this
   solver: "CLARABEL"
 
@@ -132,17 +132,17 @@ rl:
   posture_neutral_band: 0.10
   posture_profiles:
     risk_on:
-      cash_target: 0.03
-      aggressiveness: 1.05
-      turnover_cap: 0.40
+      cash_target: 0.02
+      aggressiveness: 1.30
+      turnover_cap: 0.45
     neutral:
       cash_target: 0.05
       aggressiveness: 1.00
-      turnover_cap: 0.40
+      turnover_cap: 0.35
     risk_off:
-      cash_target: 0.20
-      aggressiveness: 0.90
-      turnover_cap: 0.25
+      cash_target: 0.35
+      aggressiveness: 0.75
+      turnover_cap: 0.15
   enable_cash_control: true
   cash_buckets: [0.00, 0.05, 0.15, 0.30]
   enable_turnover_control: true

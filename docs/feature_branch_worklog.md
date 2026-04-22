@@ -332,6 +332,30 @@ Each task should record:
   - the dominant remaining problem is not compute; it is weak posture separability
   - posture utility dispersion is extremely small, which explains why the policy still collapses to static `risk_off`
 
+### Task: Stage 2 stronger posture authority and cash-first realization
+- Scope:
+  - widen posture envelopes materially without changing the reward surface
+  - make the posture transform spend turnover on cash movement first, then on equity-mix rotation
+  - keep cached one-step soft regret as the active objective
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `20 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `20.80% CAGR`, `1.112 Sharpe`, `-12.23% MaxDD`, `18.05% avg turnover`
+    - neutral full-stack -> `33.20% CAGR`, `1.508 Sharpe`, `-15.10% MaxDD`, `25.21% avg turnover`
+    - decision-quality diagnostics:
+      - `unique_postures = ['neutral', 'risk_off']`
+      - `posture_change_rate = 9.1%`
+      - `posture_optimality_rate = 8.3%`
+      - `mean_regret = 0.061`
+      - `mean_posture_utility_dispersion = 8.05e-05`
+- Decision:
+  - keep as a measured regression
+  - do not promote
+- Learning:
+  - posture separability improved about `3.5x`, but remained far too weak
+  - the wider control envelope mostly increased defensive persistence rather than useful regime switching
+  - the next Stage 2 step should attack posture realization quality and optimizer feasibility, not add more reward complexity yet
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block

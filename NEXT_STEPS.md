@@ -246,6 +246,26 @@ Current Stage 2A result:
     - interpretation:
       - runtime is acceptable again
       - posture separation is still too weak to break the static `risk_off` policy
+  - first separability pass with stronger posture authority:
+    - widened posture profiles:
+      - `risk_on -> cash 2%, aggressiveness 1.30, turnover cap 45%`
+      - `neutral -> cash 5%, aggressiveness 1.00, turnover cap 35%`
+      - `risk_off -> cash 35%, aggressiveness 0.75, turnover cap 15%`
+    - changed the posture transform so cash shift is executed before mix rotation under the turnover budget
+    - 2016 holdout -> CAGR `20.80%`, Sharpe `1.112`, MaxDD `-12.23%`, turnover `18.05%`
+    - neutral full-stack -> CAGR `33.20%`, Sharpe `1.508`, MaxDD `-15.10%`, turnover `25.21%`
+    - posture behavior:
+      - `unique_postures = ['neutral', 'risk_off']`
+      - `posture_change_rate = 9.1%`
+      - `posture_counts = {'risk_off': 11, 'neutral': 1}`
+    - decision quality:
+      - `posture_optimality_rate = 8.3%`
+      - `mean_regret = 0.061`
+      - `mean_posture_utility_dispersion = 8.05e-05`
+    - interpretation:
+      - posture separability improved about `3.5x`, but is still far too weak
+      - the stronger control envelope pushed the policy into a more persistent defensive basin
+      - the next cut should target posture realization / optimizer feasibility before touching reward again
 
 #### Stage 3 — Add breadth control
 

@@ -27,14 +27,18 @@ from tests.test_backtest import _make_synthetic_data
 
 def _cfg() -> dict:
     return {
+        "optimizer": {
+            "max_cash": 0.40,
+            "max_turnover_per_rebalance": 0.45,
+        },
         "rl": {
             "training_backend": "disabled",
             "enable_posture_control": True,
             "posture_neutral_band": 0.25,
             "posture_profiles": {
-                "risk_off": {"cash_target": 0.20, "aggressiveness": 0.90, "turnover_cap": 0.25},
-                "neutral": {"cash_target": 0.05, "aggressiveness": 1.00, "turnover_cap": 0.40},
-                "risk_on": {"cash_target": 0.03, "aggressiveness": 1.05, "turnover_cap": 0.40},
+                "risk_off": {"cash_target": 0.35, "aggressiveness": 0.75, "turnover_cap": 0.15},
+                "neutral": {"cash_target": 0.05, "aggressiveness": 1.00, "turnover_cap": 0.35},
+                "risk_on": {"cash_target": 0.02, "aggressiveness": 1.30, "turnover_cap": 0.45},
             },
             "aggressiveness_min": 0.60,
             "aggressiveness_max": 1.40,
@@ -134,9 +138,9 @@ def test_decode_action_maps_posture_slot_to_risk_off():
     decoded = SectorAllocationEnv.decode_action(action, cfg)
 
     assert decoded["posture"] == "risk_off"
-    assert decoded["cash_target"] == pytest.approx(0.20)
-    assert decoded["turnover_cap"] == pytest.approx(0.25)
-    assert decoded["aggressiveness"] == pytest.approx(0.90)
+    assert decoded["cash_target"] == pytest.approx(0.35)
+    assert decoded["turnover_cap"] == pytest.approx(0.15)
+    assert decoded["aggressiveness"] == pytest.approx(0.75)
 
 
 def test_decode_action_maps_posture_slot_to_risk_on():
@@ -146,9 +150,9 @@ def test_decode_action_maps_posture_slot_to_risk_on():
     decoded = SectorAllocationEnv.decode_action(action, cfg)
 
     assert decoded["posture"] == "risk_on"
-    assert decoded["cash_target"] == pytest.approx(0.03)
-    assert decoded["turnover_cap"] == pytest.approx(0.40)
-    assert decoded["aggressiveness"] == pytest.approx(1.05)
+    assert decoded["cash_target"] == pytest.approx(0.02)
+    assert decoded["turnover_cap"] == pytest.approx(0.45)
+    assert decoded["aggressiveness"] == pytest.approx(1.30)
 
 
 def test_encode_observation_emits_finite_vector_with_control_features():
@@ -207,9 +211,9 @@ def test_historical_executor_target_controls_scale_with_stress():
     moderate = HistoricalPeriodExecutor._target_controls_for_stress(0.20, cfg)
     high = HistoricalPeriodExecutor._target_controls_for_stress(0.40, cfg)
 
-    assert low == {"cash_target": 0.03, "aggressiveness": 1.05, "turnover_cap": 0.40}
-    assert moderate == {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.40}
-    assert high == {"cash_target": 0.20, "aggressiveness": 0.90, "turnover_cap": 0.25}
+    assert low == {"cash_target": 0.02, "aggressiveness": 1.30, "turnover_cap": 0.45}
+    assert moderate == {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.35}
+    assert high == {"cash_target": 0.35, "aggressiveness": 0.75, "turnover_cap": 0.15}
 
 
 def test_historical_executor_guidance_blends_controls_toward_target():
@@ -226,14 +230,14 @@ def test_historical_executor_guidance_blends_controls_toward_target():
                     "stress_target_moderate": 0.18,
                     "stress_target_high": 0.35,
                     "posture_profiles": {
-                        "risk_off": {"cash_target": 0.20, "aggressiveness": 0.90, "turnover_cap": 0.25},
-                        "neutral": {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.40},
-                        "risk_on": {"cash_target": 0.03, "aggressiveness": 1.05, "turnover_cap": 0.40},
+                        "risk_off": {"cash_target": 0.35, "aggressiveness": 0.75, "turnover_cap": 0.15},
+                        "neutral": {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.35},
+                        "risk_on": {"cash_target": 0.02, "aggressiveness": 1.30, "turnover_cap": 0.45},
                     },
                     "aggressiveness_min": 0.60,
                     "aggressiveness_max": 1.40,
                 },
-                "optimizer": {"max_turnover_per_rebalance": 0.40},
+                "optimizer": {"max_turnover_per_rebalance": 0.45, "max_cash": 0.40},
             }
         },
     )()
@@ -287,9 +291,9 @@ def test_historical_executor_posture_guidance_steps_toward_target():
                     "target_posture_guidance_max_step": 1,
                     "enable_target_control_blend": False,
                     "posture_profiles": {
-                        "risk_off": {"cash_target": 0.20, "aggressiveness": 0.90, "turnover_cap": 0.25},
-                        "neutral": {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.40},
-                        "risk_on": {"cash_target": 0.03, "aggressiveness": 1.05, "turnover_cap": 0.40},
+                        "risk_off": {"cash_target": 0.35, "aggressiveness": 0.75, "turnover_cap": 0.15},
+                        "neutral": {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.35},
+                        "risk_on": {"cash_target": 0.02, "aggressiveness": 1.30, "turnover_cap": 0.45},
                     },
                 }
             }
@@ -327,6 +331,51 @@ def test_historical_executor_posture_guidance_steps_toward_target():
     assert guidance["target_posture"] == "risk_off"
     assert guided["posture"] == "neutral"
     assert guided["cash_target"] == pytest.approx(0.05)
+
+
+def test_approximate_posture_weights_create_materially_different_portfolios():
+    current_weights = {
+        "A": 0.22,
+        "B": 0.21,
+        "C": 0.17,
+        "D": 0.15,
+        "E": 0.10,
+        "F": 0.10,
+        "CASH": 0.05,
+    }
+    base_target_weights = {
+        "A": 0.28,
+        "B": 0.24,
+        "C": 0.18,
+        "D": 0.12,
+        "E": 0.10,
+        "F": 0.08,
+    }
+
+    risk_on_weights, risk_on_turnover = HistoricalPeriodExecutor._approximate_posture_weights(
+        current_weights=current_weights,
+        base_target_weights=base_target_weights,
+        candidate_decision={"cash_target": 0.02, "aggressiveness": 1.30, "turnover_cap": 0.45},
+    )
+    risk_off_weights, risk_off_turnover = HistoricalPeriodExecutor._approximate_posture_weights(
+        current_weights=current_weights,
+        base_target_weights=base_target_weights,
+        candidate_decision={"cash_target": 0.35, "aggressiveness": 0.75, "turnover_cap": 0.15},
+    )
+
+    risk_on_cash = risk_on_weights.get("CASH", 0.0)
+    risk_off_cash = risk_off_weights.get("CASH", 0.0)
+    l1_gap = sum(
+        abs(risk_on_weights.get(ticker, 0.0) - risk_off_weights.get(ticker, 0.0))
+        for ticker in set(risk_on_weights) | set(risk_off_weights)
+    )
+
+    assert risk_on_cash < 0.06
+    assert risk_off_cash >= 0.20
+    assert risk_off_cash - risk_on_cash > 0.14
+    assert risk_off_turnover >= 0.14
+    assert risk_on_turnover < 0.10
+    assert l1_gap > 0.30
 
 
 def test_historical_executor_reward_uses_bounded_weights_and_soft_regret(monkeypatch):
