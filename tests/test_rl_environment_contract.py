@@ -333,6 +333,23 @@ def test_historical_executor_posture_guidance_steps_toward_target():
     assert guided["cash_target"] == pytest.approx(0.05)
 
 
+def test_target_context_from_state_keeps_streak_and_previous_target_consistent():
+    state = {
+        "portfolio_state": {
+            "target_posture_streak": 4.0,
+            "previous_target_posture_score": -1.0,
+        }
+    }
+
+    prev_target, streak = HistoricalPeriodExecutor._target_context_from_state(
+        state,
+        "neutral",
+    )
+
+    assert streak == pytest.approx(4.0)
+    assert prev_target == "neutral"
+
+
 def test_approximate_posture_weights_create_materially_different_portfolios():
     current_weights = {
         "A": 0.22,

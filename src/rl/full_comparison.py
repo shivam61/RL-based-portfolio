@@ -353,7 +353,6 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
         "mean_stress_signal": mean_from_reward("stress_signal", trace),
         "mean_defensive_posture": mean_from_reward("defensive_posture", trace),
         "mean_target_defensive_posture": mean_from_reward("target_defensive_posture", trace),
-        "mean_target_posture_penalty": mean_from_reward("target_posture_penalty", trace),
         "mean_posture_progress_bonus": mean_from_reward("posture_progress_bonus", trace),
         "mean_posture_stale_penalty": mean_from_reward("posture_stale_penalty", trace),
         "mean_posture_flip_penalty": mean_from_reward("posture_flip_penalty", trace),

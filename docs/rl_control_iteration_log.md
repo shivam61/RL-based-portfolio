@@ -290,6 +290,57 @@ Copy this block for each future change:
   - stronger authority alone pushed the policy into an even more defensive basin instead of improving regime discrimination
   - the next fix should target posture realization quality and optimizer feasibility rather than more reward changes
 
+## Iteration 11 — Stage 2 Execution Honesty And Target-Context Cleanup
+
+- Date:
+  - `2026-04-22`
+- Scope:
+  - make optimizer fallback safer under strong `risk_off`
+  - fix target-posture streak / previous-target consistency in state bookkeeping
+  - remove target-posture penalty from promoted diagnostics because it is not part of reward
+- Control levers changed:
+  - no reward changes
+  - no posture-range changes
+  - optimizer fallback now repairs rank fallback outputs toward the turnover budget when previous weights are available
+  - posture context now forces `previous_target_posture` to stay consistent with `target_posture_streak > 1`
+- Config flags:
+  - none
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not run
+- Holdout result vs `neutral_full_stack`:
+  - candidate RL:
+    - CAGR `20.80%`
+    - Sharpe `1.112`
+    - MaxDD `-12.23%`
+    - avg turnover `18.05%`
+  - neutral full-stack:
+    - CAGR `33.20%`
+    - Sharpe `1.508`
+    - MaxDD `-15.10%`
+    - avg turnover `25.21%`
+- Stress-window / decision behavior:
+  - `unique_postures = ['neutral', 'risk_off']`
+  - `posture_change_rate = 9.1%`
+  - `posture_counts = {'risk_off': 11, 'neutral': 1}`
+  - `posture_optimality_rate = 8.3%`
+  - `mean_regret = 0.061`
+  - `mean_posture_utility_dispersion = 8.05e-05`
+  - current trace now shows internally consistent repeated-target streaks such as:
+    - `risk_on` with streaks `2,3,4`
+    - `neutral` with streaks `2`
+- Execution-quality read:
+  - holdout log warning match count moved only from `200` to `199`
+  - solver infeasibility and fallback remain the dominant execution problem
+- Decision:
+  - keep the bookkeeping and fallback-safety fixes
+  - reject promotion as a material execution improvement
+- Learning:
+  - fallback outputs are now more honest with respect to turnover budget
+  - target-posture diagnostics are less misleading
+  - but optimizer infeasibility remains essentially unchanged, so the real next fix must attack the infeasibility root cause itself
+
 ## Iteration 1 — Stage 0 Control Evaluation Harness
 
 - Date:

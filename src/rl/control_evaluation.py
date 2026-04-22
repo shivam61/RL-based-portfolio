@@ -294,7 +294,6 @@ def _extract_summary_metrics(payload: dict[str, Any]) -> dict[str, Any]:
         "mean_stress_signal",
         "mean_defensive_posture",
         "mean_target_defensive_posture",
-        "mean_target_posture_penalty",
         "mean_posture_progress_bonus",
         "mean_posture_stale_penalty",
         "mean_posture_flip_penalty",

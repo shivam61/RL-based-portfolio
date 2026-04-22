@@ -266,6 +266,20 @@ Current Stage 2A result:
       - posture separability improved about `3.5x`, but is still far too weak
       - the stronger control envelope pushed the policy into a more persistent defensive basin
       - the next cut should target posture realization / optimizer feasibility before touching reward again
+  - execution-honesty pass:
+    - optimizer fallback is now turnover-aware when the solver drops to rank fallback
+    - target-posture streak / previous-target bookkeeping is internally consistent again in the trace
+    - `mean_target_posture_penalty` was removed from promoted diagnostics because it is not part of reward
+    - 2016 holdout economics were unchanged in practice:
+      - RL -> CAGR `20.80%`, Sharpe `1.112`, MaxDD `-12.23%`, turnover `18.05%`
+      - neutral -> CAGR `33.20%`, Sharpe `1.508`, MaxDD `-15.10%`, turnover `25.21%`
+    - optimizer warning pressure barely moved:
+      - prior holdout log match count `200`
+      - current holdout log match count `199`
+    - interpretation:
+      - we fixed bookkeeping honesty and made fallback outputs safer
+      - we did not materially reduce solver infeasibility yet
+      - the next execution fix should target why the optimizer is infeasible without turnover, not just how fallback behaves
 
 #### Stage 3 — Add breadth control
 

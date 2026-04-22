@@ -356,6 +356,25 @@ Each task should record:
   - the wider control envelope mostly increased defensive persistence rather than useful regime switching
   - the next Stage 2 step should attack posture realization quality and optimizer feasibility, not add more reward complexity yet
 
+### Task: Stage 2 execution honesty and target-context cleanup
+- Scope:
+  - make fallback outputs safer when the optimizer drops to rank mode
+  - fix target-streak / previous-target consistency in posture context
+  - stop promoting target-posture penalty as a top-line diagnostic since it is not part of reward
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_data.py tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+- Result:
+  - holdout economics were effectively unchanged
+  - target-streak trace is now internally consistent on repeated regimes
+  - fallback warning pressure barely changed
+- Decision:
+  - keep as a correctness / honesty improvement
+  - do not count it as a solved execution issue
+- Learning:
+  - the real problem is still solver infeasibility upstream of fallback
+  - the next optimizer pass should target infeasibility directly, not fallback cosmetics
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block

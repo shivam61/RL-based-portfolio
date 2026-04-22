@@ -436,6 +436,47 @@ class TestOptimizer:
 
         assert tight_to <= loose_to + 1e-6
 
+    def test_rank_fallback_repairs_to_turnover_budget(self):
+        from src.optimizer.portfolio_optimizer import PortfolioOptimizer
+
+        cfg = load_config()
+        opt = PortfolioOptimizer(cfg)
+        alpha = np.array([1.0, 0.8, 0.6, 0.4], dtype=float)
+        tickers = ["A.NS", "B.NS", "C.NS", "D.NS"]
+        sector_map = {
+            "A.NS": "IT",
+            "B.NS": "Banking",
+            "C.NS": "Energy",
+            "D.NS": "Pharma",
+        }
+        current_weights = {"A.NS": 0.22, "B.NS": 0.20, "C.NS": 0.18, "D.NS": 0.10, "CASH": 0.30}
+
+        result = opt._rank_based_weights(
+            alpha,
+            tickers,
+            sector_map,
+            len(tickers),
+            max_stock=0.30,
+            max_sector=cfg["optimizer"]["max_sector_weight"],
+            cash=0.40,
+            current_weights=current_weights,
+            max_turnover=0.10,
+            liquidation_cost=0.0,
+        )
+
+        w_prev = np.array([current_weights.get(ticker, 0.0) for ticker in tickers], dtype=float)
+        w_new = np.array([result.get(ticker, 0.0) for ticker in tickers], dtype=float)
+        turnover = opt._compute_one_way_turnover(
+            w_new,
+            w_prev,
+            result.get("CASH", 0.0),
+            current_weights.get("CASH", 0.0),
+            0.0,
+        )
+
+        assert turnover <= 0.10 + 1e-6
+        assert result.get("CASH", 0.0) >= current_weights["CASH"]
+
 
 # ── Risk engine tests ─────────────────────────────────────────────────────────
 

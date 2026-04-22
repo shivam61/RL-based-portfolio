@@ -488,14 +488,6 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
                 ]
             )
         ),
-        "mean_target_posture_penalty": float(
-            np.mean(
-                [
-                    float(entry.get("reward_components", {}).get("target_posture_penalty", 0.0))
-                    for entry in trace
-                ]
-            )
-        ),
         "mean_posture_progress_bonus": float(
             np.mean(
                 [

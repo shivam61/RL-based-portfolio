@@ -552,10 +552,10 @@ class HistoricalPeriodExecutor:
         prev_posture_label = self._label_from_score(
             float(portfolio_state.get("previous_posture_score", 0.0) or 0.0)
         )
-        prev_target_posture_label = self._label_from_score(
-            float(portfolio_state.get("previous_target_posture_score", 0.0) or 0.0)
+        prev_target_posture_label, target_streak = self._target_context_from_state(
+            current_state,
+            target_posture_label,
         )
-        target_streak = max(0.0, float(portfolio_state.get("target_posture_streak", 0.0) or 0.0))
         prev_distance = self._posture_distance(prev_posture_label, target_posture_label)
         current_distance = self._posture_distance(decision_posture, target_posture_label)
         target_posture_penalty = float(
@@ -1264,6 +1264,21 @@ class HistoricalPeriodExecutor:
             return "risk_off"
         return "neutral"
 
+    @classmethod
+    def _target_context_from_state(
+        cls,
+        current_state: dict[str, Any],
+        target_posture_label: str,
+    ) -> tuple[str, float]:
+        portfolio_state = current_state.get("portfolio_state", {}) if isinstance(current_state, dict) else {}
+        target_streak = max(0.0, float(portfolio_state.get("target_posture_streak", 0.0) or 0.0))
+        prev_target_posture_label = cls._label_from_score(
+            float(portfolio_state.get("previous_target_posture_score", 0.0) or 0.0)
+        )
+        if target_streak > 1.0 and prev_target_posture_label != target_posture_label:
+            prev_target_posture_label = target_posture_label
+        return prev_target_posture_label, target_streak
+
     @staticmethod
     def _posture_distance(left: str, right: str) -> float:
         return float(
@@ -1302,9 +1317,9 @@ class HistoricalPeriodExecutor:
         stress_signal = self._stress_signal(current_state)
         target_posture = self._target_posture_for_stress(stress_signal, self.engine.cfg)
         target_controls = self._target_controls_for_posture(target_posture, self.engine.cfg)
-        target_streak = max(0.0, float(portfolio_state.get("target_posture_streak", 0.0) or 0.0))
-        prev_target_posture = self._label_from_score(
-            float(portfolio_state.get("previous_target_posture_score", 0.0) or 0.0)
+        prev_target_posture, target_streak = self._target_context_from_state(
+            current_state,
+            target_posture,
         )
         posture_guidance_enabled = bool(rl_cfg.get("enable_target_posture_guidance", False))
         guided = dict(decision)
@@ -1552,6 +1567,11 @@ class HistoricalPeriodExecutor:
             if target_posture == self._prev_target_posture
             else 1
         )
+        previous_target_posture = (
+            target_posture
+            if target_streak > 1
+            else self._prev_target_posture
+        )
         enriched_context = self._build_control_context(
             sector_feats,
             risk_signal=risk_signal,
@@ -1561,7 +1581,7 @@ class HistoricalPeriodExecutor:
                 "previous_stress_signal": self._prev_stress_signal,
                 "target_posture_score": self._posture_score(target_posture),
                 "previous_posture_score": self._posture_score(self._prev_posture),
-                "previous_target_posture_score": self._posture_score(self._prev_target_posture),
+                "previous_target_posture_score": self._posture_score(previous_target_posture),
                 "target_posture_streak": float(target_streak),
                 "previous_posture_mismatch": self._prev_posture_mismatch,
             },

@@ -229,13 +229,23 @@ class PortfolioOptimizer:
                     logger.warning("CVXPY retry also failed (%s); using rank fallback", e2)
                     return self._rank_based_weights(
                         alpha, tickers, sector_map, n,
-                        max_stock, max_sector, cash_target or cash_min
+                        max_stock,
+                        max_sector,
+                        cash_target or cash_min,
+                        current_weights=current_weights,
+                        max_turnover=effective_max_to,
+                        liquidation_cost=liquidation_cost,
                     )
             else:
                 logger.warning("CVXPY solver failed (%s); using rank fallback", e)
                 return self._rank_based_weights(
                     alpha, tickers, sector_map, n,
-                    max_stock, max_sector, cash_target or cash_min
+                    max_stock,
+                    max_sector,
+                    cash_target or cash_min,
+                    current_weights=current_weights,
+                    max_turnover=effective_max_to if current_weights else max_to,
+                    liquidation_cost=liquidation_cost,
                 )
 
         w_val = np.array(w.value).clip(0)
@@ -376,6 +386,10 @@ class PortfolioOptimizer:
         max_stock: float,
         max_sector: float,
         cash: float,
+        *,
+        current_weights: dict[str, float] | None = None,
+        max_turnover: float | None = None,
+        liquidation_cost: float = 0.0,
     ) -> dict[str, float]:
         """Simple rank-based weight assignment as fallback.
 
@@ -408,6 +422,25 @@ class PortfolioOptimizer:
 
         # Preserve hard caps in fallback mode; leave any residual uninvested.
         realized_cash = max(cash, 1.0 - float(w.sum()))
+
+        if current_weights and max_turnover is not None:
+            w_prev = np.array([(current_weights or {}).get(t, 0.0) for t in tickers], dtype=float)
+            w_prev_cash = float((current_weights or {}).get("CASH", 0.0))
+            repaired = self._repair_turnover_violation(
+                w_val=w,
+                cash_val=float(realized_cash),
+                w_prev=w_prev,
+                w_prev_cash=w_prev_cash,
+                liquidation_cost=float(liquidation_cost),
+                max_turnover=float(max_turnover),
+                max_stock=max_stock,
+                tickers=tickers,
+                sector_map=sector_map,
+                max_sector=max_sector,
+            )
+            if repaired is not None:
+                w, realized_cash = repaired
+
         result = {t: float(v) for t, v in zip(tickers, w) if v > 1e-5}
         result["CASH"] = float(realized_cash)
         return result
