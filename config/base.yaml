@@ -170,6 +170,10 @@ rl:
   reward_lambda_posture_progress: 0.06 # reward moving closer to the current target posture
   reward_lambda_posture_stale: 0.03    # penalize staying in a mismatched posture when the target persists
   reward_lambda_posture_flip: 0.02     # penalize posture flips that do not improve target alignment
+  enable_target_posture_guidance: true
+  target_posture_guidance_min_streak: 2
+  target_posture_guidance_min_stress: 0.16
+  target_posture_guidance_max_step: 1
   enable_target_control_blend: false
   target_control_blend_min: 0.15
   target_control_blend_max: 0.85

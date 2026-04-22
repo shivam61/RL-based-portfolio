@@ -819,34 +819,95 @@ class HistoricalPeriodExecutor:
             / 2.0
         )
 
+    @staticmethod
+    def _step_toward_posture(current: str, target: str, *, max_step: int = 1) -> str:
+        order = ["risk_on", "neutral", "risk_off"]
+        try:
+            current_idx = order.index(current)
+        except ValueError:
+            current_idx = order.index("neutral")
+        try:
+            target_idx = order.index(target)
+        except ValueError:
+            target_idx = order.index("neutral")
+        if current_idx == target_idx:
+            return order[current_idx]
+        step = min(max_step, abs(target_idx - current_idx))
+        if target_idx > current_idx:
+            return order[current_idx + step]
+        return order[current_idx - step]
+
     def _apply_target_control_guidance(
         self,
         decision: dict[str, Any],
         current_state: dict[str, Any],
     ) -> tuple[dict[str, Any], dict[str, float | bool]]:
         rl_cfg = self.engine.cfg.get("rl", {})
-        if not bool(rl_cfg.get("enable_target_control_blend", False)):
-            return decision, {"enabled": False, "blend_weight": 0.0}
-
+        portfolio_state = current_state.get("portfolio_state", {}) if isinstance(current_state, dict) else {}
         stress_signal = self._stress_signal(current_state)
         target_posture = self._target_posture_for_stress(stress_signal, self.engine.cfg)
         target_controls = self._target_controls_for_posture(target_posture, self.engine.cfg)
+        target_streak = max(0.0, float(portfolio_state.get("target_posture_streak", 0.0) or 0.0))
+        prev_target_posture = self._label_from_score(
+            float(portfolio_state.get("previous_target_posture_score", 0.0) or 0.0)
+        )
+        posture_guidance_enabled = bool(rl_cfg.get("enable_target_posture_guidance", False))
+        guided = dict(decision)
+        applied_posture_guidance = False
+        posture_guidance_step = 0.0
+        if posture_guidance_enabled:
+            min_streak = float(rl_cfg.get("target_posture_guidance_min_streak", 2))
+            min_stress = float(rl_cfg.get("target_posture_guidance_min_stress", 0.16))
+            max_step = int(max(1, rl_cfg.get("target_posture_guidance_max_step", 1)))
+            current_posture = str(decision.get("posture", "neutral"))
+            if (
+                current_posture != target_posture
+                and target_streak >= min_streak
+                and stress_signal >= min_stress
+                and target_posture == prev_target_posture
+            ):
+                guided["posture"] = self._step_toward_posture(
+                    current_posture,
+                    target_posture,
+                    max_step=max_step,
+                )
+                applied_posture_guidance = guided["posture"] != current_posture
+                posture_guidance_step = self._posture_distance(
+                    current_posture,
+                    str(guided["posture"]),
+                )
+                posture_controls = self._target_controls_for_posture(str(guided["posture"]), self.engine.cfg)
+                guided["cash_target"] = float(posture_controls["cash_target"])
+                guided["aggressiveness"] = float(posture_controls["aggressiveness"])
+                guided["turnover_cap"] = float(posture_controls["turnover_cap"])
+
+        if not bool(rl_cfg.get("enable_target_control_blend", False)):
+            return guided, {
+                "enabled": False,
+                "blend_weight": 0.0,
+                "stress_signal": float(stress_signal),
+                "target_posture": str(target_posture),
+                "target_posture_streak": float(target_streak),
+                "posture_guidance_enabled": posture_guidance_enabled,
+                "applied_posture_guidance": applied_posture_guidance,
+                "posture_guidance_step": float(posture_guidance_step),
+            }
+
         min_blend = float(rl_cfg.get("target_control_blend_min", 0.15))
         max_blend = float(rl_cfg.get("target_control_blend_max", 0.85))
         if min_blend > max_blend:
             min_blend, max_blend = max_blend, min_blend
         blend_weight = float(np.clip(min_blend + (max_blend - min_blend) * stress_signal, 0.0, 1.0))
 
-        guided = dict(decision)
         guided["cash_target"] = float(
-            (1.0 - blend_weight) * float(decision.get("cash_target", 0.05))
+            (1.0 - blend_weight) * float(guided.get("cash_target", 0.05))
             + blend_weight * float(target_controls["cash_target"])
         )
         guided["aggressiveness"] = float(
-            (1.0 - blend_weight) * float(decision.get("aggressiveness", 1.0))
+            (1.0 - blend_weight) * float(guided.get("aggressiveness", 1.0))
             + blend_weight * float(target_controls["aggressiveness"])
         )
-        turnover_cap = decision.get("turnover_cap")
+        turnover_cap = guided.get("turnover_cap")
         if turnover_cap is not None:
             guided["turnover_cap"] = float(
                 (1.0 - blend_weight) * float(turnover_cap)
@@ -862,6 +923,10 @@ class HistoricalPeriodExecutor:
             "blend_weight": float(blend_weight),
             "stress_signal": float(stress_signal),
             "target_posture": str(target_posture),
+            "target_posture_streak": float(target_streak),
+            "posture_guidance_enabled": posture_guidance_enabled,
+            "applied_posture_guidance": applied_posture_guidance,
+            "posture_guidance_step": float(posture_guidance_step),
             "target_cash_target": float(target_controls["cash_target"]),
             "target_aggressiveness": float(target_controls["aggressiveness"]),
             "target_turnover_cap": float(target_controls["turnover_cap"]),

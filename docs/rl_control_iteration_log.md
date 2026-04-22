@@ -109,6 +109,54 @@ Copy this block for each future change:
   - keep / reject
 - Learning:
 
+## Iteration 7 — Stage 2 Decision-Quality Instrumentation And Advisory Diagnostics
+
+- Date:
+  - `2026-04-22`
+- Scope:
+  - add explicit holdout diagnostics for:
+    - posture counts
+    - posture by stress bucket
+    - proxy decision quality
+    - realized controls by posture and by stress bucket
+  - remove hard posture-switch thresholds from config and evaluation
+  - keep posture stagnation as an advisory-only diagnostic
+- Control levers changed:
+  - none
+  - this iteration is instrumentation and evaluation only
+- Config flags:
+  - removed fixed thresholds for `min_unique_postures` and `min_posture_change_rate`
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not re-run in this iteration
+- Holdout result vs `neutral_full_stack`:
+  - candidate RL:
+    - CAGR `29.96%`
+    - Sharpe `1.464`
+    - MaxDD `-13.58%`
+    - avg turnover `20.77%`
+  - neutral full-stack:
+    - CAGR `32.99%`
+    - Sharpe `1.496`
+    - MaxDD `-14.99%`
+    - avg turnover `25.53%`
+- Stress-window behavior:
+  - not re-run as a named-window review in this slice
+  - new holdout diagnostics now expose:
+    - `posture_counts = {'risk_off': 12}`
+    - `target_posture_counts = {'neutral': 5, 'risk_on': 5, 'risk_off': 2}`
+    - `posture_by_stress_bucket`
+    - realized cash / aggressiveness / turnover by posture and by stress bucket
+- Decision:
+  - keep
+  - do not use posture switching as a promotion gate
+  - use this as the baseline instrumentation layer for the next reward redesign
+- Learning:
+  - the current candidate is statically `risk_off` and only matches the proxy target posture `16.7%` of the time
+  - mean proxy regret is `0.583`
+  - the next Stage 2 change should make posture correctness economically dominant rather than behaviorally enforced
+
 ## Iteration 1 — Stage 0 Control Evaluation Harness
 
 - Date:

@@ -272,6 +272,62 @@ def test_historical_executor_guidance_blends_controls_toward_target():
     assert guided["posture"] == "risk_off"
 
 
+def test_historical_executor_posture_guidance_steps_toward_target():
+    executor = HistoricalPeriodExecutor.__new__(HistoricalPeriodExecutor)
+    executor.engine = type(
+        "Engine",
+        (),
+        {
+            "cfg": {
+                "rl": {
+                    "enable_target_posture_guidance": True,
+                    "target_posture_guidance_min_streak": 2,
+                    "target_posture_guidance_min_stress": 0.16,
+                    "target_posture_guidance_max_step": 1,
+                    "enable_target_control_blend": False,
+                    "posture_profiles": {
+                        "risk_off": {"cash_target": 0.20, "aggressiveness": 0.90, "turnover_cap": 0.25},
+                        "neutral": {"cash_target": 0.05, "aggressiveness": 1.0, "turnover_cap": 0.40},
+                        "risk_on": {"cash_target": 0.03, "aggressiveness": 1.05, "turnover_cap": 0.40},
+                    },
+                }
+            }
+        },
+    )()
+
+    decision = {
+        "sector_tilts": {sector: 1.0 for sector in SECTORS},
+        "posture": "risk_on",
+        "cash_target": 0.03,
+        "aggressiveness": 1.05,
+        "turnover_cap": 0.40,
+        "should_rebalance": True,
+    }
+    state = {
+        "macro_state": {"macro_stress_score": 0.8},
+        "portfolio_state": {
+            "current_drawdown": -0.12,
+            "drawdown_slope_1m": -0.04,
+            "vol_shock_1m_3m": 0.4,
+            "breadth_deterioration": 0.6,
+            "emergency_flag": 1.0,
+            "target_posture_streak": 3.0,
+            "previous_target_posture_score": 1.0,
+        },
+    }
+
+    guided, guidance = HistoricalPeriodExecutor._apply_target_control_guidance(
+        executor,
+        decision,
+        state,
+    )
+
+    assert guidance["applied_posture_guidance"] is True
+    assert guidance["target_posture"] == "risk_off"
+    assert guided["posture"] == "neutral"
+    assert guided["cash_target"] == pytest.approx(0.05)
+
+
 def test_rl_agent_trains_fresh_policy_on_causal_env(monkeypatch):
     agent = RLSectorAgent(_cfg())
     agent.cfg.setdefault("backtest", {})

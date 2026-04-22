@@ -207,9 +207,10 @@ Recommended Stage 2 build order from here:
   - reward improvement toward the current target posture
   - penalize stale mismatch when the target persists
   - penalize posture flips that do not improve alignment
-- `2C` posture-guided evaluation gate
-  - reject any policy that stays in one posture for most of the holdout
-  - require posture changes to line up with target-posture variation
+- `2C` posture-guided evaluation diagnostics
+  - measure posture stagnation explicitly
+  - do not hard-gate on switching frequency
+  - use switching data to judge whether the next reward change is fixing the real objective
 
 Current Stage 2A result:
 - implementation landed and validated
@@ -223,10 +224,16 @@ Current Stage 2A result:
   - `posture_usage_rate = 1.0`
   - `posture_change_rate = 0.0`
   - target posture still varied across `risk_on / neutral / risk_off`
+- current instrumentation baseline:
+  - `posture_counts = {'risk_off': 12}`
+  - `target_posture_counts = {'neutral': 5, 'risk_on': 5, 'risk_off': 2}`
+  - `decision_quality_basis = target_posture_proxy`
+  - `posture_optimality_rate = 16.7%`
+  - `mean_regret = 0.583`
 - interpretation:
   - the target-aware state is working mechanically
   - the controller still collapses to one posture, now `risk_off`
-  - next Stage 2 step should add explicit posture-usage gates and stronger conditional supervision, not more generic reward tuning
+  - next Stage 2 step should make posture correctness economically dominant, not force posture switching as a fixed condition
 
 #### Stage 3 — Add breadth control
 

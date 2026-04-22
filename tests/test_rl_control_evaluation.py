@@ -124,6 +124,15 @@ def test_evaluate_control_from_artifacts_builds_canonical_stage0_report(tmp_path
                     "mean_turnover": 0.24,
                     "cash_usage_rate": 0.25,
                     "turnover_cap_usage_rate": 0.10,
+                    "posture_counts": {"risk_off": 8, "neutral": 4},
+                    "target_posture_counts": {"risk_off": 5, "neutral": 4, "risk_on": 3},
+                    "posture_by_stress_bucket": {"low": {"neutral": 4}, "medium": {"risk_off": 3}, "high": {"risk_off": 5}},
+                    "decision_quality_basis": "target_posture_proxy",
+                    "posture_optimality_rate": 0.58,
+                    "mean_regret": 0.42,
+                    "regret_by_stress_bucket": {"low": 0.25, "medium": 0.50, "high": 0.75},
+                    "control_realization_by_posture": {"risk_off": {"avg_cash_target": 0.20}},
+                    "control_realization_by_stress_bucket": {"high": {"avg_cash_target": 0.18}},
                 },
                 "neutral_policy_diagnostics": {
                     "mean_cash_target": 0.05,
@@ -190,6 +199,9 @@ def test_evaluate_control_from_artifacts_builds_canonical_stage0_report(tmp_path
     assert result["reference_modes"]["optimizer_only"]["cagr"] == 0.0948
     assert result["holdout"]["current_rl_vs_neutral"]["uplift"]["cagr"] == 0.0029
     assert result["holdout"]["drawdown_behavior"]["current_rl"]["cash_usage_rate"] == 0.25
+    assert result["holdout"]["drawdown_behavior"]["current_rl"]["posture_counts"]["risk_off"] == 8
+    assert result["holdout"]["drawdown_behavior"]["current_rl"]["decision_quality_basis"] == "target_posture_proxy"
+    assert result["holdout"]["drawdown_behavior"]["current_rl"]["mean_regret"] == 0.42
     covid = result["stress_windows"]["2020_covid"]
     assert covid["current_rl"]["observations"] == 3
     assert covid["neutral_full_stack"]["observations"] == 3

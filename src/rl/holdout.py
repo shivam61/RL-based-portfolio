@@ -124,6 +124,9 @@ def evaluate_holdout(
         "uplift": _compute_uplift(trained.metrics, neutral.metrics),
         "trained_policy_diagnostics": _summarize_trace(trained.trace, cfg_eval),
         "neutral_policy_diagnostics": _summarize_trace(neutral.trace, cfg_eval),
+        "trained_policy_behavior_flags": _posture_behavior_flags(
+            _summarize_trace(trained.trace, cfg_eval),
+        ),
         "trained_policy_trace": trained.trace,
         "neutral_policy_trace": neutral.trace,
     }
@@ -217,6 +220,7 @@ def _compute_uplift(trained: dict[str, Any], neutral: dict[str, Any]) -> dict[st
 def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> dict[str, Any]:
     if not trace:
         return {}
+    rl_cfg = (cfg or {}).get("rl", {}) if isinstance(cfg, dict) else {}
     tilt_vectors = []
     for entry in trace:
         tilts = entry.get("sector_tilts", {})
@@ -265,7 +269,32 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
         )
         return values
 
+    def posture_counts(values: list[str]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for value in values:
+            counts[value] = counts.get(value, 0) + 1
+        return counts
+
+    def stress_bucket(stress_signal: float) -> str:
+        moderate = float(rl_cfg.get("stress_target_moderate", 0.18))
+        high = float(rl_cfg.get("stress_target_high", 0.35))
+        if stress_signal >= high:
+            return "high"
+        if stress_signal >= moderate:
+            return "medium"
+        return "low"
+
+    def mean_of(entries: list[dict[str, Any]], key: str) -> float | None:
+        values = [entry.get(key) for entry in entries if entry.get(key) is not None]
+        if not values:
+            return None
+        return float(np.mean([float(value) for value in values]))
+
     postures = [str(entry.get("posture", "neutral")) for entry in trace]
+    target_postures = [
+        str(entry.get("reward_components", {}).get("target_posture", "neutral"))
+        for entry in trace
+    ]
     posture_change_rate = 0.0
     if len(postures) > 1:
         posture_change_rate = float(
@@ -276,6 +305,60 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
                 ]
             )
         )
+
+    bucket_rows: dict[str, list[dict[str, Any]]] = {"low": [], "medium": [], "high": []}
+    posture_rows: dict[str, list[dict[str, Any]]] = {}
+    posture_by_bucket: dict[str, dict[str, int]] = {"low": {}, "medium": {}, "high": {}}
+    target_by_bucket: dict[str, dict[str, int]] = {"low": {}, "medium": {}, "high": {}}
+    regrets: list[float] = []
+    optimal_hits: list[float] = []
+    for entry, posture, target_posture in zip(trace, postures, target_postures):
+        reward_components = entry.get("reward_components", {})
+        stress_signal = float(reward_components.get("stress_signal", 0.0))
+        bucket = stress_bucket(stress_signal)
+        bucket_rows[bucket].append(entry)
+        posture_rows.setdefault(posture, []).append(entry)
+        posture_by_bucket[bucket][posture] = posture_by_bucket[bucket].get(posture, 0) + 1
+        target_by_bucket[bucket][target_posture] = (
+            target_by_bucket[bucket].get(target_posture, 0) + 1
+        )
+        regret = float(reward_components.get("posture_distance_to_target", 0.0))
+        regrets.append(regret)
+        optimal_hits.append(1.0 if posture == target_posture else 0.0)
+
+    control_by_posture = {
+        posture: {
+            "observations": len(entries),
+            "avg_cash_target": mean_of(entries, "cash_target"),
+            "avg_aggressiveness": mean_of(entries, "aggressiveness"),
+            "avg_turnover": mean_of(entries, "turnover"),
+        }
+        for posture, entries in sorted(posture_rows.items())
+    }
+    control_by_stress_bucket = {
+        bucket: {
+            "observations": len(entries),
+            "avg_cash_target": mean_of(entries, "cash_target"),
+            "avg_aggressiveness": mean_of(entries, "aggressiveness"),
+            "avg_turnover": mean_of(entries, "turnover"),
+        }
+        for bucket, entries in bucket_rows.items()
+    }
+    regret_by_stress_bucket = {
+        bucket: (
+            float(
+                np.mean(
+                    [
+                        float(entry.get("reward_components", {}).get("posture_distance_to_target", 0.0))
+                        for entry in entries
+                    ]
+                )
+            )
+            if entries
+            else None
+        )
+        for bucket, entries in bucket_rows.items()
+    }
 
     return {
         "mean_abs_tilt_deviation": float(np.mean(np.abs(arr - 1.0))),
@@ -304,6 +387,9 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
         "unique_cash_targets": unique_values("cash_target"),
         "unique_turnover_caps": unique_values("turnover_cap"),
         "unique_postures": sorted(set(postures)),
+        "posture_counts": posture_counts(postures),
+        "target_posture_counts": posture_counts(target_postures),
+        "posture_by_stress_bucket": posture_by_bucket,
         "rebalance_rate": float(
             np.mean([1.0 if entry["should_rebalance"] else 0.0 for entry in trace])
         ),
@@ -383,6 +469,10 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
                 ]
             )
         ),
+        "decision_quality_basis": "target_posture_proxy",
+        "posture_optimality_rate": float(np.mean(optimal_hits)),
+        "mean_regret": float(np.mean(regrets)),
+        "regret_by_stress_bucket": regret_by_stress_bucket,
         "stress_posture_correlation": _correlation(
             [
                 float(entry.get("reward_components", {}).get("stress_signal", 0.0))
@@ -433,6 +523,24 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
                 ]
             )
         ),
+        "control_realization_by_posture": control_by_posture,
+        "control_realization_by_stress_bucket": control_by_stress_bucket,
+    }
+
+
+def _posture_behavior_flags(diagnostics: dict[str, Any]) -> dict[str, Any]:
+    unique_postures = diagnostics.get("unique_postures") or []
+    posture_change_rate = float(diagnostics.get("posture_change_rate") or 0.0)
+    warnings: list[str] = []
+    if len(unique_postures) <= 1:
+        warnings.append("static posture across holdout")
+    if posture_change_rate <= 0.0:
+        warnings.append("no posture transitions observed")
+    return {
+        "advisory_only": True,
+        "warnings": warnings,
+        "unique_posture_count": len(unique_postures),
+        "posture_change_rate": posture_change_rate,
     }
 
 

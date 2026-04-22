@@ -251,6 +251,35 @@ Each task should record:
   - the remaining failure is not hidden anymore: policy still collapses to one posture, now `risk_off`
   - the next Stage 2 build should introduce explicit posture-usage gates or constrained supervision rather than only more reward shaping
 
+### Task: Stage 2 decision-quality instrumentation and advisory-only posture diagnostics
+- Scope:
+  - add explicit holdout diagnostics for:
+    - posture counts
+    - posture by stress bucket
+    - proxy decision quality
+    - realized control settings by posture and by stress bucket
+  - remove hard posture-switch thresholds from config and evaluation
+  - keep posture stagnation as an advisory diagnostic only
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_holdout.py tests/test_rl_control_evaluation.py tests/test_rl_environment_contract.py -q` -> `17 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `29.96% CAGR`, `1.464 Sharpe`, `-13.58% MaxDD`, `20.77% avg turnover`
+    - neutral full-stack -> `32.99% CAGR`, `1.496 Sharpe`, `-14.99% MaxDD`, `25.53% avg turnover`
+    - posture behavior:
+      - `posture_counts = {'risk_off': 12}`
+      - `target_posture_counts = {'neutral': 5, 'risk_on': 5, 'risk_off': 2}`
+    - decision quality, current proxy:
+      - `decision_quality_basis = target_posture_proxy`
+      - `posture_optimality_rate = 16.7%`
+      - `mean_regret = 0.583`
+- Decision:
+  - keep
+  - do not use posture switching as a promotion gate
+  - use these diagnostics as the baseline for the next reward redesign
+- Learning:
+  - the current candidate is still statically defensive, but now that failure is measurable in economic terms
+  - the next reward change should target posture correctness directly, not enforce switching frequency
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block

@@ -75,3 +75,16 @@ def test_evaluate_holdout_returns_trained_vs_neutral_comparison(monkeypatch):
     assert result["trained_policy_diagnostics"]["aggressiveness_usage_rate"] > 0.0
     assert result["trained_policy_diagnostics"]["posture_usage_rate"] > 0.0
     assert "risk_off" in result["trained_policy_diagnostics"]["unique_postures"]
+    assert result["trained_policy_diagnostics"]["posture_counts"]["risk_off"] > 0
+    assert result["trained_policy_diagnostics"]["target_posture_counts"]
+    assert result["trained_policy_diagnostics"]["posture_by_stress_bucket"]
+    assert (
+        result["trained_policy_diagnostics"]["decision_quality_basis"]
+        == "target_posture_proxy"
+    )
+    assert "mean_regret" in result["trained_policy_diagnostics"]
+    assert "regret_by_stress_bucket" in result["trained_policy_diagnostics"]
+    assert "control_realization_by_posture" in result["trained_policy_diagnostics"]
+    assert "control_realization_by_stress_bucket" in result["trained_policy_diagnostics"]
+    assert result["trained_policy_behavior_flags"]["advisory_only"] is True
+    assert result["trained_policy_behavior_flags"]["warnings"]
