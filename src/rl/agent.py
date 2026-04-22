@@ -23,7 +23,7 @@ from src.rl.contract import (
     is_transition_step,
     summarize_buffer,
 )
-from src.rl.environment import HistoricalSectorAllocationEnv, SectorAllocationEnv, SECTORS
+from src.rl.environment import ACTION_DIM, STATE_DIM, HistoricalSectorAllocationEnv, SectorAllocationEnv, SECTORS
 
 logger = logging.getLogger(__name__)
 
@@ -185,17 +185,17 @@ class RLSectorAgent:
     ) -> dict:
         """Given current state, return sector allocation decisions."""
         if not self.is_trained or self.model is None:
-            return SectorAllocationEnv.neutral_action()
+            return SectorAllocationEnv.neutral_action(self.cfg)
 
         obs = self._build_obs(macro_state, sector_state, portfolio_state)
         obs_tensor = np.array(obs, dtype=np.float32).reshape(1, -1)
 
         try:
             action, _ = self.model.predict(obs_tensor, deterministic=True)
-            return SectorAllocationEnv.decode_action(action[0])
+            return SectorAllocationEnv.decode_action(action[0], self.cfg)
         except Exception as e:
             logger.warning("RL predict failed (%s); using neutral action", e)
-            return SectorAllocationEnv.neutral_action()
+            return SectorAllocationEnv.neutral_action(self.cfg)
 
     def _build_obs(
         self,
@@ -230,6 +230,8 @@ class RLSectorAgent:
             "training_backend": self.training_backend,
             "disable_reason": self.disable_reason,
             "buffer_summary": self._buffer_summary,
+            "observation_dim": int(STATE_DIM),
+            "action_dim": int(ACTION_DIM),
         }
         with open(dir_path / "meta.pkl", "wb") as f:
             pickle.dump(meta, f)
@@ -253,11 +255,21 @@ class RLSectorAgent:
         self.training_backend = meta.get("training_backend", "disabled")
         self.disable_reason = meta.get("disable_reason")
         self.is_trained = bool(meta.get("is_trained", False))
+        saved_obs_dim = meta.get("observation_dim")
+        saved_action_dim = meta.get("action_dim")
 
         model_path = dir_path / "ppo_model.zip"
         if not meta_path.exists():
             self._disable_training(
                 "Legacy RL artifact is missing causal training metadata; model load refused."
+            )
+        elif saved_obs_dim is None or saved_action_dim is None:
+            self._disable_training(
+                "Legacy RL artifact is missing policy-dimension metadata; retrain required."
+            )
+        elif int(saved_obs_dim) != int(STATE_DIM) or int(saved_action_dim) != int(ACTION_DIM):
+            self._disable_training(
+                "Saved RL artifact uses incompatible action/state dimensions; retrain required."
             )
         elif self.training_backend != CAUSAL_TRAINING_BACKEND:
             self._disable_training(
@@ -326,5 +338,6 @@ class RLSectorAgent:
             "sector_tilts": tilts,
             "cash_target": cash_target,
             "aggressiveness": agg,
+            "turnover_cap": None,
             "should_rebalance": True,
         }

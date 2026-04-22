@@ -55,6 +55,7 @@ class PortfolioOptimizer:
         sector_tilts: dict[str, float] | None = None,  # RL sector multipliers
         aggressiveness: float = 1.0,
         cash_target: float | None = None,
+        max_turnover_override: float | None = None,
         forced_exclude: list[str] | None = None,
     ) -> dict[str, float]:
         """
@@ -123,10 +124,16 @@ class PortfolioOptimizer:
 
         # Constraints config
         max_stock = opt_cfg["max_stock_weight"]
-        max_sector = opt_cfg["max_sector_weight"] * aggressiveness
+        aggressiveness_effect_scale = float(opt_cfg.get("aggressiveness_effect_scale", 1.5))
+        effective_aggressiveness = max(0.25, float(aggressiveness)) ** aggressiveness_effect_scale
+        max_sector = opt_cfg["max_sector_weight"] * effective_aggressiveness
         max_sector = min(max_sector, 0.50)
-        max_to = opt_cfg["max_turnover_per_rebalance"]
-        risk_aversion = cfg_risk_aversion = self.cfg["optimizer"]["risk_aversion"] / aggressiveness
+        max_to = (
+            float(max_turnover_override)
+            if max_turnover_override is not None
+            else float(opt_cfg["max_turnover_per_rebalance"])
+        )
+        risk_aversion = cfg_risk_aversion = self.cfg["optimizer"]["risk_aversion"] / effective_aggressiveness
 
         cash_min = opt_cfg["min_cash"]
         cash_max = opt_cfg["max_cash"]

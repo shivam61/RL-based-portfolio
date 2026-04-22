@@ -131,6 +131,26 @@ Stage 1 success criteria:
 - improved drawdown profile vs `current_rl` and `neutral_full_stack`
 - improvement in at least `3/6` named stress windows
 
+Status:
+- implementation slice landed behind bounded controls:
+  - control-state features
+  - cash buckets
+  - turnover caps
+  - stronger aggressiveness scaling
+- feature-correctness coverage added for:
+  - clipped/default control features
+  - finite RL observation vectors
+  - report schema carrying `turnover_cap_pct`
+- first 2016 holdout smoke on the new control surface did not clear the promotion gate:
+  - candidate RL CAGR `28.01%` vs neutral `32.39%`
+  - candidate RL Sharpe `1.236` vs neutral `1.465`
+  - candidate RL MaxDD `-15.15%` vs neutral `-15.00%`
+  - candidate RL avg turnover `26.18%` vs neutral `25.54%`
+- decision:
+  - keep the implementation and validation work
+  - do not promote this policy as the new incumbent
+  - keep Stage 1 open until economics and stress behavior improve
+
 #### Stage 2 — Add a posture layer
 
 Only after Stage 1 works:

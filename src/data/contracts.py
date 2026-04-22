@@ -120,6 +120,7 @@ class RebalanceRecord(BaseModel):
     aggressiveness: float
     selected_sector_count: int = 0
     selected_stock_count: int = 0
+    turnover_cap: float | None = None
     total_turnover: float
     total_cost: float
     rl_action: Optional[dict] = None

@@ -1,6 +1,9 @@
 """Shared policy helpers for backtest-aligned allocation decisions."""
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+import numpy as np
 import pandas as pd
 
 
@@ -21,12 +24,40 @@ def build_sector_state(sector_feats: pd.DataFrame) -> dict[str, dict[str, float]
     return state
 
 
+def build_control_context(
+    sector_feats: pd.DataFrame | None,
+    *,
+    risk_signal: object | None = None,
+    risk_action: object | None = None,
+    recent_turnovers: Sequence[float] | None = None,
+    recent_cost_ratios: Sequence[float] | None = None,
+) -> dict[str, float]:
+    """Build validated control-state features used by the RL overlay."""
+    breadth = 1.0
+    if sector_feats is not None and not sector_feats.empty and "breadth_3m" in sector_feats.columns:
+        breadth_values = pd.to_numeric(sector_feats["breadth_3m"], errors="coerce").dropna()
+        if not breadth_values.empty:
+            breadth = float(np.clip(breadth_values.mean(), 0.0, 1.0))
+
+    turnovers = [float(v) for v in (recent_turnovers or []) if np.isfinite(float(v))]
+    costs = [float(v) for v in (recent_cost_ratios or []) if np.isfinite(float(v))]
+
+    return {
+        "market_breadth_3m": breadth,
+        "recent_turnover_3p": float(np.mean(turnovers[-3:])) if turnovers else 0.0,
+        "recent_cost_ratio_3p": float(np.mean(costs[-3:])) if costs else 0.0,
+        "risk_cash_floor": float(getattr(risk_action, "cash_floor", 0.0) or 0.0),
+        "emergency_rebalance": float(bool(getattr(risk_signal, "emergency_rebalance", False))),
+    }
+
+
 def default_decision(sectors: list[str]) -> dict[str, object]:
     """Neutral allocation decision used when RL is disabled or unavailable."""
     return {
         "sector_tilts": {sector: 1.0 for sector in sectors},
         "cash_target": 0.05,
         "aggressiveness": 1.0,
+        "turnover_cap": None,
         "should_rebalance": True,
     }
 

@@ -169,3 +169,61 @@ Copy this block for each future change:
   - the repo now has one canonical artifact for RL control review instead of split ad hoc JSONs
   - the measurement confirms the existing RL policy is still under-defensive in stress
   - the next stage should change only risk-budget behavior, not breadth or sector inclusion yet
+
+## Iteration 2 — Stage 1 Risk-Budget Controls And Validation Hardening
+
+- Date:
+  - `2026-04-22`
+- Scope:
+  - add bounded risk-budget controls without widening RL authority beyond cash, aggressiveness, and turnover
+  - enrich RL state with control-specific features aimed at drawdown handling
+  - add correctness checks so new control features cannot silently drift or emit malformed state
+- Control levers changed:
+  - cash control via bounded buckets
+  - turnover control via bounded caps
+  - stronger aggressiveness effect in the optimizer
+  - no breadth control
+  - no sector inclusion control
+- Config flags:
+  - `enable_control_state_features`
+  - `enable_cash_control`
+  - `enable_turnover_control`
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+  - test validation only for this slice; no fresh full-window comparison yet
+- Full-window result vs `neutral_full_stack`:
+  - not re-run in this iteration
+  - incumbent full-window gate remains Iteration 1 until a fresh full-window backtest is produced
+- Holdout result vs `neutral_full_stack`:
+  - window: `2016-01-28` to `2016-12-01`
+  - candidate RL:
+    - CAGR `28.01%`
+    - Sharpe `1.236`
+    - Sortino `1.547`
+    - MaxDD `-15.15%`
+    - avg turnover `26.18%`
+  - neutral full-stack:
+    - CAGR `32.39%`
+    - Sharpe `1.465`
+    - Sortino `1.817`
+    - MaxDD `-15.00%`
+    - avg turnover `25.54%`
+  - uplift:
+    - CAGR `-4.39 pts`
+    - Sharpe `-0.229`
+    - MaxDD `-0.16 pts`
+    - turnover `+0.64 pts` worse
+- Stress-window behavior:
+  - not promoted to the named-window review set yet
+  - this iteration is a bounded-control / correctness slice only
+- Decision:
+  - keep the implementation
+  - reject promotion of the resulting policy as a new incumbent
+  - Stage 1 remains open
+- Learning:
+  - the new control surface is stable enough to train and validate without schema drift
+  - bounded cash and turnover levers alone are not yet producing better economics on holdout
+  - the validation additions are worthwhile even though the candidate policy failed the gate:
+    - portfolio control features are finite and clipped
+    - RL observation vectors stay finite at the new state dimension
+    - reporting preserves `turnover_cap_pct` for future control audits

@@ -97,7 +97,7 @@ def evaluate_holdout(
         executor=eval_executor,
         start_idx=holdout_start_idx,
         end_idx=holdout_end_idx,
-        decision_fn=lambda prepared: SectorAllocationEnv.neutral_action(),
+        decision_fn=lambda prepared: SectorAllocationEnv.neutral_action(cfg_eval),
         benchmark=_benchmark_series(price_matrix, cfg_eval, holdout_rebalance, holdout_end_ts),
     )
     trained = _run_holdout_policy(
@@ -164,6 +164,11 @@ def _run_holdout_policy(
                 "turnover": float(result.exec_result.total_turnover),
                 "transaction_cost": float(result.exec_result.total_cost),
                 "cash_target": float(result.cash_target),
+                "turnover_cap": (
+                    float(decision.get("turnover_cap"))
+                    if decision.get("turnover_cap") is not None
+                    else None
+                ),
                 "aggressiveness": float(decision.get("aggressiveness", 1.0)),
                 "should_rebalance": bool(decision.get("should_rebalance", True)),
                 "selected_sectors": list(result.selected_sectors),
@@ -231,6 +236,15 @@ def _summarize_trace(trace: list[dict[str, Any]]) -> dict[str, Any]:
         "mean_min_tilt": float(np.mean(np.min(arr, axis=1))),
         "mean_max_tilt": float(np.mean(np.max(arr, axis=1))),
         "mean_cash_target": float(np.mean([entry["cash_target"] for entry in trace])),
+        "mean_turnover_cap": float(
+            np.mean(
+                [
+                    entry["turnover_cap"]
+                    for entry in trace
+                    if entry.get("turnover_cap") is not None
+                ]
+            )
+        ) if any(entry.get("turnover_cap") is not None for entry in trace) else None,
         "mean_aggressiveness": float(
             np.mean([entry["aggressiveness"] for entry in trace])
         ),

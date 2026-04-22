@@ -189,4 +189,5 @@ def test_report_generator_writes_minimal_manifest_without_model_dir(tmp_path):
         "report_generated_at_utc",
         "selected_sector_count",
         "selected_stock_count",
+        "turnover_cap_pct",
     } <= set(rebalance_log.columns)

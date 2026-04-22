@@ -183,7 +183,7 @@ def _run_full_window_policy(
     end_idx = len(executor.rebalance_dates) - 2
     for idx in range(0, end_idx + 1):
         prepared = executor.prepare_step(idx, portfolio, nav_points)
-        decision = SectorAllocationEnv.neutral_action()
+        decision = SectorAllocationEnv.neutral_action(executor.engine.cfg)
         result = executor.execute_prepared_step(
             prepared,
             portfolio,
@@ -203,6 +203,11 @@ def _run_full_window_policy(
                 "turnover": float(result.exec_result.total_turnover),
                 "transaction_cost": float(result.exec_result.total_cost),
                 "cash_target": float(result.cash_target),
+                "turnover_cap": (
+                    float(decision.get("turnover_cap"))
+                    if decision.get("turnover_cap") is not None
+                    else None
+                ),
                 "aggressiveness": float(decision.get("aggressiveness", 1.0)),
                 "should_rebalance": bool(decision.get("should_rebalance", True)),
                 "selected_sectors": list(result.selected_sectors),
@@ -274,9 +279,14 @@ def _benchmark_series(
 def _summarize_trace(trace: list[dict[str, Any]]) -> dict[str, Any]:
     if not trace:
         return {}
-    mean = lambda key: float(sum(float(entry.get(key, 0.0)) for entry in trace) / len(trace))
+    def mean(key: str) -> float | None:
+        values = [entry.get(key) for entry in trace if entry.get(key) is not None]
+        if not values:
+            return None
+        return float(sum(float(value) for value in values) / len(values))
     return {
         "mean_cash_target": mean("cash_target"),
+        "mean_turnover_cap": mean("turnover_cap"),
         "mean_aggressiveness": mean("aggressiveness"),
         "mean_turnover": mean("turnover"),
         "mean_selected_sector_count": float(

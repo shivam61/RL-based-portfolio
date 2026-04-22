@@ -19,7 +19,12 @@ from src.data.contracts import PortfolioState
 from src.features.portfolio_features import compute_portfolio_features
 from src.optimizer.portfolio_optimizer import PortfolioOptimizer
 from src.rl.contract import build_state, build_transition
-from src.rl.policy_utils import build_sector_state, default_decision, select_sectors
+from src.rl.policy_utils import (
+    build_control_context,
+    build_sector_state,
+    default_decision,
+    select_sectors,
+)
 from src.risk.risk_engine import RiskAction, RiskEngine, RiskSignal
 
 
@@ -86,6 +91,8 @@ class HistoricalPeriodExecutor:
             if bm_ticker in self.engine.price_matrix.columns
             else None
         )
+        self._recent_turnovers: list[float] = []
+        self._recent_cost_ratios: list[float] = []
 
     def initial_portfolio(self, idx: int = 0) -> PortfolioState:
         start = self.rebalance_dates[idx]
@@ -106,6 +113,8 @@ class HistoricalPeriodExecutor:
         nav_points: list[tuple[pd.Timestamp, float]] | None = None,
     ) -> None:
         self.engine.risk_engine = RiskEngine(self.engine.cfg)
+        self._recent_turnovers = []
+        self._recent_cost_ratios = []
         for ts, nav in nav_points or self.initial_nav_points():
             self.engine.risk_engine.update(float(nav), pd.Timestamp(ts).date())
 
@@ -156,9 +165,6 @@ class HistoricalPeriodExecutor:
             if self.bm_prices is not None
             else None
         )
-        portfolio_features = compute_portfolio_features(
-            portfolio, recent_returns, bm_rets_recent
-        )
         risk_regime = self.engine.risk_engine.regime(recent_returns)
         risk_signal, risk_action = self.engine.risk_engine.evaluate(
             portfolio,
@@ -169,6 +175,18 @@ class HistoricalPeriodExecutor:
                 else pd.Series(macro_now)
             ),
             volume_matrix=self.engine.volume_matrix.loc[:current_date],
+        )
+        portfolio_features = compute_portfolio_features(
+            portfolio,
+            recent_returns,
+            bm_rets_recent,
+            control_context=build_control_context(
+                sector_feats_now,
+                risk_signal=risk_signal,
+                risk_action=risk_action,
+                recent_turnovers=self._recent_turnovers,
+                recent_cost_ratios=self._recent_cost_ratios,
+            ),
         )
 
         transition_state = build_state(
@@ -254,6 +272,11 @@ class HistoricalPeriodExecutor:
                     else 1.0
                 ),
                 cash_target=cash_target,
+                max_turnover_override=(
+                    float(decision.get("turnover_cap"))
+                    if decision.get("turnover_cap") is not None
+                    else None
+                ),
                 forced_exclude=prepared.risk_action.exclude_tickers,
             )
             pre_risk_target_weights = dict(target_weights)
@@ -320,6 +343,9 @@ class HistoricalPeriodExecutor:
             next_portfolio,
             updated_nav_points,
         )
+        self._recent_turnovers.append(float(exec_result.total_turnover))
+        if pre_nav > 0:
+            self._recent_cost_ratios.append(float(exec_result.total_cost) / float(pre_nav))
 
         transition = build_transition(
             state=prepared.transition_state,
@@ -351,6 +377,11 @@ class HistoricalPeriodExecutor:
                 "turnover": float(exec_result.total_turnover),
                 "transaction_cost": float(exec_result.total_cost),
                 "cash_target": float(cash_target),
+                "turnover_cap": (
+                    float(decision.get("turnover_cap"))
+                    if decision.get("turnover_cap") is not None
+                    else None
+                ),
                 "reward_components": reward_components,
             },
         )
@@ -498,7 +529,9 @@ class HistoricalPeriodExecutor:
         ]
         cash_dev = abs(float(decision.get("cash_target", 0.05)) - 0.05)
         aggressiveness_dev = abs(float(decision.get("aggressiveness", 1.0)) - 1.0)
-        components = sector_dev + [cash_dev, aggressiveness_dev]
+        turnover_cap = decision.get("turnover_cap")
+        turnover_dev = abs(float(turnover_cap) - 0.40) if turnover_cap is not None else 0.0
+        components = sector_dev + [cash_dev, aggressiveness_dev, turnover_dev]
         if not components:
             return 0.0
         return float(np.mean(components))
@@ -569,8 +602,27 @@ class HistoricalPeriodExecutor:
             if self.bm_prices is not None
             else None
         )
+        risk_signal, risk_action = self.engine.risk_engine.evaluate(
+            portfolio,
+            recent_returns,
+            macro_features=(
+                macro_now_raw
+                if isinstance(macro_now_raw, pd.Series)
+                else pd.Series(macro_now)
+            ),
+            volume_matrix=self.engine.volume_matrix.loc[:as_of],
+        )
         portfolio_state = compute_portfolio_features(
-            portfolio, recent_returns, bm_rets_recent
+            portfolio,
+            recent_returns,
+            bm_rets_recent,
+            control_context=build_control_context(
+                sector_feats_now,
+                risk_signal=risk_signal,
+                risk_action=risk_action,
+                recent_turnovers=self._recent_turnovers,
+                recent_cost_ratios=self._recent_cost_ratios,
+            ),
         )
         return build_state(
             macro_state=macro_now,
@@ -594,7 +646,16 @@ class HistoricalPeriodExecutor:
         if "cash_target" in rl_decision:
             decision["cash_target"] = float(np.clip(rl_decision["cash_target"], 0.0, 0.30))
         if "aggressiveness" in rl_decision:
-            decision["aggressiveness"] = float(np.clip(rl_decision["aggressiveness"], 0.70, 1.30))
+            agg_min = float(self.engine.cfg.get("rl", {}).get("aggressiveness_min", 0.60))
+            agg_max = float(self.engine.cfg.get("rl", {}).get("aggressiveness_max", 1.40))
+            if agg_min > agg_max:
+                agg_min, agg_max = agg_max, agg_min
+            decision["aggressiveness"] = float(np.clip(rl_decision["aggressiveness"], agg_min, agg_max))
+        if "turnover_cap" in rl_decision and rl_decision.get("turnover_cap") is not None:
+            max_turnover = float(
+                self.engine.cfg.get("optimizer", {}).get("max_turnover_per_rebalance", 0.40)
+            )
+            decision["turnover_cap"] = float(np.clip(rl_decision["turnover_cap"], 0.05, max_turnover))
         return decision
 
     def _with_sector_weights(

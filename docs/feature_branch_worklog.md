@@ -82,6 +82,40 @@ Each task should record:
   - the current policy still fails the economic smell test in stress even though it is causally valid and slightly additive on returns
   - future stages can now be rejected quickly when behavior gets worse even if reward improves
 
+### Task: Stage 1 risk-budget controls and validation hardening
+- Scope:
+  - add bounded RL control levers for:
+    - cash buckets
+    - turnover caps
+    - stronger aggressiveness scaling
+  - enrich the RL portfolio-state surface with control-specific features:
+    - drawdown slope
+    - volatility shock
+    - breadth deterioration
+    - recent turnover pressure
+    - recent cost pressure
+    - risk cash floor
+    - emergency flag
+  - harden validation so the new control inputs cannot introduce silent data issues
+- Validation:
+  - `./.venv/bin/python -m py_compile src/rl/environment.py src/rl/agent.py src/rl/historical_executor.py src/backtest/walk_forward.py src/features/portfolio_features.py src/optimizer/portfolio_optimizer.py src/rl/policy_utils.py tests/test_portfolio_features.py`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_portfolio_features.py tests/test_rl_environment_contract.py tests/test_data.py::TestOptimizer tests/test_reporting_artifacts.py -q` -> `19 passed`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q` -> `118 passed, 1 skipped`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 64`
+    - candidate RL -> `28.01% CAGR`, `1.236 Sharpe`, `-15.15% MaxDD`, `26.18% avg turnover`
+    - neutral full-stack -> `32.39% CAGR`, `1.465 Sharpe`, `-15.00% MaxDD`, `25.54% avg turnover`
+- Decision:
+  - keep the implementation and validation additions
+  - do not promote the resulting policy as the new RL incumbent
+  - continue Stage 1 until the candidate improves control behavior without losing to neutral
+- Learning:
+  - the new control levers are functioning and bounded, but the first candidate policy is still economically weaker than neutral
+  - the added tests materially reduce data-risk on this surface:
+    - control features are clipped/defaulted safely
+    - RL observations remain finite at the expanded state dimension
+    - rebalance reports now preserve turnover-cap metadata for audit
+  - the next Stage 1 work should focus on the economics of how the policy uses these levers, not on widening authority further
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block

@@ -387,6 +387,55 @@ class TestOptimizer:
         assert turnover <= 0.12 + 1e-6
         assert w_new.max() <= 0.20 + 1e-6
 
+    def test_optimizer_respects_tighter_turnover_override(self):
+        from src.optimizer.portfolio_optimizer import PortfolioOptimizer
+
+        cfg = load_config()
+        opt = PortfolioOptimizer(cfg)
+        alpha = {"A.NS": 1.0, "B.NS": 0.9, "C.NS": 0.1}
+        sector_map = {"A.NS": "IT", "B.NS": "Banking", "C.NS": "Energy"}
+        current_weights = {"A.NS": 0.20, "B.NS": 0.20, "C.NS": 0.20, "CASH": 0.40}
+
+        loose = opt.optimize(
+            alpha,
+            None,
+            sector_map,
+            current_weights=current_weights,
+            cash_target=0.10,
+            max_turnover_override=0.40,
+        )
+        tight = opt.optimize(
+            alpha,
+            None,
+            sector_map,
+            current_weights=current_weights,
+            cash_target=0.10,
+            max_turnover_override=0.10,
+        )
+
+        tickers = [ticker for ticker in alpha if ticker in sector_map]
+        w_prev = np.array([current_weights.get(ticker, 0.0) for ticker in tickers])
+        loose_w = np.array([loose.get(ticker, 0.0) for ticker in tickers])
+        tight_w = np.array([tight.get(ticker, 0.0) for ticker in tickers])
+        liquidation_cost = 0.0
+
+        loose_to = opt._compute_one_way_turnover(
+            loose_w,
+            w_prev,
+            loose.get("CASH", 0.0),
+            current_weights.get("CASH", 0.0),
+            liquidation_cost,
+        )
+        tight_to = opt._compute_one_way_turnover(
+            tight_w,
+            w_prev,
+            tight.get("CASH", 0.0),
+            current_weights.get("CASH", 0.0),
+            liquidation_cost,
+        )
+
+        assert tight_to <= loose_to + 1e-6
+
 
 # ── Risk engine tests ─────────────────────────────────────────────────────────
 

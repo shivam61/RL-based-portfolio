@@ -140,6 +140,7 @@ class ReportGenerator:
             "n_stocks",
             "selected_sector_count",
             "selected_stock_count",
+            "turnover_cap_pct",
             "cash_pct",
             "turnover_pct",
             "cost_inr",
@@ -186,6 +187,11 @@ class ReportGenerator:
                 "n_stocks":          len(cur_weights),
                 "selected_sector_count": int(getattr(r, "selected_sector_count", 0)),
                 "selected_stock_count": int(getattr(r, "selected_stock_count", 0)),
+                "turnover_cap_pct": (
+                    round(float(getattr(r, "turnover_cap")) * 100, 2)
+                    if getattr(r, "turnover_cap", None) is not None
+                    else np.nan
+                ),
                 "cash_pct":          round(r.target_weights.get("CASH", 0) * 100, 2),
                 "turnover_pct":      round(r.total_turnover * 100, 2),
                 "cost_inr":          round(r.total_cost, 2),

@@ -41,24 +41,22 @@ N_SECTORS = len(SECTORS)
 
 # Action dimensions
 # [0:N_SECTORS]        zero-sum sector tilt deltas  [-0.35, 0.35]
-# [N_SECTORS]          aggressiveness delta         [-0.30, 0.30] around 1.0
-ACTION_DIM = N_SECTORS + 1
+# [N_SECTORS]          aggressiveness delta         configurable around 1.0
+# [N_SECTORS + 1]      cash control slot            optional bucketed control
+# [N_SECTORS + 2]      turnover control slot        optional bucketed control
+ACTION_DIM = N_SECTORS + 3
 SECTOR_DELTA_MAX = 0.35
 CASH_TARGET_NEUTRAL = 0.05
 CASH_TARGET_MIN = 0.0
 AGGRESSIVENESS_NEUTRAL = 1.0
-AGGRESSIVENESS_MIN = 0.70
-AGGRESSIVENESS_MAX = 1.30
-AGGRESSIVENESS_DELTA_MIN = AGGRESSIVENESS_MIN - AGGRESSIVENESS_NEUTRAL
-AGGRESSIVENESS_DELTA_MAX = AGGRESSIVENESS_MAX - AGGRESSIVENESS_NEUTRAL
 
 # State dimensions
 MACRO_DIM = 12          # macro features
 SECTOR_DIM = N_SECTORS * 4  # per-sector: mom_1m, mom_3m, rel_str_1m, breadth_3m
-PORT_DIM = 10           # portfolio state features
+PORT_DIM = 17           # portfolio state + control features
 # REALIZED_SECTOR_DIM kept here for future use when more live experience exists
 REALIZED_SECTOR_DIM = N_SECTORS  # not added to STATE_DIM until RL has 500+ training steps
-STATE_DIM = MACRO_DIM + SECTOR_DIM + PORT_DIM  # 12+60+10 = 82
+STATE_DIM = MACRO_DIM + SECTOR_DIM + PORT_DIM  # 12+60+17 = 89
 
 
 _GymBase = gym.Env if HAS_GYM else object
@@ -100,14 +98,15 @@ class SectorAllocationEnv(_GymBase):
             self._setup_gym_spaces()
 
     def _setup_gym_spaces(self) -> None:
+        agg_min, agg_max = _aggressiveness_bounds(self.cfg)
         low_a = np.array(
-            [-
-                SECTOR_DELTA_MAX
-            ] * N_SECTORS + [AGGRESSIVENESS_DELTA_MIN],
+            [-SECTOR_DELTA_MAX] * N_SECTORS
+            + [agg_min - AGGRESSIVENESS_NEUTRAL, -1.0, -1.0],
             dtype=np.float32,
         )
         high_a = np.array(
-            [SECTOR_DELTA_MAX] * N_SECTORS + [AGGRESSIVENESS_DELTA_MAX],
+            [SECTOR_DELTA_MAX] * N_SECTORS
+            + [agg_max - AGGRESSIVENESS_NEUTRAL, 1.0, 1.0],
             dtype=np.float32,
         )
         self.action_space = spaces.Box(low=low_a, high=high_a, dtype=np.float32)
@@ -140,7 +139,11 @@ class SectorAllocationEnv(_GymBase):
         transition = self.experience[self._step_idx]
         reward = self._compute_reward(transition, action)
         recorded_action = self.encode_action(transition["action"])
-        mismatch_l1 = float(np.mean(np.abs(np.asarray(action) - recorded_action)))
+        mismatch_l1 = float(
+            np.mean(
+                np.abs(_pad_action(np.asarray(action, dtype=np.float32)) - recorded_action)
+            )
+        )
         self._step_idx += 1
         obs = self.encode_observation(**transition["next_state"])
         done = bool(transition["done"]) or self._step_idx >= self._max_steps
@@ -189,8 +192,10 @@ class SectorAllocationEnv(_GymBase):
 
         port_keys = [
             "cash_ratio", "ret_1m", "vol_1m", "current_drawdown",
-            "max_drawdown", "hhi", "max_weight", "sharpe_3m",
-            "active_ret_1m", "n_stocks",
+            "max_drawdown", "drawdown_slope_1m", "vol_shock_1m_3m",
+            "breadth_deterioration", "recent_turnover_3p", "recent_cost_ratio_3p",
+            "risk_cash_floor", "emergency_flag", "hhi", "max_weight",
+            "sharpe_3m", "active_ret_1m", "n_stocks",
         ]
         for i, k in enumerate(port_keys[:PORT_DIM]):
             v = portfolio_state.get(k, 0.0)
@@ -206,7 +211,11 @@ class SectorAllocationEnv(_GymBase):
             raise ValueError("Reward is only defined for canonical RL transitions.")
         if action is not None and transition.get("action") is not None:
             recorded = self.encode_action(transition["action"])
-            mismatch = float(np.mean(np.abs(np.asarray(action) - recorded)))
+            mismatch = float(
+                np.mean(
+                    np.abs(_pad_action(np.asarray(action, dtype=np.float32)) - recorded)
+                )
+            )
             if mismatch > 1e-6:
                 logger.debug(
                     "Replay reward requested for non-recorded action; mismatch_l1=%.6f",
@@ -233,25 +242,37 @@ class SectorAllocationEnv(_GymBase):
                 -SECTOR_DELTA_MAX,
                 SECTOR_DELTA_MAX,
             )
+        agg_min, agg_max = _aggressiveness_bounds(None)
+        aggressiveness_slot = float(
+            np.clip(
+                float(action.get("aggressiveness", AGGRESSIVENESS_NEUTRAL))
+                - AGGRESSIVENESS_NEUTRAL,
+                agg_min - AGGRESSIVENESS_NEUTRAL,
+                agg_max - AGGRESSIVENESS_NEUTRAL,
+            )
+        )
+        cash_slot = _encode_bucket_slot(
+            value=float(action.get("cash_target", CASH_TARGET_NEUTRAL)),
+            buckets=_cash_buckets(None),
+            neutral_value=CASH_TARGET_NEUTRAL,
+        )
+        turnover_value = action.get("turnover_cap")
+        if turnover_value is None:
+            turnover_value = _neutral_turnover_cap(None)
+        turnover_slot = _encode_bucket_slot(
+            value=float(turnover_value),
+            buckets=_turnover_buckets(None),
+            neutral_value=float(_neutral_turnover_cap(None)),
+        )
         return np.array(
-            list(raw_sector)
-            + [
-                float(
-                    np.clip(
-                        float(action.get("aggressiveness", AGGRESSIVENESS_NEUTRAL))
-                        - AGGRESSIVENESS_NEUTRAL,
-                        AGGRESSIVENESS_DELTA_MIN,
-                        AGGRESSIVENESS_DELTA_MAX,
-                    )
-                ),
-            ],
+            list(raw_sector) + [aggressiveness_slot, cash_slot, turnover_slot],
             dtype=np.float32,
         )
 
     @staticmethod
-    def decode_action(action: np.ndarray) -> dict:
+    def decode_action(action: np.ndarray, cfg: dict | None = None) -> dict:
         """Convert raw delta action vector into neutral-anchored decisions."""
-        raw_action = np.asarray(action, dtype=np.float32)
+        raw_action = _pad_action(np.asarray(action, dtype=np.float32))
         sector_delta = np.clip(raw_action[:N_SECTORS], -SECTOR_DELTA_MAX, SECTOR_DELTA_MAX)
         if sector_delta.size:
             sector_delta = np.clip(
@@ -263,28 +284,49 @@ class SectorAllocationEnv(_GymBase):
             SECTORS[i]: float(np.clip(1.0 + sector_delta[i], 1.0 - SECTOR_DELTA_MAX, 1.0 + SECTOR_DELTA_MAX))
             for i in range(N_SECTORS)
         }
+        agg_min, agg_max = _aggressiveness_bounds(cfg)
         aggressiveness = float(
             np.clip(
                 AGGRESSIVENESS_NEUTRAL + raw_action[N_SECTORS],
-                AGGRESSIVENESS_MIN,
-                AGGRESSIVENESS_MAX,
+                agg_min,
+                agg_max,
             )
+        )
+        cash_target = (
+            _decode_bucket_slot(
+                raw_action[N_SECTORS + 1],
+                _cash_buckets(cfg),
+                neutral_value=CASH_TARGET_NEUTRAL,
+            )
+            if _cash_control_enabled(cfg)
+            else CASH_TARGET_NEUTRAL
+        )
+        turnover_cap = (
+            _decode_bucket_slot(
+                raw_action[N_SECTORS + 2],
+                _turnover_buckets(cfg),
+                neutral_value=float(_neutral_turnover_cap(cfg) or 0.40),
+            )
+            if _turnover_control_enabled(cfg)
+            else _neutral_turnover_cap(cfg)
         )
 
         return {
             "sector_tilts": sector_tilts,
-            "cash_target": CASH_TARGET_NEUTRAL,
+            "cash_target": cash_target,
             "aggressiveness": aggressiveness,
+            "turnover_cap": turnover_cap,
             "should_rebalance": True,
         }
 
     @staticmethod
-    def neutral_action() -> dict:
+    def neutral_action(cfg: dict | None = None) -> dict:
         """Default no-tilt action for non-RL baseline."""
         return {
             "sector_tilts": {s: 1.0 for s in SECTORS},
             "cash_target": CASH_TARGET_NEUTRAL,
             "aggressiveness": AGGRESSIVENESS_NEUTRAL,
+            "turnover_cap": _neutral_turnover_cap(cfg),
             "should_rebalance": True,
         }
 
@@ -326,12 +368,15 @@ class HistoricalSectorAllocationEnv(_GymBase):
         self._warm_start_cache: dict[int, tuple[Any, list[tuple[Any, float]]]] = {}
 
         if HAS_GYM:
+            agg_min, agg_max = _aggressiveness_bounds(self.cfg)
             low_a = np.array(
-                [-SECTOR_DELTA_MAX] * N_SECTORS + [AGGRESSIVENESS_DELTA_MIN],
+                [-SECTOR_DELTA_MAX] * N_SECTORS
+                + [agg_min - AGGRESSIVENESS_NEUTRAL, -1.0, -1.0],
                 dtype=np.float32,
             )
             high_a = np.array(
-                [SECTOR_DELTA_MAX] * N_SECTORS + [AGGRESSIVENESS_DELTA_MAX],
+                [SECTOR_DELTA_MAX] * N_SECTORS
+                + [agg_max - AGGRESSIVENESS_NEUTRAL, 1.0, 1.0],
                 dtype=np.float32,
             )
             self.action_space = spaces.Box(low=low_a, high=high_a, dtype=np.float32)
@@ -395,7 +440,7 @@ class HistoricalSectorAllocationEnv(_GymBase):
             obs = SectorAllocationEnv.encode_observation(**self._prepared.transition_state)
             return obs.astype(np.float32), 0.0, True, False, {"replay_only": False}
 
-        decision = SectorAllocationEnv.decode_action(np.asarray(action, dtype=np.float32))
+        decision = SectorAllocationEnv.decode_action(np.asarray(action, dtype=np.float32), self.cfg)
         terminated, truncated = self._termination_flags_after_step()
         result = self.executor.execute_prepared_step(
             self._prepared,
@@ -453,7 +498,7 @@ class HistoricalSectorAllocationEnv(_GymBase):
                 prepared,
                 portfolio,
                 nav_points,
-                SectorAllocationEnv.neutral_action(),
+                SectorAllocationEnv.neutral_action(self.cfg),
                 done=False,
             )
             self.executor.engine.risk_engine.update(
@@ -465,3 +510,84 @@ class HistoricalSectorAllocationEnv(_GymBase):
 
         self._warm_start_cache[idx] = (deepcopy(portfolio), list(nav_points))
         return deepcopy(portfolio), list(nav_points)
+
+
+def _rl_cfg(cfg: dict | None) -> dict:
+    return (cfg or {}).get("rl", {}) if isinstance(cfg, dict) else {}
+
+
+def _cash_control_enabled(cfg: dict | None) -> bool:
+    return bool(_rl_cfg(cfg).get("enable_cash_control", False))
+
+
+def _turnover_control_enabled(cfg: dict | None) -> bool:
+    return bool(_rl_cfg(cfg).get("enable_turnover_control", False))
+
+
+def _cash_buckets(cfg: dict | None) -> list[float]:
+    buckets = _rl_cfg(cfg).get("cash_buckets", [0.0, 0.1, 0.2, 0.3])
+    values = sorted({float(np.clip(v, 0.0, 0.30)) for v in buckets})
+    return values or [CASH_TARGET_NEUTRAL]
+
+
+def _turnover_buckets(cfg: dict | None) -> list[float]:
+    buckets = _rl_cfg(cfg).get("turnover_buckets", [0.20, 0.30, 0.40])
+    values = sorted({float(max(0.05, v)) for v in buckets})
+    return values or [0.40]
+
+
+def _aggressiveness_bounds(cfg: dict | None) -> tuple[float, float]:
+    rl_cfg = _rl_cfg(cfg)
+    agg_min = float(rl_cfg.get("aggressiveness_min", 0.60))
+    agg_max = float(rl_cfg.get("aggressiveness_max", 1.40))
+    if agg_min > agg_max:
+        agg_min, agg_max = agg_max, agg_min
+    return agg_min, agg_max
+
+
+def _neutral_turnover_cap(cfg: dict | None) -> float | None:
+    if cfg is not None and not _turnover_control_enabled(cfg):
+        return None
+    buckets = _turnover_buckets(cfg)
+    cfg_max = (
+        float((cfg or {}).get("optimizer", {}).get("max_turnover_per_rebalance", buckets[-1]))
+        if isinstance(cfg, dict)
+        else float(buckets[-1])
+    )
+    return float(min(max(buckets), cfg_max))
+
+
+def _encode_bucket_slot(value: float, buckets: list[float], neutral_value: float) -> float:
+    if len(buckets) <= 1:
+        return 0.0
+    idx = int(np.argmin([abs(float(value) - bucket) for bucket in buckets]))
+    neutral_idx = int(np.argmin([abs(float(neutral_value) - bucket) for bucket in buckets]))
+    if idx == neutral_idx:
+        return 0.0
+    if idx > neutral_idx:
+        max_up = max(1, len(buckets) - 1 - neutral_idx)
+        return float((idx - neutral_idx) / max_up)
+    max_down = max(1, neutral_idx)
+    return float(-((neutral_idx - idx) / max_down))
+
+
+def _decode_bucket_slot(raw_value: float, buckets: list[float], neutral_value: float) -> float:
+    if len(buckets) <= 1:
+        return float(buckets[0])
+    normalized = float(np.clip(raw_value, -1.0, 1.0))
+    neutral_idx = int(np.argmin([abs(float(neutral_value) - bucket) for bucket in buckets]))
+    if normalized >= 0:
+        max_up = max(1, len(buckets) - 1 - neutral_idx)
+        idx = neutral_idx + int(np.rint(normalized * max_up))
+    else:
+        max_down = max(1, neutral_idx)
+        idx = neutral_idx - int(np.rint(abs(normalized) * max_down))
+    idx = int(np.clip(idx, 0, len(buckets) - 1))
+    return float(buckets[idx])
+
+
+def _pad_action(action: np.ndarray) -> np.ndarray:
+    raw = np.asarray(action, dtype=np.float32).flatten()
+    if raw.size < ACTION_DIM:
+        raw = np.pad(raw, (0, ACTION_DIM - raw.size))
+    return raw

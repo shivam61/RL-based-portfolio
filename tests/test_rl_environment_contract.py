@@ -16,6 +16,7 @@ import src.rl.agent as rl_agent_module
 from src.rl.contract import CAUSAL_TRAINING_BACKEND, build_state, build_transition
 from src.rl.environment import (
     SECTORS,
+    STATE_DIM,
     HistoricalSectorAllocationEnv,
     SectorAllocationEnv,
 )
@@ -27,6 +28,12 @@ def _cfg() -> dict:
     return {
         "rl": {
             "training_backend": "disabled",
+            "enable_cash_control": True,
+            "cash_buckets": [0.0, 0.1, 0.2, 0.3],
+            "enable_turnover_control": True,
+            "turnover_buckets": [0.2, 0.3, 0.4],
+            "aggressiveness_min": 0.60,
+            "aggressiveness_max": 1.40,
             "reward_lambda_dd": 2.0,
             "reward_lambda_to": 0.5,
             "reward_lambda_conc": 0.3,
@@ -112,6 +119,24 @@ def test_sector_allocation_env_replays_logged_transition_and_reports_action_mism
     _, neutral_reward, _, _, neutral_info = env.step(neutral)
     assert neutral_reward == pytest.approx(reward)
     assert neutral_info["action_mismatch_l1"] == pytest.approx(0.0)
+
+
+def test_decode_action_maps_cash_and_turnover_to_buckets():
+    cfg = _cfg()
+    action = np.array([0.0] * len(SECTORS) + [-0.20, 1.0, -1.0], dtype=np.float32)
+
+    decoded = SectorAllocationEnv.decode_action(action, cfg)
+
+    assert decoded["cash_target"] == pytest.approx(0.30)
+    assert decoded["turnover_cap"] == pytest.approx(0.20)
+    assert decoded["aggressiveness"] == pytest.approx(0.80)
+
+
+def test_encode_observation_emits_finite_vector_with_control_features():
+    observation = SectorAllocationEnv.encode_observation(**_transition_step()["state"])
+
+    assert observation.shape == (STATE_DIM,)
+    assert np.isfinite(observation).all()
 
 
 def test_rl_agent_trains_fresh_policy_on_causal_env(monkeypatch):

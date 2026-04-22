@@ -46,6 +46,7 @@ from src.rl.agent import RLSectorAgent
 from src.rl.contract import CAUSAL_TRAINING_BACKEND
 from src.rl.environment import SectorAllocationEnv, SECTORS
 from src.rl.historical_executor import HistoricalPeriodExecutor
+from src.rl.policy_utils import build_control_context
 from src.rl.retrain_triggers import EventDetector
 from src.risk.risk_engine import RiskEngine
 
@@ -130,6 +131,8 @@ class WalkForwardEngine:
         self.selection_diagnostics: list[dict] = []
         self._trigger_log: list[dict] = []  # records every event that fired
         self._rl_retrain_count: int = 0
+        self._recent_turnovers: list[float] = []
+        self._recent_cost_ratios: list[float] = []
 
     # ── Main simulation ───────────────────────────────────────────────────────
 
@@ -180,6 +183,8 @@ class WalkForwardEngine:
 
         nav_points: list[tuple] = [(first_rebal, float(self.initial_capital))]
         portfolio_returns: list[float] = []
+        self._recent_turnovers = []
+        self._recent_cost_ratios = []
 
         # Precompute benchmark return series
         bm_ticker = self.cfg["backtest"].get("benchmark_ticker", "^NSEI")
@@ -238,8 +243,27 @@ class WalkForwardEngine:
             # ── E. RL / rule-based decisions ──────────────────────────────────
             recent_rets = self._get_recent_portfolio_returns(nav_points, current_date)
             bm_rets_recent = bm_prices.pct_change() if bm_prices is not None else None
-            port_feats = compute_portfolio_features(portfolio, recent_rets, bm_rets_recent)
             risk_regime = self.risk_engine.regime(recent_rets)
+
+            # ── F. Risk evaluation ────────────────────────────────────────────
+            risk_signal, risk_action = self.risk_engine.evaluate(
+                portfolio,
+                recent_rets,
+                macro_features=macro_now if isinstance(macro_now, pd.Series) else pd.Series(macro_now),
+                volume_matrix=self.volume_matrix,
+            )
+            port_feats = compute_portfolio_features(
+                portfolio,
+                recent_rets,
+                bm_rets_recent,
+                control_context=build_control_context(
+                    sector_feats_now,
+                    risk_signal=risk_signal,
+                    risk_action=risk_action,
+                    recent_turnovers=self._recent_turnovers,
+                    recent_cost_ratios=self._recent_cost_ratios,
+                ),
+            )
 
             sector_state = self._build_sector_state(sector_feats_now)
 
@@ -265,14 +289,6 @@ class WalkForwardEngine:
                     )
                 else:
                     rl_decision = self._default_decision(snapshot.sectors)
-
-            # ── F. Risk evaluation ────────────────────────────────────────────
-            risk_signal, risk_action = self.risk_engine.evaluate(
-                portfolio,
-                recent_rets,
-                macro_features=macro_now if isinstance(macro_now, pd.Series) else pd.Series(macro_now),
-                volume_matrix=self.volume_matrix,
-            )
 
             # Keep selection_only as a pure selection signal; other modes still honor risk cash floors.
             if self.mode == "selection_only":
@@ -334,6 +350,11 @@ class WalkForwardEngine:
                         else 1.0
                     ),
                     cash_target=cash_target,
+                    max_turnover_override=(
+                        float(rl_decision.get("turnover_cap"))
+                        if rl_decision.get("turnover_cap") is not None
+                        else None
+                    ),
                     forced_exclude=risk_action.exclude_tickers,
                 )
                 pre_risk_target_weights = dict(target_weights)
@@ -359,6 +380,9 @@ class WalkForwardEngine:
                 target_weights, portfolio_mtm, prices_today, current_date.date()
             )
             portfolio = exec_result.new_portfolio
+            self._recent_turnovers.append(float(exec_result.total_turnover))
+            if pre_nav > 0:
+                self._recent_cost_ratios.append(float(exec_result.total_cost) / float(pre_nav))
 
             # Update sector weights
             sw: dict[str, float] = {}
@@ -404,6 +428,7 @@ class WalkForwardEngine:
                 aggressiveness=rl_decision.get("aggressiveness", 1.0),
                 selected_sector_count=len(selected_sectors),
                 selected_stock_count=len(selected_stock_rows),
+                turnover_cap=rl_decision.get("turnover_cap"),
                 total_turnover=exec_result.total_turnover,
                 total_cost=exec_result.total_cost,
                 rl_action=rl_decision,
@@ -623,6 +648,11 @@ class WalkForwardEngine:
                     "total_cost": float(exec_result.total_cost),
                     "turnover": float(exec_result.total_turnover),
                     "cash_target": float(cash_target),
+                    "turnover_cap": (
+                        float(rl_decision.get("turnover_cap"))
+                        if rl_decision.get("turnover_cap") is not None
+                        else None
+                    ),
                     "selected_sectors": [str(sector) for sector in selected_sectors],
                 }
                 outcome = {
@@ -648,6 +678,11 @@ class WalkForwardEngine:
                         },
                         "cash_target": float(rl_decision.get("cash_target", cash_target)),
                         "aggressiveness": float(rl_decision.get("aggressiveness", 1.0)),
+                        "turnover_cap": (
+                            float(rl_decision.get("turnover_cap"))
+                            if rl_decision.get("turnover_cap") is not None
+                            else None
+                        ),
                     },
                     "reward": float(period_return),
                     "next_state": next_state,
@@ -1073,8 +1108,25 @@ class WalkForwardEngine:
         )
         recent_rets = self._get_recent_portfolio_returns(nav_points, next_date)
         bm_rets_recent = bm_prices.pct_change(fill_method=None) if bm_prices is not None else None
+        risk_signal, risk_action = self.risk_engine.evaluate(
+            portfolio,
+            recent_rets,
+            macro_features=(
+                macro_next if isinstance(macro_next, pd.Series) else pd.Series(macro_next)
+            ),
+            volume_matrix=self.volume_matrix.loc[:next_date],
+        )
         portfolio_state = compute_portfolio_features(
-            portfolio, recent_rets, bm_rets_recent
+            portfolio,
+            recent_rets,
+            bm_rets_recent,
+            control_context=build_control_context(
+                sector_feats_next,
+                risk_signal=risk_signal,
+                risk_action=risk_action,
+                recent_turnovers=self._recent_turnovers,
+                recent_cost_ratios=self._recent_cost_ratios,
+            ),
         )
         return {
             "macro_state": (
@@ -1097,6 +1149,7 @@ class WalkForwardEngine:
             "sector_tilts": {sector: 1.0 for sector in sectors},
             "cash_target": 0.05,
             "aggressiveness": 1.0,
+            "turnover_cap": None,
         }
 
     def _select_sectors(

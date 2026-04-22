@@ -102,6 +102,7 @@ stock_model:
 optimizer:
   objective: "mean_variance"
   risk_aversion: 2.0
+  aggressiveness_effect_scale: 1.5
   max_stock_weight: 0.08
   max_sector_weight: 0.35
   min_stock_weight: 0.005
@@ -126,6 +127,13 @@ rl:
   algorithm: "PPO"
   training_backend: "disabled"   # disabled | causal_historical_env_v1 ; invalid replay training is blocked by default
   total_timesteps: 20000         # 20k confirmed optimal (50k = 23.37% vs 20k = 23.57%)
+  enable_control_state_features: true
+  enable_cash_control: true
+  cash_buckets: [0.00, 0.05, 0.15, 0.30]
+  enable_turnover_control: true
+  turnover_buckets: [0.20, 0.30, 0.40]
+  aggressiveness_min: 0.60
+  aggressiveness_max: 1.40
   learning_rate: 3.0e-4
   n_steps: 36                   # match minimum buffer size (36 periods before first retrain)
   batch_size: 16
