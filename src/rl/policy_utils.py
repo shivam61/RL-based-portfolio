@@ -70,12 +70,29 @@ def default_decision(sectors: list[str]) -> dict[str, object]:
     }
 
 
+def posture_selection_profile(
+    cfg: dict | None,
+    posture: str,
+) -> dict[str, int | None]:
+    rl_cfg = (cfg or {}).get("rl", {}) if isinstance(cfg, dict) else {}
+    stock_cfg = (cfg or {}).get("stock_model", {}) if isinstance(cfg, dict) else {}
+    posture_profiles = rl_cfg.get("posture_profiles", {}) if isinstance(rl_cfg, dict) else {}
+    profile = posture_profiles.get(str(posture), {}) if isinstance(posture_profiles, dict) else {}
+    sector_top_n = profile.get("sector_top_n")
+    stock_top_k = profile.get("stock_top_k_per_sector", stock_cfg.get("top_k_per_sector", 5))
+    return {
+        "sector_top_n": int(sector_top_n) if sector_top_n is not None else None,
+        "stock_top_k_per_sector": int(stock_top_k) if stock_top_k is not None else None,
+    }
+
+
 def select_sectors(
     sectors: list[str],
     sector_scores: dict[str, float],
     rl_decision: dict[str, object],
     *,
     full_rl: bool,
+    cfg: dict | None = None,
 ) -> list[str]:
     """Mirror backtest sector-selection semantics."""
     ordered = sorted(
@@ -83,7 +100,12 @@ def select_sectors(
         key=lambda item: (-item[1], item[0]),
     )
     if full_rl:
-        return [sector for sector, _ in ordered]
+        posture = str(rl_decision.get("posture", "neutral"))
+        sector_top_n = posture_selection_profile(cfg, posture).get("sector_top_n")
+        if sector_top_n is None:
+            return [sector for sector, _ in ordered]
+        top_n = min(len(ordered), int(sector_top_n))
+        return [sector for sector, _ in ordered[:top_n]]
 
     top_n = min(len(ordered), 5)
     return [sector for sector, _ in ordered[:top_n]]

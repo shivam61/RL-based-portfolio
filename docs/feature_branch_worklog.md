@@ -268,6 +268,29 @@ Each task should record:
   - that created a thinner `risk_off` book, not a meaningfully different posture
   - the next structural experiment should change sector breadth by posture before changing stock breadth again
 
+### Task: Stage 2 sector-first breadth gate
+- Scope:
+  - replace rejected global stock-breadth masking with posture-specific sector breadth
+  - apply posture-specific stock `top_k` inside the selected sectors
+  - keep reward/regret unchanged
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_data.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py tests/test_rl_environment_contract.py -q` -> `53 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `34.79% CAGR`, `1.583 Sharpe`, `-12.86% MaxDD`, `27.90% avg turnover`
+    - neutral full-stack -> `32.55% CAGR`, `1.433 Sharpe`, `-14.67% MaxDD`, `29.63% avg turnover`
+    - diagnostics:
+      - `unique_postures = ['neutral']`
+      - `mean_posture_utility_dispersion = 5.33e-05`
+      - `optimizer_fallback_counts = {'none': 12}`
+      - `mean_selected_stock_count = 51.75`
+      - `mean_selected_sector_count = 11.0`
+- Decision:
+  - reject as a solved RL-controller iteration
+- Learning:
+  - sector-first breadth is much healthier structurally than the prior stock-breadth-only pass
+  - it improved economics and restored clean execution
+  - but the policy used only `neutral`, so it did not actually demonstrate posture separability or multi-posture control
+
 ### Task: Stage 2 target-aware switching state and reward
 - Scope:
   - expose control-target features directly in RL state:

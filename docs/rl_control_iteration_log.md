@@ -365,6 +365,65 @@ Copy this block for each future change:
   - the policy collapsed further into static `risk_off`
   - the narrower `risk_off` candidate set also reintroduced fallback pressure
   - the next structural change should be sector-first breadth, not more stock-breadth-only masking
+
+## Iteration 13 — Stage 2 Sector-First Breadth Gate
+
+- Date:
+  - `2026-04-23`
+- Scope:
+  - switch from global stock breadth to posture-specific sector breadth first
+  - then apply posture-specific stock `top_k` within those sectors
+  - keep reward/regret unchanged
+- Control levers changed:
+  - posture-specific sector breadth:
+    - `risk_on = 13` sectors
+    - `neutral = 11` sectors
+    - `risk_off = 8` sectors
+  - posture-specific stock breadth within chosen sectors:
+    - `risk_on = 6`
+    - `neutral = 5`
+    - `risk_off = 5`
+- Config flags:
+  - `rl.posture_profiles.*.sector_top_n`
+  - `rl.posture_profiles.*.stock_top_k_per_sector`
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not re-run in this iteration
+- Holdout result vs `neutral_full_stack`:
+  - candidate RL:
+    - CAGR `34.79%`
+    - Sharpe `1.583`
+    - MaxDD `-12.86%`
+    - avg turnover `27.90%`
+  - neutral full-stack:
+    - CAGR `32.55%`
+    - Sharpe `1.433`
+    - MaxDD `-14.67%`
+    - avg turnover `29.63%`
+- Stress-window behavior:
+  - holdout-only review in this iteration
+  - posture diagnostics:
+    - `unique_postures = ['neutral']`
+    - `posture_counts = {'neutral': 12}`
+    - `posture_change_rate = 0.0`
+  - execution diagnostics:
+    - `optimizer_reason_counts = {'optimal': 11, 'optimal_relaxed_turnover': 1}`
+    - `optimizer_fallback_counts = {'none': 12}`
+    - `optimizer_relaxation_tier_counts = {'A_full': 11, 'B_relax_turnover': 1}`
+    - `mean_requested_vs_realized_cash_gap = 0.29 pts`
+  - separability diagnostics:
+    - `mean_posture_utility_dispersion = 5.33e-05`
+    - `mean_selected_stock_count = 51.75`
+    - `mean_selected_sector_count = 11.0`
+- Decision:
+  - reject as a posture-controller improvement
+  - keep as evidence that sector-first breadth is economically viable at the neutral posture
+- Learning:
+  - sector-first breadth materially improved the neutral-like structural portfolio and preserved clean execution
+  - but the policy still collapsed to a single posture, now `neutral`
+  - because only one posture was chosen, this run does not prove improved posture separability even though the economics improved
+  - the next step should target posture exploration or posture-conditioned candidate divergence more explicitly before tuning reward
 - Full-window result vs `neutral_full_stack`:
   - not run
 - Holdout result vs `neutral_full_stack`:

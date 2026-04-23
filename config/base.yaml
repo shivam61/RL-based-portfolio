@@ -138,20 +138,22 @@ rl:
       aggressiveness: 1.30
       turnover_cap: 0.45
       max_stock_weight: 0.11
-      breadth_top_k: 72
+      sector_top_n: 13
+      stock_top_k_per_sector: 6
     neutral:
       cash_target: 0.05
       aggressiveness: 1.00
       turnover_cap: 0.35
       max_stock_weight: 0.08
-      breadth_top_k: 58
+      sector_top_n: 11
+      stock_top_k_per_sector: 5
     risk_off:
       cash_target: 0.35
       aggressiveness: 0.75
       turnover_cap: 0.15
       max_stock_weight: 0.05
-      breadth_top_k: 42
-  posture_breadth_sector_min_names: 1
+      sector_top_n: 8
+      stock_top_k_per_sector: 5
   enable_cash_control: true
   cash_buckets: [0.00, 0.05, 0.15, 0.30]
   enable_turnover_control: true

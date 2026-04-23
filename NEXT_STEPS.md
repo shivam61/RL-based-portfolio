@@ -697,10 +697,9 @@ Decision rule:
   - explicit cash-target realization is tighter now
   - the candidate still camps in `risk_off`, so more honest execution worsened return while improving drawdown/turnover
 - Next RL hypothesis:
-  - move back to posture decision quality
-  - the controller now has enough execution fidelity that poor regime choice is showing through directly
-  - the stock-breadth-only pass was rejected because it preserved all sectors and reintroduced fallback
-  - next structural change should be sector-first breadth by posture, then stock breadth inside that reduced sector set
+  - sector-first breadth improved economics and execution, but the policy collapsed to `neutral`
+  - next work should target posture diversity / posture-conditioned candidate divergence, not generic reward tuning
+  - any next run should keep the sector-first structural path and verify at least `2` postures are actually used before interpreting the economics as controller value
 - Always `rm artifacts/models/rl_agent/ppo_model.zip meta.pkl experience_buffer.pkl`
   before running backtest when STATE_DIM changes
 - Always reset `_metadata.json` macro last_date when `macro_features.py` changes
