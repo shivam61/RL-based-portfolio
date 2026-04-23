@@ -78,15 +78,13 @@ def test_evaluate_holdout_returns_trained_vs_neutral_comparison(monkeypatch):
     assert "cagr" in result["trained_policy"]
     assert "cagr" in result["neutral_policy"]
     assert "cagr" in result["uplift"]
-    assert (
-        result["trained_policy_diagnostics"]["mean_cash_target"]
-        > result["neutral_policy_diagnostics"]["mean_cash_target"]
+    assert result["trained_policy_diagnostics"]["mean_cash_target"] == pytest.approx(
+        result["neutral_policy_diagnostics"]["mean_cash_target"]
     )
-    assert result["trained_policy_diagnostics"]["cash_usage_rate"] > 0.0
-    assert result["trained_policy_diagnostics"]["aggressiveness_usage_rate"] > 0.0
-    assert result["trained_policy_diagnostics"]["posture_usage_rate"] > 0.0
-    assert "risk_off" in result["trained_policy_diagnostics"]["unique_postures"]
-    assert result["trained_policy_diagnostics"]["posture_counts"]["risk_off"] > 0
+    assert result["trained_policy_diagnostics"]["aggressiveness_usage_rate"] == pytest.approx(0.0)
+    assert result["trained_policy_diagnostics"]["posture_usage_rate"] == pytest.approx(0.0)
+    assert result["trained_policy_diagnostics"]["unique_postures"] == ["neutral"]
+    assert result["trained_policy_diagnostics"]["posture_counts"]["neutral"] > 0
     assert result["trained_policy_diagnostics"]["target_posture_counts"]
     assert result["trained_policy_diagnostics"]["posture_by_stress_bucket"]
     assert result["trained_policy_diagnostics"]["target_posture_by_stress_bucket"]

@@ -218,6 +218,62 @@ Copy this block for each future change:
     - avg turnover `19.83%`
   - neutral full-stack:
     - CAGR `32.99%`
+
+## Iteration 10 — Production Split To Tilt-Only RL
+
+- Date:
+  - `2026-04-24`
+- Scope:
+  - freeze the production RL path to `neutral` posture
+  - keep learned sector tilts live
+  - align the serving fallback with the neutral full-stack baseline
+  - retain fixed-posture holdout baselines for posture research
+- Control levers changed:
+  - added `rl.force_neutral_posture`
+  - production execution now forces:
+    - `posture = neutral`
+    - neutral `cash_target`
+    - neutral `aggressiveness`
+    - neutral `turnover_cap`
+  - learned `sector_tilts` are preserved
+  - fixed posture holdout paths explicitly opt out of the production freeze
+- Config flags:
+  - `rl.force_neutral_posture: true`
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not re-run in this iteration
+- Holdout result vs `neutral_full_stack`:
+  - trained tilt-only RL:
+    - CAGR `33.70%`
+    - Sharpe `1.464`
+    - MaxDD `-14.73%`
+    - avg turnover `27.34%`
+  - neutral full-stack:
+    - CAGR `32.55%`
+    - Sharpe `1.433`
+    - MaxDD `-14.67%`
+    - avg turnover `29.63%`
+- Stress-window behavior:
+  - holdout-only review in this iteration
+  - trained policy diagnostics:
+    - `unique_postures = ['neutral']`
+    - `posture_counts = {'neutral': 12}`
+    - `posture_change_rate = 0.0`
+    - `optimizer_fallback_counts = {'none': 12}`
+    - `optimizer_relaxation_tier_counts = {'A_full': 12}`
+  - fixed-posture references on the same holdout:
+    - `risk_on`: CAGR `24.56%`, Sharpe `0.923`, MaxDD `-16.23%`
+    - `neutral`: CAGR `32.55%`, Sharpe `1.433`, MaxDD `-14.67%`
+    - `risk_off`: CAGR `14.79%`, Sharpe `0.741`, MaxDD `-9.84%`
+- Decision:
+  - keep
+  - this is the new production-track baseline
+  - posture remains a research-only track until the training signal is rebuilt from realized outcomes
+- Learning:
+  - the production uplift survives with posture frozen, which confirms the current RL value is primarily in sector tilts
+  - fixed posture paths are materially different in realized breadth and concentration, so execution-path separability exists
+  - the remaining posture problem is training-signal mismatch, not lack of structural posture differences
     - Sharpe `1.496`
     - MaxDD `-14.99%`
     - avg turnover `25.53%`

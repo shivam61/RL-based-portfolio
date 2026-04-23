@@ -693,13 +693,17 @@ Decision rule:
 
 ## Ops Notes
 - RL controller status after the latest execution pass:
-  - optimizer fallback is not the main live holdout bottleneck
-  - explicit cash-target realization is tighter now
-  - the candidate still camps in `risk_off`, so more honest execution worsened return while improving drawdown/turnover
+  - production track is now `tilt_only_rl`:
+    - posture fixed to `neutral`
+    - learned sector tilts remain live
+    - serving fallback uses the neutral full-stack baseline rather than the old rule path
+  - latest 2016 holdout for the production track:
+    - `tilt_only_rl`: CAGR `33.70%`, Sharpe `1.464`, MaxDD `-14.73%`, turnover `27.34%`
+    - `neutral_full_stack`: CAGR `32.55%`, Sharpe `1.433`, MaxDD `-14.67%`, turnover `29.63%`
 - Next RL hypothesis:
-  - sector-first breadth improved economics and execution, but the policy collapsed to `neutral`
-  - next work should target posture diversity / posture-conditioned candidate divergence, not generic reward tuning
-  - any next run should keep the sector-first structural path and verify at least `2` postures are actually used before interpreting the economics as controller value
+  - keep the production path fixed as tilt-only RL
+  - move posture research to realized `k`-step outcome labeling for `risk_on / neutral / risk_off`
+  - do not keep tuning the current posture regret proxy in the production loop
 - Always `rm artifacts/models/rl_agent/ppo_model.zip meta.pkl experience_buffer.pkl`
   before running backtest when STATE_DIM changes
 - Always reset `_metadata.json` macro last_date when `macro_features.py` changes

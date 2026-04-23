@@ -258,6 +258,7 @@ def _fixed_posture_decision(
     decision["cash_target"] = float(controls["cash_target"])
     decision["aggressiveness"] = float(controls["aggressiveness"])
     decision["turnover_cap"] = float(controls["turnover_cap"])
+    decision["allow_forced_posture_override"] = False
     return decision
 
 

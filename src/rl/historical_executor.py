@@ -20,6 +20,7 @@ from src.features.portfolio_features import compute_portfolio_features
 from src.optimizer.portfolio_optimizer import PortfolioOptimizer
 from src.rl.contract import build_state, build_transition
 from src.rl.policy_utils import (
+    apply_posture_policy,
     build_control_context,
     build_sector_state,
     default_decision,
@@ -1525,6 +1526,7 @@ class HistoricalPeriodExecutor:
             for sector, tilt in rl_decision.get("sector_tilts", {}).items()
         }
         decision["sector_tilts"].update(sector_tilts)
+        rl_decision = apply_posture_policy(self.engine.cfg, rl_decision)
         posture = str(rl_decision.get("posture", decision.get("posture", "neutral")))
         if posture not in {"risk_off", "neutral", "risk_on"}:
             posture = "neutral"

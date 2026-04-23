@@ -44,7 +44,7 @@ from src.models.stock_ranker import StockRanker
 from src.optimizer.portfolio_optimizer import PortfolioOptimizer
 from src.rl.agent import RLSectorAgent
 from src.rl.contract import CAUSAL_TRAINING_BACKEND
-from src.rl.policy_utils import posture_selection_profile
+from src.rl.policy_utils import apply_posture_policy, posture_selection_profile
 from src.rl.environment import SectorAllocationEnv, SECTORS
 from src.rl.historical_executor import HistoricalPeriodExecutor
 from src.rl.policy_utils import build_control_context
@@ -290,6 +290,7 @@ class WalkForwardEngine:
                     )
                 else:
                     rl_decision = self._default_decision(snapshot.sectors)
+            rl_decision = apply_posture_policy(self.cfg, rl_decision)
 
             # Keep selection_only as a pure selection signal; other modes still honor risk cash floors.
             if self.mode == "selection_only":

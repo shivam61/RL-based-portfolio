@@ -131,6 +131,7 @@ rl:
   total_timesteps: 20000         # 20k confirmed optimal (50k = 23.37% vs 20k = 23.57%)
   enable_control_state_features: true
   enable_posture_control: true
+  force_neutral_posture: true     # production track: keep posture fixed to neutral while continuing to learn sector tilts
   posture_neutral_band: 0.10
   posture_profiles:
     risk_on:

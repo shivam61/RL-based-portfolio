@@ -26,6 +26,7 @@ from src.rl.agent import RLSectorAgent
 from src.rl.contract import CAUSAL_TRAINING_BACKEND
 from src.rl.environment import SectorAllocationEnv
 from src.rl.policy_utils import (
+    apply_posture_policy,
     build_sector_state,
     posture_selection_profile,
     select_sectors,
@@ -394,6 +395,7 @@ class PortfolioRecommender:
         else:
             rl_decision = SectorAllocationEnv.neutral_action(self.cfg)
             model_mode = "Baseline"
+        rl_decision = apply_posture_policy(self.cfg, rl_decision)
 
         cash_target = max(
             float(rl_decision.get("cash_target", 0.05)),

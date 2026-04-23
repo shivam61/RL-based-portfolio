@@ -70,6 +70,35 @@ def default_decision(sectors: list[str]) -> dict[str, object]:
     }
 
 
+def apply_posture_policy(
+    cfg: dict | None,
+    decision: dict[str, object],
+) -> dict[str, object]:
+    """Apply production posture policy while preserving sector tilts."""
+    normalized = dict(decision)
+    if not bool(normalized.get("allow_forced_posture_override", True)):
+        normalized.pop("allow_forced_posture_override", None)
+        return normalized
+
+    rl_cfg = (cfg or {}).get("rl", {}) if isinstance(cfg, dict) else {}
+    if not bool(rl_cfg.get("force_neutral_posture", False)):
+        normalized.pop("allow_forced_posture_override", None)
+        return normalized
+
+    posture_profiles = rl_cfg.get("posture_profiles", {}) if isinstance(rl_cfg, dict) else {}
+    neutral_profile = (
+        posture_profiles.get("neutral", {}) if isinstance(posture_profiles, dict) else {}
+    )
+    if not isinstance(neutral_profile, dict):
+        neutral_profile = {}
+    normalized["posture"] = "neutral"
+    normalized["cash_target"] = float(neutral_profile.get("cash_target", 0.05))
+    normalized["aggressiveness"] = float(neutral_profile.get("aggressiveness", 1.0))
+    normalized["turnover_cap"] = float(neutral_profile.get("turnover_cap", 0.35))
+    normalized.pop("allow_forced_posture_override", None)
+    return normalized
+
+
 def posture_selection_profile(
     cfg: dict | None,
     posture: str,

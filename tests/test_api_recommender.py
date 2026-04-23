@@ -379,7 +379,7 @@ def test_recommender_matches_backtest_rl_application_semantics(monkeypatch, tmp_
     rec = _make_recommender_with_cfg(
         monkeypatch,
         tmp_path,
-        {"rl": {"use_rl": True, "training_backend": CAUSAL_TRAINING_BACKEND}},
+        {"rl": {"use_rl": True, "training_backend": CAUSAL_TRAINING_BACKEND, "force_neutral_posture": True}},
     )
     _patch_covariance(monkeypatch)
 
@@ -433,7 +433,8 @@ def test_recommender_matches_backtest_rl_application_semantics(monkeypatch, tmp_
     assert result["model_mode"] == "RL"
     assert optimize_call["alpha_scores"]["AAA"] == pytest.approx(0.8)
     assert optimize_call["sector_tilts"]["IT"] == pytest.approx(1.5)
-    assert optimize_call["aggressiveness"] == pytest.approx(0.7)
+    assert optimize_call["aggressiveness"] == pytest.approx(1.0)
+    assert optimize_call["posture"] == "neutral"
 
 
 def test_api_returns_503_when_recommender_is_unavailable(monkeypatch, tmp_path):

@@ -800,3 +800,22 @@ Each task should record:
   - expose the horizon as `stock_model.fwd_window_days` plus a `run_backtest.py` CLI override
 - Rationale:
   - the ranker has little to no 4W signal; the next hypothesis is that the signal is slower-moving momentum rather than a broken model wiring path
+
+### Task: production split to tilt-only RL
+- Scope:
+  - froze the production RL path to neutral posture while preserving learned sector tilts
+  - aligned serving fallback to the neutral full-stack baseline instead of the old rule path
+  - retained fixed posture holdout baselines for posture research
+- Validation:
+  - focused suites passed:
+    - `tests/test_api_recommender.py`
+    - `tests/test_rl_environment_contract.py`
+    - `tests/test_rl_holdout.py`
+    - `tests/test_rl_control_evaluation.py`
+    - `tests/test_data.py`
+  - 2016 holdout:
+    - `tilt_only_rl`: `33.70% CAGR`, `1.464 Sharpe`, `-14.73% MaxDD`, `27.34% turnover`
+    - `neutral_full_stack`: `32.55% CAGR`, `1.433 Sharpe`, `-14.67% MaxDD`, `29.63% turnover`
+- Learning:
+  - the production edge survives with posture frozen, so the live RL value is still in sector tilts
+  - posture should move to a separate realized-outcome research track instead of staying inside the current PPO reward loop

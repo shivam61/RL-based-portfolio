@@ -22,6 +22,7 @@ from src.rl.environment import (
     SectorAllocationEnv,
 )
 from src.rl.historical_executor import HistoricalPeriodExecutor
+from src.rl.policy_utils import apply_posture_policy
 from tests.test_backtest import _make_synthetic_data
 
 
@@ -153,6 +154,48 @@ def test_decode_action_maps_posture_slot_to_risk_on():
     assert decoded["cash_target"] == pytest.approx(0.02)
     assert decoded["turnover_cap"] == pytest.approx(0.45)
     assert decoded["aggressiveness"] == pytest.approx(1.30)
+
+
+def test_apply_posture_policy_freezes_to_neutral_but_preserves_tilts():
+    cfg = _cfg()
+    cfg["rl"]["force_neutral_posture"] = True
+
+    decision = apply_posture_policy(
+        cfg,
+        {
+            "sector_tilts": {"IT": 1.4, "Banking": 0.8},
+            "posture": "risk_on",
+            "cash_target": 0.02,
+            "aggressiveness": 1.30,
+            "turnover_cap": 0.45,
+        },
+    )
+
+    assert decision["sector_tilts"]["IT"] == pytest.approx(1.4)
+    assert decision["posture"] == "neutral"
+    assert decision["cash_target"] == pytest.approx(0.05)
+    assert decision["aggressiveness"] == pytest.approx(1.0)
+    assert decision["turnover_cap"] == pytest.approx(0.35)
+
+
+def test_apply_posture_policy_respects_explicit_research_opt_out():
+    cfg = _cfg()
+    cfg["rl"]["force_neutral_posture"] = True
+
+    decision = apply_posture_policy(
+        cfg,
+        {
+            "sector_tilts": {"IT": 1.1},
+            "posture": "risk_off",
+            "cash_target": 0.35,
+            "aggressiveness": 0.75,
+            "turnover_cap": 0.15,
+            "allow_forced_posture_override": False,
+        },
+    )
+
+    assert decision["posture"] == "risk_off"
+    assert decision["cash_target"] == pytest.approx(0.35)
 
 
 def test_encode_observation_emits_finite_vector_with_control_features():
