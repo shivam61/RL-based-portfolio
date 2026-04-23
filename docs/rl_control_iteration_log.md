@@ -310,6 +310,61 @@ Copy this block for each future change:
   - the cash-target realization path is now materially tighter once turnover permits it
   - the policy still stays mostly `risk_off`, and the more honest execution makes the return drag larger rather than smaller
   - this is useful because it shows the remaining problem is now posture choice / objective quality, not cash-target drift inside the optimizer
+
+## Iteration 12 — Stage 2 Sector-Preserved Stock Breadth Gate
+
+- Date:
+  - `2026-04-23`
+- Scope:
+  - add posture-specific stock breadth gating before optimization
+  - keep reward/regret unchanged
+  - preserve a lightweight all-sector guard while changing stock breadth by posture
+- Control levers changed:
+  - posture-specific `breadth_top_k` on the candidate stock set:
+    - `risk_on = 72`
+    - `neutral = 58`
+    - `risk_off = 42`
+  - light sector-presence guard kept all sectors represented
+- Config flags:
+  - `rl.posture_profiles.*.breadth_top_k`
+  - `rl.posture_breadth_sector_min_names`
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not re-run in this iteration
+- Holdout result vs `neutral_full_stack`:
+  - candidate RL:
+    - CAGR `12.96%`
+    - Sharpe `0.575`
+    - MaxDD `-10.76%`
+    - avg turnover `10.92%`
+  - neutral full-stack:
+    - CAGR `28.96%`
+    - Sharpe `1.228`
+    - MaxDD `-14.89%`
+    - avg turnover `29.32%`
+- Stress-window behavior:
+  - holdout-only review in this iteration
+  - posture diagnostics:
+    - `unique_postures = ['risk_off']`
+    - `posture_counts = {'risk_off': 12}`
+    - `posture_change_rate = 0.0`
+  - execution diagnostics:
+    - `optimizer_reason_counts = {'fallback': 7, 'optimal': 3, 'optimal_relaxed_turnover_and_caps': 2}`
+    - `optimizer_fallback_counts = {'risk_off_de_risk': 7, 'none': 5}`
+    - `optimizer_relaxation_tier_counts = {'A_full': 3, 'D_relax_both': 2, 'fallback': 7}`
+    - `mean_requested_vs_realized_cash_gap = 1.62 pts`
+  - separability diagnostics:
+    - `mean_posture_utility_dispersion = 8.42e-05`
+    - `mean_selected_stock_count = 42.0`
+    - `mean_selected_sector_count = 15.0`
+- Decision:
+  - reject
+- Learning:
+  - changing stock breadth while keeping all `15` sectors present did not create meaningful posture separation
+  - the policy collapsed further into static `risk_off`
+  - the narrower `risk_off` candidate set also reintroduced fallback pressure
+  - the next structural change should be sector-first breadth, not more stock-breadth-only masking
 - Full-window result vs `neutral_full_stack`:
   - not run
 - Holdout result vs `neutral_full_stack`:

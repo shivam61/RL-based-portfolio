@@ -436,6 +436,35 @@ class TestOptimizer:
 
         assert tight_to <= loose_to + 1e-6
 
+    def test_min_feasible_turnover_floor_covers_cash_move_from_all_cash(self):
+        from src.optimizer.portfolio_optimizer import PortfolioOptimizer
+
+        cfg = load_config()
+        opt = PortfolioOptimizer(cfg)
+        alpha = {"A.NS": 1.0, "B.NS": 0.9, "C.NS": 0.8, "D.NS": 0.7}
+        sector_map = {
+            "A.NS": "IT",
+            "B.NS": "Banking",
+            "C.NS": "Energy",
+            "D.NS": "Pharma",
+        }
+        current_weights = {"CASH": 1.0}
+
+        result = opt.optimize(
+            alpha,
+            None,
+            sector_map,
+            current_weights=current_weights,
+            cash_target=0.35,
+            max_turnover_override=0.15,
+            posture="risk_off",
+        )
+
+        diagnostics = opt.last_optimize_diagnostics
+        assert diagnostics["effective_turnover_needed"] >= 0.67 - 1e-6
+        assert diagnostics["effective_turnover_budget"] >= diagnostics["effective_turnover_needed"]
+        assert diagnostics["turnover_shortfall"] >= 0.50 - 1e-6
+
     def test_rank_fallback_repairs_to_turnover_budget(self):
         from src.optimizer.portfolio_optimizer import PortfolioOptimizer
 
@@ -502,6 +531,40 @@ class TestOptimizer:
         )
 
         assert result["CASH"] == pytest.approx(0.35, abs=0.02)
+
+    def test_posture_specific_stock_caps_apply(self):
+        from src.optimizer.portfolio_optimizer import PortfolioOptimizer
+
+        cfg = load_config()
+        opt = PortfolioOptimizer(cfg)
+        alpha = {
+            "A.NS": 1.0,
+            "B.NS": 0.95,
+            "C.NS": 0.90,
+            "D.NS": 0.85,
+            "E.NS": 0.80,
+            "F.NS": 0.75,
+        }
+        sector_map = {
+            "A.NS": "IT",
+            "B.NS": "Banking",
+            "C.NS": "Energy",
+            "D.NS": "Pharma",
+            "E.NS": "Cement",
+            "F.NS": "Telecom",
+        }
+
+        risk_on = opt.optimize(alpha, None, sector_map, posture="risk_on")
+        risk_on_cap = float(opt.last_optimize_diagnostics["max_stock_weight"])
+        risk_on_top = max(weight for ticker, weight in risk_on.items() if ticker != "CASH")
+
+        risk_off = opt.optimize(alpha, None, sector_map, posture="risk_off")
+        risk_off_cap = float(opt.last_optimize_diagnostics["max_stock_weight"])
+        risk_off_top = max(weight for ticker, weight in risk_off.items() if ticker != "CASH")
+
+        assert risk_on_cap > risk_off_cap
+        assert risk_on_top >= risk_off_top - 1e-6
+        assert risk_off_top <= risk_off_cap + 1e-3
 
     def test_no_trade_band_postprocess_preserves_solver_cash(self):
         from src.optimizer.portfolio_optimizer import PortfolioOptimizer

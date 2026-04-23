@@ -321,6 +321,11 @@ class WalkForwardEngine:
                         selected_stock_rows.append(
                             {"ticker": t, "sector": sector_map.get(t, "Unknown"), "score": 0.5}
                         )
+            alpha_scores, selected_stock_rows = self._apply_posture_breadth_gate(
+                alpha_scores,
+                selected_stock_rows,
+                rl_decision,
+            )
 
             # ── H. Optimize portfolio ─────────────────────────────────────────
             optimizer_diagnostics = {}
@@ -1205,6 +1210,64 @@ class WalkForwardEngine:
         invested = per_stock * len(weights)
         weights["CASH"] = max(0.0, 1.0 - invested)
         return weights
+
+    def _apply_posture_breadth_gate(
+        self,
+        alpha_scores: dict[str, float],
+        selected_stock_rows: list[dict[str, object]],
+        rl_decision: dict[str, float | dict[str, float] | bool | str | None],
+    ) -> tuple[dict[str, float], list[dict[str, object]]]:
+        if self.mode != "full_rl" or not alpha_scores or not selected_stock_rows:
+            return alpha_scores, selected_stock_rows
+
+        posture = str(rl_decision.get("posture", "neutral"))
+        rl_cfg = self.cfg.get("rl", {})
+        posture_profiles = rl_cfg.get("posture_profiles", {}) if isinstance(rl_cfg, dict) else {}
+        profile = posture_profiles.get(posture, {}) if isinstance(posture_profiles, dict) else {}
+        breadth_top_k = profile.get("breadth_top_k")
+        if breadth_top_k is None:
+            return alpha_scores, selected_stock_rows
+
+        breadth_top_k = int(breadth_top_k)
+        if breadth_top_k <= 0 or len(selected_stock_rows) <= breadth_top_k:
+            return alpha_scores, selected_stock_rows
+
+        sector_min = int(rl_cfg.get("posture_breadth_sector_min_names", 1) or 0)
+        ordered_rows = sorted(
+            selected_stock_rows,
+            key=lambda row: (-float(row["score"]), str(row["ticker"])),
+        )
+        kept: list[dict[str, object]] = []
+        kept_tickers: set[str] = set()
+
+        if sector_min > 0:
+            by_sector: dict[str, list[dict[str, object]]] = {}
+            for row in ordered_rows:
+                by_sector.setdefault(str(row["sector"]), []).append(row)
+            for sector in sorted(by_sector):
+                for row in by_sector[sector][:sector_min]:
+                    ticker = str(row["ticker"])
+                    if ticker in kept_tickers:
+                        continue
+                    kept.append(row)
+                    kept_tickers.add(ticker)
+                    if len(kept) >= breadth_top_k:
+                        break
+                if len(kept) >= breadth_top_k:
+                    break
+
+        for row in ordered_rows:
+            if len(kept) >= breadth_top_k:
+                break
+            ticker = str(row["ticker"])
+            if ticker in kept_tickers:
+                continue
+            kept.append(row)
+            kept_tickers.add(ticker)
+
+        gated_rows = kept[:breadth_top_k]
+        gated_scores = {str(row["ticker"]): float(row["score"]) for row in gated_rows}
+        return gated_scores, gated_rows
 
     def _selected_forward_returns(
         self,

@@ -355,6 +355,8 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             "avg_cash_target": mean_of(entries, "cash_target"),
             "avg_aggressiveness": mean_of(entries, "aggressiveness"),
             "avg_turnover": mean_of(entries, "turnover"),
+            "avg_selected_stock_count": mean_of(entries, "selected_stock_count"),
+            "avg_selected_sector_count": mean_of(entries, "selected_sector_count"),
         }
         for posture, entries in sorted(posture_rows.items())
     }
@@ -364,6 +366,8 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             "avg_cash_target": mean_of(entries, "cash_target"),
             "avg_aggressiveness": mean_of(entries, "aggressiveness"),
             "avg_turnover": mean_of(entries, "turnover"),
+            "avg_selected_stock_count": mean_of(entries, "selected_stock_count"),
+            "avg_selected_sector_count": mean_of(entries, "selected_sector_count"),
         }
         for bucket, entries in bucket_rows.items()
     }
@@ -464,6 +468,21 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             mode: int(sum(1 for entry in trace if str(entry.get("optimizer_fallback_mode", "none")) == mode))
             for mode in sorted({str(entry.get("optimizer_fallback_mode", "none")) for entry in trace})
         },
+        "optimizer_relaxation_tier_counts": {
+            tier: int(
+                sum(
+                    1
+                    for entry in trace
+                    if str((entry.get("optimizer_diagnostics") or {}).get("relaxation_tier", "unknown")) == tier
+                )
+            )
+            for tier in sorted(
+                {
+                    str((entry.get("optimizer_diagnostics") or {}).get("relaxation_tier", "unknown"))
+                    for entry in trace
+                }
+            )
+        },
         "aggressiveness_usage_rate": usage_rate("aggressiveness", neutral_aggressiveness),
         "posture_usage_rate": float(
             np.mean([1.0 if posture != neutral_posture else 0.0 for posture in postures])
@@ -479,7 +498,12 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             np.mean([1.0 if entry["should_rebalance"] else 0.0 for entry in trace])
         ),
         "mean_selected_sector_count": float(
-            np.mean([len(entry["selected_sectors"]) for entry in trace])
+            np.mean(
+                [
+                    entry.get("selected_sector_count", len(entry.get("selected_sectors", [])))
+                    for entry in trace
+                ]
+            )
         ),
         "mean_selected_stock_count": float(
             np.mean([entry["selected_stock_count"] for entry in trace])

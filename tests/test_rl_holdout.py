@@ -102,6 +102,7 @@ def test_evaluate_holdout_returns_trained_vs_neutral_comparison(monkeypatch):
     assert "mean_requested_vs_realized_cash_gap" in result["trained_policy_diagnostics"]
     assert "optimizer_reason_counts" in result["trained_policy_diagnostics"]
     assert "optimizer_fallback_counts" in result["trained_policy_diagnostics"]
+    assert "optimizer_relaxation_tier_counts" in result["trained_policy_diagnostics"]
     assert "control_realization_by_posture" in result["trained_policy_diagnostics"]
     assert "control_realization_by_stress_bucket" in result["trained_policy_diagnostics"]
     assert result["trained_policy_behavior_flags"]["advisory_only"] is True
@@ -188,3 +189,4 @@ def test_summarize_trace_reports_dispersion_and_bucketed_decision_quality():
     assert "mean_requested_vs_realized_cash_gap" in summary
     assert "optimizer_reason_counts" in summary
     assert "optimizer_fallback_counts" in summary
+    assert "optimizer_relaxation_tier_counts" in summary

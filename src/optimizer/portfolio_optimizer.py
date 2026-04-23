@@ -126,6 +126,11 @@ class PortfolioOptimizer:
 
         # Constraints config
         max_stock = opt_cfg["max_stock_weight"]
+        if posture:
+            posture_profiles = self.cfg.get("rl", {}).get("posture_profiles", {})
+            posture_profile = posture_profiles.get(str(posture), {})
+            if isinstance(posture_profile, dict) and posture_profile.get("max_stock_weight") is not None:
+                max_stock = float(posture_profile["max_stock_weight"])
         aggressiveness_effect_scale = float(opt_cfg.get("aggressiveness_effect_scale", 1.5))
         effective_aggressiveness = max(0.25, float(aggressiveness)) ** aggressiveness_effect_scale
         max_sector = opt_cfg["max_sector_weight"] * effective_aggressiveness
@@ -149,8 +154,11 @@ class PortfolioOptimizer:
             "requested_cash_target": float(cash_target if cash_target is not None else cash_min),
             "cash_target_tolerance": float(cash_target_tolerance if cash_target is not None else 0.0),
             "previous_cash_weight": float(w_prev_cash),
+            "required_liquidation": float(liquidation_cost),
             "requested_turnover_cap": float(max_to),
             "effective_turnover_budget": float(max_to),
+            "effective_turnover_needed": 0.0,
+            "turnover_shortfall": 0.0,
             "liquidation_cost": float(liquidation_cost),
             "candidate_stock_count": int(n),
             "candidate_sector_count": int(len(set(sector_map.get(t, "") for t in tickers))),
@@ -158,9 +166,13 @@ class PortfolioOptimizer:
             "max_sector_weight": float(max_sector),
             "aggressiveness": float(aggressiveness),
             "status": "init",
+            "solver_status": "init",
             "fallback_mode": "none",
             "solver_retry_without_turnover": False,
             "turnover_repair_applied": False,
+            "relaxation_tier": "A_full",
+            "binding_constraints": [],
+            "cash_gap": None,
         }
 
         if not HAS_CVXPY:
@@ -203,45 +215,25 @@ class PortfolioOptimizer:
             equity_to = cp.norm1(w - w_prev)
             cash_to   = cp.abs(cash - w_prev_cash)
             one_way_turnover = 0.5 * (equity_to + cash_to + liquidation_cost)
+            cash_move_floor = abs(w_prev_cash - (cash_target or cash_min))
             min_feasible = (
                 0.5 * liquidation_cost
-                + 0.5 * abs(w_prev_cash - (cash_target or cash_min))
+                + cash_move_floor
                 + 0.02   # small solver headroom
             )
             effective_max_to = max(max_to, min_feasible)
             diagnostics["effective_turnover_budget"] = float(effective_max_to)
+            diagnostics["effective_turnover_needed"] = float(min_feasible)
+            diagnostics["turnover_shortfall"] = float(max(0.0, min_feasible - max_to))
 
             objective_terms.append(
                 -opt_cfg.get("turnover_cost", 0.3) * one_way_turnover
             )
         else:
             effective_max_to = max_to  # no previous portfolio → no constraint
+            diagnostics["effective_turnover_needed"] = float(max_to)
 
         objective = cp.Maximize(sum(objective_terms))
-
-        constraints = [
-            cp.sum(w) + cash == 1.0,
-            cash >= cash_min,
-            cash <= cash_max,
-            w <= max_stock,
-        ]
-
-        # sector constraints
-        sector_constraints = self._build_sector_constraints(
-            w, tickers, sector_map, max_sector
-        )
-        constraints.extend(sector_constraints)
-
-        # Full-portfolio one-way turnover constraint.
-        to_constraint = None
-        if current_weights:
-            to_constraint = one_way_turnover <= effective_max_to
-            constraints.append(to_constraint)
-            if effective_max_to > max_to:
-                logger.debug(
-                    "Turnover budget relaxed %.2f→%.2f (liquidation_cost=%.2f)",
-                    max_to, effective_max_to, liquidation_cost,
-                )
 
         solver = opt_cfg.get("solver", "CLARABEL")
 
@@ -252,63 +244,109 @@ class PortfolioOptimizer:
                 raise ValueError(f"Solver status: {p.status}")
             if w.value is None:
                 raise ValueError("Solver returned None solution")
+            return p.status
 
-        try:
-            _solve(constraints)
-            diagnostics["status"] = "optimal"
-        except Exception as e:
-            # If infeasible and a turnover constraint exists, retry without it.
-            # This can happen when sector/weight constraints force more turnover
-            # than the budget allows (not captured by min_feasible).
-            if to_constraint is not None and "infeasible" in str(e).lower():
-                logger.warning(
-                    "CVXPY infeasible with turnover constraint; retrying without it"
+        def _build_constraints(
+            *,
+            turnover_budget: float,
+            max_stock_limit: float,
+            max_sector_limit: float,
+        ):
+            constrs = [
+                cp.sum(w) + cash == 1.0,
+                cash >= cash_min,
+                cash <= cash_max,
+                w <= max_stock_limit,
+            ]
+            constrs.extend(
+                self._build_sector_constraints(
+                    w, tickers, sector_map, max_sector_limit
                 )
-                diagnostics["status"] = "infeasible_with_turnover"
-                diagnostics["solver_retry_without_turnover"] = True
-                constraints_no_to = [c for c in constraints if c is not to_constraint]
-                try:
-                    _solve(constraints_no_to)
-                    diagnostics["status"] = "optimal_without_turnover_constraint"
-                except Exception as e2:
-                    logger.warning("CVXPY retry also failed (%s); using rank fallback", e2)
-                    result = self._fallback_weights(
-                        alpha=alpha,
-                        alpha_scores=alpha_scores,
-                        tickers=tickers,
-                        sector_map=sector_map,
-                        n=n,
-                        max_stock=max_stock,
-                        max_sector=max_sector,
-                        cash=float(cash_target or cash_min),
-                        current_weights=current_weights,
-                        max_turnover=effective_max_to,
-                        liquidation_cost=liquidation_cost,
-                        posture=str(posture or "neutral"),
-                        diagnostics=diagnostics,
-                    )
-                    self.last_optimize_diagnostics = diagnostics
-                    return result
-            else:
-                logger.warning("CVXPY solver failed (%s); using rank fallback", e)
-                diagnostics["status"] = f"solver_failed:{type(e).__name__}"
-                result = self._fallback_weights(
-                    alpha=alpha,
-                    alpha_scores=alpha_scores,
-                    tickers=tickers,
-                    sector_map=sector_map,
-                    n=n,
-                    max_stock=max_stock,
-                    max_sector=max_sector,
-                    cash=float(cash_target or cash_min),
-                    current_weights=current_weights,
-                    max_turnover=effective_max_to if current_weights else max_to,
-                    liquidation_cost=liquidation_cost,
-                    posture=str(posture or "neutral"),
-                    diagnostics=diagnostics,
+            )
+            if current_weights:
+                constrs.append(one_way_turnover <= turnover_budget)
+            return constrs
+
+        relaxation_tiers = [
+            {
+                "label": "A_full",
+                "turnover_budget": float(effective_max_to),
+                "max_stock_limit": float(max_stock),
+                "max_sector_limit": float(max_sector),
+                "status": "optimal",
+            },
+        ]
+        if current_weights:
+            relaxation_tiers.extend(
+                [
+                    {
+                        "label": "B_relax_turnover",
+                        "turnover_budget": float(min(opt_cfg["max_turnover_per_rebalance"], effective_max_to * 1.20)),
+                        "max_stock_limit": float(max_stock),
+                        "max_sector_limit": float(max_sector),
+                        "status": "optimal_relaxed_turnover",
+                    },
+                    {
+                        "label": "C_relax_caps",
+                        "turnover_budget": float(effective_max_to),
+                        "max_stock_limit": float(min(max_stock * 1.20, 1.0)),
+                        "max_sector_limit": float(min(max_sector * 1.20, 1.0)),
+                        "status": "optimal_relaxed_caps",
+                    },
+                    {
+                        "label": "D_relax_both",
+                        "turnover_budget": float(min(opt_cfg["max_turnover_per_rebalance"], effective_max_to * 1.20)),
+                        "max_stock_limit": float(min(max_stock * 1.20, 1.0)),
+                        "max_sector_limit": float(min(max_sector * 1.20, 1.0)),
+                        "status": "optimal_relaxed_turnover_and_caps",
+                    },
+                ]
+            )
+
+        last_error: Exception | None = None
+        for tier in relaxation_tiers:
+            try:
+                constraints = _build_constraints(
+                    turnover_budget=float(tier["turnover_budget"]),
+                    max_stock_limit=float(tier["max_stock_limit"]),
+                    max_sector_limit=float(tier["max_sector_limit"]),
                 )
-                self.last_optimize_diagnostics = diagnostics
-                return result
+                raw_status = _solve(constraints)
+                diagnostics["status"] = str(tier["status"])
+                diagnostics["solver_status"] = str(raw_status)
+                diagnostics["relaxation_tier"] = str(tier["label"])
+                diagnostics["effective_turnover_budget"] = float(tier["turnover_budget"])
+                diagnostics["max_stock_weight"] = float(tier["max_stock_limit"])
+                diagnostics["max_sector_weight"] = float(tier["max_sector_limit"])
+                diagnostics["solver_retry_without_turnover"] = str(tier["label"]) in {"B_relax_turnover", "D_relax_both"}
+                break
+            except Exception as e:
+                last_error = e
+                diagnostics.setdefault("tier_failures", []).append(
+                    {"tier": str(tier["label"]), "error": str(e)}
+                )
+        else:
+            logger.warning("CVXPY solver failed across relaxation tiers (%s); using rank fallback", last_error)
+            diagnostics["status"] = f"solver_failed:{type(last_error).__name__ if last_error else 'Unknown'}"
+            diagnostics["solver_status"] = "fallback"
+            diagnostics["relaxation_tier"] = "fallback"
+            result = self._fallback_weights(
+                alpha=alpha,
+                alpha_scores=alpha_scores,
+                tickers=tickers,
+                sector_map=sector_map,
+                n=n,
+                max_stock=max_stock,
+                max_sector=max_sector,
+                cash=float(cash_target or cash_min),
+                current_weights=current_weights,
+                max_turnover=effective_max_to if current_weights else max_to,
+                liquidation_cost=liquidation_cost,
+                posture=str(posture or "neutral"),
+                diagnostics=diagnostics,
+            )
+            self.last_optimize_diagnostics = diagnostics
+            return result
 
         w_val = np.array(w.value).clip(0)
         cash_val = float(cash.value) if cash.value is not None else cash_min
@@ -363,6 +401,19 @@ class PortfolioOptimizer:
         result = {t: float(w) for t, w in zip(tickers, w_val) if w > 1e-5}
         result["CASH"] = float(max(cash_val, 0))
         diagnostics["realized_cash_weight"] = float(result["CASH"])
+        diagnostics["cash_gap"] = float(result["CASH"] - diagnostics["requested_cash_target"])
+        diagnostics["binding_constraints"] = self._binding_constraints(
+            result=result,
+            tickers=tickers,
+            sector_map=sector_map,
+            max_stock=float(diagnostics["max_stock_weight"]),
+            max_sector=float(diagnostics["max_sector_weight"]),
+            current_weights=current_weights,
+            turnover_budget=float(diagnostics["effective_turnover_budget"]),
+            liquidation_cost=float(liquidation_cost),
+            requested_cash_target=float(diagnostics["requested_cash_target"]),
+            cash_tolerance=float(diagnostics.get("cash_target_tolerance", 0.0)),
+        )
         diagnostics["used_turnover_retry"] = bool(diagnostics.get("solver_retry_without_turnover", False))
         diagnostics["status"] = str(diagnostics.get("status") or "optimal")
         self.last_optimize_diagnostics = diagnostics
@@ -409,9 +460,57 @@ class PortfolioOptimizer:
             )
             diagnostics["fallback_mode"] = "rank"
         diagnostics["realized_cash_weight"] = float(result.get("CASH", 0.0))
+        diagnostics["cash_gap"] = float(result.get("CASH", 0.0) - diagnostics["requested_cash_target"])
+        diagnostics["binding_constraints"] = ["fallback"]
         diagnostics["used_turnover_retry"] = bool(diagnostics.get("solver_retry_without_turnover", False))
         diagnostics["status"] = "fallback"
+        diagnostics["solver_status"] = "fallback"
         return result
+
+    def _binding_constraints(
+        self,
+        *,
+        result: dict[str, float],
+        tickers: list[str],
+        sector_map: dict[str, str],
+        max_stock: float,
+        max_sector: float,
+        current_weights: dict[str, float] | None,
+        turnover_budget: float,
+        liquidation_cost: float,
+        requested_cash_target: float,
+        cash_tolerance: float,
+    ) -> list[str]:
+        bindings: list[str] = []
+        tol = 1e-3
+        cash_weight = float(result.get("CASH", 0.0))
+        if cash_tolerance > 0.0 and abs(cash_weight - requested_cash_target) >= max(cash_tolerance - tol, tol):
+            bindings.append("cash_target")
+
+        stock_weights = [float(result.get(t, 0.0)) for t in tickers]
+        if stock_weights and max(stock_weights) >= max_stock - tol:
+            bindings.append("position_cap")
+
+        sector_totals: dict[str, float] = {}
+        for ticker in tickers:
+            sector = sector_map.get(ticker, "")
+            sector_totals[sector] = sector_totals.get(sector, 0.0) + float(result.get(ticker, 0.0))
+        if sector_totals and max(sector_totals.values()) >= max_sector - tol:
+            bindings.append("sector_cap")
+
+        if current_weights:
+            w_prev = np.array([float((current_weights or {}).get(t, 0.0)) for t in tickers], dtype=float)
+            w_new = np.array([float(result.get(t, 0.0)) for t in tickers], dtype=float)
+            turnover = self._compute_one_way_turnover(
+                w_new,
+                w_prev,
+                cash_weight,
+                float((current_weights or {}).get("CASH", 0.0)),
+                float(liquidation_cost),
+            )
+            if turnover >= turnover_budget - tol:
+                bindings.append("turnover_cap")
+        return bindings
 
     @staticmethod
     def _compute_one_way_turnover(

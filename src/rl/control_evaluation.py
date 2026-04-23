@@ -304,6 +304,7 @@ def _extract_summary_metrics(payload: dict[str, Any]) -> dict[str, Any]:
         "mean_requested_vs_realized_cash_gap",
         "optimizer_reason_counts",
         "optimizer_fallback_counts",
+        "optimizer_relaxation_tier_counts",
         "aggressiveness_usage_rate",
         "posture_usage_rate",
         "posture_change_rate",

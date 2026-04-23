@@ -244,6 +244,30 @@ Each task should record:
   - tightening that path made posture execution more faithful, but did not improve economics because the controller is still choosing `risk_off` too often
   - this narrows the next hypothesis: the remaining issue is decision quality, not cash-target realization drift
 
+### Task: Stage 2 sector-preserved stock breadth gate
+- Scope:
+  - add posture-specific stock breadth gates before optimization
+  - keep reward/regret unchanged
+  - keep a light sector-presence guard so all sectors remain represented
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_data.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `35 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `12.96% CAGR`, `0.575 Sharpe`, `-10.76% MaxDD`, `10.92% avg turnover`
+    - neutral full-stack -> `28.96% CAGR`, `1.228 Sharpe`, `-14.89% MaxDD`, `29.32% avg turnover`
+    - diagnostics:
+      - `unique_postures = ['risk_off']`
+      - `mean_posture_utility_dispersion = 8.42e-05`
+      - `optimizer_fallback_counts = {'risk_off_de_risk': 7, 'none': 5}`
+      - `mean_selected_stock_count = 42.0`
+      - `mean_selected_sector_count = 15.0`
+- Decision:
+  - reject
+- Learning:
+  - stock-breadth masking alone was too diluted because all sectors stayed present
+  - the active stock count changed, but the active sector count did not
+  - that created a thinner `risk_off` book, not a meaningfully different posture
+  - the next structural experiment should change sector breadth by posture before changing stock breadth again
+
 ### Task: Stage 2 target-aware switching state and reward
 - Scope:
   - expose control-target features directly in RL state:

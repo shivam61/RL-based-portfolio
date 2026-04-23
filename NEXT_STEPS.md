@@ -699,7 +699,8 @@ Decision rule:
 - Next RL hypothesis:
   - move back to posture decision quality
   - the controller now has enough execution fidelity that poor regime choice is showing through directly
-  - next change should target the objective / posture-choice economics, not broader execution plumbing
+  - the stock-breadth-only pass was rejected because it preserved all sectors and reintroduced fallback
+  - next structural change should be sector-first breadth by posture, then stock breadth inside that reduced sector set
 - Always `rm artifacts/models/rl_agent/ppo_model.zip meta.pkl experience_buffer.pkl`
   before running backtest when STATE_DIM changes
 - Always reset `_metadata.json` macro last_date when `macro_features.py` changes
