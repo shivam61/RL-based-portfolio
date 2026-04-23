@@ -40,6 +40,25 @@ class UniverseManagerStub:
         return {stock.ticker: snapshot.sectors[0] for stock in snapshot.stocks}
 
 
+class UniverseManagerMappingStub:
+    def __init__(self, sectors: list[str], ticker_sector_pairs: list[tuple[str, str]]):
+        self.snapshot = SimpleNamespace(
+            sectors=sectors,
+            tickers=[ticker for ticker, _ in ticker_sector_pairs],
+            stocks=[
+                SimpleNamespace(ticker=ticker, cap="large")
+                for ticker, _ in ticker_sector_pairs
+            ],
+        )
+        self._sector_map = {ticker: sector for ticker, sector in ticker_sector_pairs}
+
+    def get_universe(self, as_of, price_matrix=None):
+        return self.snapshot
+
+    def get_sector_map(self, snapshot) -> dict[str, str]:
+        return dict(self._sector_map)
+
+
 class OptimizerStub:
     def __init__(self, target_weights: dict[str, float]):
         self.target_weights = target_weights
@@ -209,7 +228,7 @@ def test_recommender_falls_back_when_models_are_missing(monkeypatch, tmp_path):
 
     result = rec.recommend(capital_inr=100_000, risk_profile="moderate")
 
-    assert result["model_mode"] == "Rule"
+    assert result["model_mode"] == "Baseline"
     assert result["allocation"]["AAA"] == 0.6
     assert result["allocation"]["BBB"] == 0.3
     assert result["sector_tilts"]["IT"] == 1.0
@@ -273,8 +292,87 @@ def test_recommender_bypasses_trained_rl_when_rl_is_disabled(monkeypatch, tmp_pa
     result = rec.recommend(capital_inr=100_000, risk_profile="moderate")
 
     assert rl_agent.calls == 0
-    assert result["model_mode"] == "Rule"
+    assert result["model_mode"] == "Baseline"
     assert optimizer.calls[-1]["sector_tilts"]["IT"] == 1.0
+    assert optimizer.calls[-1]["posture"] == "neutral"
+
+
+def test_recommender_baseline_uses_full_stack_sector_first_selection(monkeypatch, tmp_path):
+    rec = _make_recommender_with_cfg(
+        monkeypatch,
+        tmp_path,
+        {
+            "rl": {
+                "use_rl": True,
+                "training_backend": "disabled",
+                "posture_profiles": {
+                    "neutral": {
+                        "cash_target": 0.05,
+                        "aggressiveness": 1.0,
+                        "turnover_cap": 0.35,
+                        "sector_top_n": 1,
+                        "stock_top_k_per_sector": 1,
+                    }
+                },
+            }
+        },
+    )
+    _patch_covariance(monkeypatch)
+
+    class SectorScorerStub:
+        is_fitted = True
+
+        def predict(self, sector_features_row, macro_features_row=None):
+            return {"IT": 0.9, "Banking": 0.6, "FMCG": 0.3}
+
+    class StockRankerStub:
+        def rank_stocks(self, stock_features_snap, sector, top_k=None):
+            rows = stock_features_snap[stock_features_snap["sector"] == sector].copy()
+            rows = rows.sort_values("ret_3m", ascending=False).reset_index(drop=True)
+            rows["score"] = rows["ret_3m"].astype(float)
+            rows["rank"] = range(1, len(rows) + 1)
+            return rows[["ticker", "score", "rank"]].head(top_k)
+
+    optimizer = OptimizerStub({"AAA": 0.9, "CASH": 0.1})
+
+    rec._feature_store = FeatureStoreStub(
+        {
+            "sector": pd.DataFrame(
+                {
+                    "sector": ["IT", "Banking", "FMCG"],
+                    "mom_3m": [0.2, 0.1, 0.05],
+                    "breadth_3m": [0.6, 0.6, 0.6],
+                }
+            ),
+            "stock": pd.DataFrame(
+                {
+                    "ticker": ["AAA", "AAB", "BBB", "BBC", "CCC", "CCD"],
+                    "sector": ["IT", "IT", "Banking", "Banking", "FMCG", "FMCG"],
+                    "ret_3m": [0.20, 0.15, 0.12, 0.08, 0.09, 0.07],
+                    "mom_3m": [0.20, 0.15, 0.12, 0.08, 0.09, 0.07],
+                }
+            ),
+            "macro": pd.DataFrame(
+                {"macro_stress_score": [0.2], "vix_level": [15.0]},
+                index=pd.to_datetime(["2024-01-02"]),
+            ),
+        }
+    )
+    rec._macro_mgr = SimpleNamespace(load=lambda: pd.DataFrame())
+    rec._universe_mgr = UniverseManagerMappingStub(
+        ["IT", "Banking", "FMCG"],
+        [("AAA", "IT"), ("AAB", "IT"), ("BBB", "Banking"), ("BBC", "Banking"), ("CCC", "FMCG"), ("CCD", "FMCG")],
+    )
+    rec._sector_scorer = SectorScorerStub()
+    rec._stock_ranker = StockRankerStub()
+    rec._rl_agent = None
+    rec._optimizer = optimizer
+
+    result = rec.recommend(capital_inr=100_000, risk_profile="moderate")
+
+    assert result["model_mode"] == "Baseline"
+    assert set(optimizer.calls[-1]["alpha_scores"].keys()) == {"AAA"}
+    assert optimizer.calls[-1]["posture"] == "neutral"
 
 
 def test_recommender_matches_backtest_rl_application_semantics(monkeypatch, tmp_path):

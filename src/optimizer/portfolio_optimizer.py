@@ -148,6 +148,11 @@ class PortfolioOptimizer:
         if cash_target is not None:
             cash_min = max(cash_min, cash_target - cash_target_tolerance)
             cash_max = min(cash_max, cash_target + cash_target_tolerance)
+        target_cash_weight = float(cash_target if cash_target is not None else cash_min)
+        reference_weights = self._reference_pre_cap_weights(
+            alpha=alpha,
+            target_cash_weight=target_cash_weight,
+        )
 
         diagnostics: dict[str, object] = {
             "posture": str(posture or "neutral"),
@@ -174,11 +179,19 @@ class PortfolioOptimizer:
             "binding_constraints": [],
             "cash_gap": None,
         }
+        diagnostics.update(
+            self._compression_metrics(
+                reference_weights=reference_weights,
+                result_weights=None,
+                max_stock=float(max_stock),
+            )
+        )
 
         if not HAS_CVXPY:
             diagnostics["status"] = "no_cvxpy"
             result = self._fallback_weights(
                 alpha=alpha,
+                reference_weights=reference_weights,
                 alpha_scores=alpha_scores,
                 tickers=tickers,
                 sector_map=sector_map,
@@ -332,6 +345,7 @@ class PortfolioOptimizer:
             diagnostics["relaxation_tier"] = "fallback"
             result = self._fallback_weights(
                 alpha=alpha,
+                reference_weights=reference_weights,
                 alpha_scores=alpha_scores,
                 tickers=tickers,
                 sector_map=sector_map,
@@ -402,6 +416,13 @@ class PortfolioOptimizer:
         result["CASH"] = float(max(cash_val, 0))
         diagnostics["realized_cash_weight"] = float(result["CASH"])
         diagnostics["cash_gap"] = float(result["CASH"] - diagnostics["requested_cash_target"])
+        diagnostics.update(
+            self._compression_metrics(
+                reference_weights=reference_weights,
+                result_weights=result,
+                max_stock=float(diagnostics["max_stock_weight"]),
+            )
+        )
         diagnostics["binding_constraints"] = self._binding_constraints(
             result=result,
             tickers=tickers,
@@ -423,6 +444,7 @@ class PortfolioOptimizer:
         self,
         *,
         alpha: np.ndarray,
+        reference_weights: dict[int, float],
         alpha_scores: dict[str, float],
         tickers: list[str],
         sector_map: dict[str, str],
@@ -461,11 +483,62 @@ class PortfolioOptimizer:
             diagnostics["fallback_mode"] = "rank"
         diagnostics["realized_cash_weight"] = float(result.get("CASH", 0.0))
         diagnostics["cash_gap"] = float(result.get("CASH", 0.0) - diagnostics["requested_cash_target"])
+        diagnostics.update(
+            self._compression_metrics(
+                reference_weights=reference_weights,
+                result_weights=result,
+                max_stock=float(diagnostics["max_stock_weight"]),
+            )
+        )
         diagnostics["binding_constraints"] = ["fallback"]
         diagnostics["used_turnover_retry"] = bool(diagnostics.get("solver_retry_without_turnover", False))
         diagnostics["status"] = "fallback"
         diagnostics["solver_status"] = "fallback"
         return result
+
+    @staticmethod
+    def _reference_pre_cap_weights(
+        *,
+        alpha: np.ndarray,
+        target_cash_weight: float,
+    ) -> dict[int, float]:
+        investable = max(0.0, 1.0 - float(target_cash_weight))
+        if investable <= 0.0 or len(alpha) == 0:
+            return {}
+        positives = np.clip(alpha.astype(float), 0.0, None)
+        if positives.sum() <= 1e-12:
+            positives = np.ones(len(alpha), dtype=float)
+        weights = investable * positives / positives.sum()
+        return {idx: float(weight) for idx, weight in enumerate(weights) if weight > 1e-10}
+
+    @staticmethod
+    def _compression_metrics(
+        *,
+        reference_weights: dict[int, float],
+        result_weights: dict[str, float] | None,
+        max_stock: float,
+    ) -> dict[str, float]:
+        before = np.array(list(reference_weights.values()), dtype=float)
+        total_mass = float(before.sum()) if before.size else 0.0
+        clipped_mass = float(np.maximum(before - float(max_stock), 0.0).sum()) if before.size else 0.0
+        after_values = []
+        top_weights = []
+        if result_weights:
+            after_values = [
+                float(weight)
+                for ticker, weight in result_weights.items()
+                if ticker != "CASH" and float(weight) > 0.0
+            ]
+            top_weights = sorted(after_values, reverse=True)
+        after = np.array(after_values, dtype=float) if after_values else np.array([], dtype=float)
+        return {
+            "avg_weight_before_cap": float(before.mean()) if before.size else 0.0,
+            "avg_weight_after_cap": float(after.mean()) if after.size else 0.0,
+            "cap_clipping_ratio": float(clipped_mass / total_mass) if total_mass > 1e-12 else 0.0,
+            "top5_weight_sum": float(sum(top_weights[:5])) if top_weights else 0.0,
+            "top10_weight_sum": float(sum(top_weights[:10])) if top_weights else 0.0,
+            "realized_hhi": float(sum(weight * weight for weight in top_weights)) if top_weights else 0.0,
+        }
 
     def _binding_constraints(
         self,

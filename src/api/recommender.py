@@ -24,7 +24,12 @@ from src.optimizer.portfolio_optimizer import PortfolioOptimizer
 from src.risk.risk_engine import RiskAction, RiskEngine
 from src.rl.agent import RLSectorAgent
 from src.rl.contract import CAUSAL_TRAINING_BACKEND
-from src.rl.policy_utils import build_sector_state, default_decision, select_sectors
+from src.rl.environment import SectorAllocationEnv
+from src.rl.policy_utils import (
+    build_sector_state,
+    posture_selection_profile,
+    select_sectors,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +94,11 @@ class PortfolioRecommender:
         return self._loaded
 
     def policy_status(self) -> dict[str, object]:
+        live_rl = self._serving_uses_rl()
         return {
             "rl_trained": bool(self._rl_agent is not None and self._rl_agent.is_trained),
-            "rl_serving_enabled": self._serving_uses_rl(),
+            "rl_serving_enabled": live_rl,
+            "default_serving_mode": "RL" if live_rl else "Baseline",
         }
 
     @staticmethod
@@ -368,7 +375,7 @@ class PortfolioRecommender:
         use_live_rl = self._serving_uses_rl()
         sector_state = build_sector_state(sector_feats_now)
 
-        # RL decision or safe neutral fallback
+        # RL decision or neutral full-stack baseline
         if use_live_rl:
             try:
                 rl_decision = self._rl_agent.decide(
@@ -385,8 +392,8 @@ class PortfolioRecommender:
                 )
             model_mode = "RL"
         else:
-            rl_decision = default_decision(snapshot.sectors)
-            model_mode = "Rule"
+            rl_decision = SectorAllocationEnv.neutral_action(self.cfg)
+            model_mode = "Baseline"
 
         cash_target = max(
             float(rl_decision.get("cash_target", 0.05)),
@@ -395,13 +402,16 @@ class PortfolioRecommender:
         )
 
         # Rank stocks
-        top_k = self.cfg["stock_model"]["top_k_per_sector"]
+        posture = str(rl_decision.get("posture", "neutral"))
+        selection_profile = posture_selection_profile(self.cfg, posture)
+        top_k = int(selection_profile.get("stock_top_k_per_sector") or self.cfg["stock_model"]["top_k_per_sector"])
         alpha_scores: dict[str, float] = {}
         selected_sectors = select_sectors(
             snapshot.sectors,
             sector_scores,
             rl_decision,
-            full_rl=use_live_rl,
+            full_rl=True,
+            cfg=self.cfg,
         )
 
         for sector in selected_sectors:
@@ -423,18 +433,11 @@ class PortfolioRecommender:
             cov_matrix=cov,
             sector_map=sector_map,
             current_weights=current_weights,
-            sector_tilts=(
-                rl_decision["sector_tilts"]
-                if use_live_rl
-                else {sector: 1.0 for sector in snapshot.sectors}
-            ),
-            aggressiveness=(
-                float(rl_decision.get("aggressiveness", 1.0))
-                if use_live_rl
-                else float(profile["aggressiveness"])
-            ),
+            sector_tilts=rl_decision["sector_tilts"],
+            aggressiveness=float(rl_decision.get("aggressiveness", 1.0)),
             cash_target=cash_target,
             forced_exclude=risk_action.exclude_tickers,
+            posture=posture,
         )
         if "risk" in self.cfg:
             risk_engine = self._risk_engine or RiskEngine(self.cfg)

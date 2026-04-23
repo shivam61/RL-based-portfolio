@@ -19,6 +19,7 @@ from src.config import load_config
 from src.rl.contract import CAUSAL_TRAINING_BACKEND
 from src.rl.environment import SECTORS, SectorAllocationEnv
 from src.rl.historical_executor import HistoricalPeriodExecutor
+from src.rl.policy_utils import default_decision
 
 
 @dataclass
@@ -111,6 +112,20 @@ def evaluate_holdout(
         ),
         benchmark=_benchmark_series(price_matrix, cfg_eval, holdout_rebalance, holdout_end_ts),
     )
+    fixed_posture_runs = {
+        posture: _run_holdout_policy(
+            executor=eval_executor,
+            start_idx=holdout_start_idx,
+            end_idx=holdout_end_idx,
+            decision_fn=lambda prepared, posture=posture: _fixed_posture_decision(
+                cfg_eval,
+                list(prepared.snapshot.sectors),
+                posture,
+            ),
+            benchmark=_benchmark_series(price_matrix, cfg_eval, holdout_rebalance, holdout_end_ts),
+        )
+        for posture in ("risk_on", "neutral", "risk_off")
+    }
 
     return {
         "training_backend": engine.rl_agent.training_backend,
@@ -124,6 +139,13 @@ def evaluate_holdout(
         "uplift": _compute_uplift(trained.metrics, neutral.metrics),
         "trained_policy_diagnostics": _summarize_trace(trained.trace, cfg_eval),
         "neutral_policy_diagnostics": _summarize_trace(neutral.trace, cfg_eval),
+        "fixed_posture_policies": {
+            posture: {
+                "metrics": run.metrics,
+                "diagnostics": _summarize_trace(run.trace, cfg_eval),
+            }
+            for posture, run in fixed_posture_runs.items()
+        },
         "trained_policy_behavior_flags": _posture_behavior_flags(
             _summarize_trace(trained.trace, cfg_eval),
         ),
@@ -225,6 +247,20 @@ def _compute_uplift(trained: dict[str, Any], neutral: dict[str, Any]) -> dict[st
     return uplift
 
 
+def _fixed_posture_decision(
+    cfg: dict,
+    sectors: list[str],
+    posture: str,
+) -> dict[str, Any]:
+    decision = default_decision(sectors)
+    controls = HistoricalPeriodExecutor._target_controls_for_posture(posture, cfg)
+    decision["posture"] = str(posture)
+    decision["cash_target"] = float(controls["cash_target"])
+    decision["aggressiveness"] = float(controls["aggressiveness"])
+    decision["turnover_cap"] = float(controls["turnover_cap"])
+    return decision
+
+
 def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> dict[str, Any]:
     if not trace:
         return {}
@@ -298,6 +334,16 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             return None
         return float(np.mean([float(value) for value in values]))
 
+    def mean_opt_diag(entries: list[dict[str, Any]], key: str) -> float | None:
+        values = [
+            (entry.get("optimizer_diagnostics") or {}).get(key)
+            for entry in entries
+            if (entry.get("optimizer_diagnostics") or {}).get(key) is not None
+        ]
+        if not values:
+            return None
+        return float(np.mean([float(value) for value in values]))
+
     postures = [str(entry.get("posture", "neutral")) for entry in trace]
     target_postures = [
         str(entry.get("reward_components", {}).get("target_posture", "neutral"))
@@ -357,6 +403,12 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             "avg_turnover": mean_of(entries, "turnover"),
             "avg_selected_stock_count": mean_of(entries, "selected_stock_count"),
             "avg_selected_sector_count": mean_of(entries, "selected_sector_count"),
+            "avg_weight_before_cap": mean_opt_diag(entries, "avg_weight_before_cap"),
+            "avg_weight_after_cap": mean_opt_diag(entries, "avg_weight_after_cap"),
+            "avg_cap_clipping_ratio": mean_opt_diag(entries, "cap_clipping_ratio"),
+            "avg_top5_weight_sum": mean_opt_diag(entries, "top5_weight_sum"),
+            "avg_top10_weight_sum": mean_opt_diag(entries, "top10_weight_sum"),
+            "avg_hhi": mean_opt_diag(entries, "realized_hhi"),
         }
         for posture, entries in sorted(posture_rows.items())
     }
@@ -368,6 +420,12 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
             "avg_turnover": mean_of(entries, "turnover"),
             "avg_selected_stock_count": mean_of(entries, "selected_stock_count"),
             "avg_selected_sector_count": mean_of(entries, "selected_sector_count"),
+            "avg_weight_before_cap": mean_opt_diag(entries, "avg_weight_before_cap"),
+            "avg_weight_after_cap": mean_opt_diag(entries, "avg_weight_after_cap"),
+            "avg_cap_clipping_ratio": mean_opt_diag(entries, "cap_clipping_ratio"),
+            "avg_top5_weight_sum": mean_opt_diag(entries, "top5_weight_sum"),
+            "avg_top10_weight_sum": mean_opt_diag(entries, "top10_weight_sum"),
+            "avg_hhi": mean_opt_diag(entries, "realized_hhi"),
         }
         for bucket, entries in bucket_rows.items()
     }

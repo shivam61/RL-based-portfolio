@@ -127,7 +127,7 @@ risk:
 # ── RL agent ─────────────────────────────────────────────────────────────────
 rl:
   algorithm: "PPO"
-  training_backend: "disabled"   # disabled | causal_historical_env_v1 ; invalid replay training is blocked by default
+  training_backend: "causal_historical_env_v1"   # causal_historical_env_v1 is the supported backend; serving falls back to neutral full-stack when no trained RL artifact is available
   total_timesteps: 20000         # 20k confirmed optimal (50k = 23.37% vs 20k = 23.57%)
   enable_control_state_features: true
   enable_posture_control: true

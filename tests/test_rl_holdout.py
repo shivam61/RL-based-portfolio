@@ -105,6 +105,11 @@ def test_evaluate_holdout_returns_trained_vs_neutral_comparison(monkeypatch):
     assert "optimizer_relaxation_tier_counts" in result["trained_policy_diagnostics"]
     assert "control_realization_by_posture" in result["trained_policy_diagnostics"]
     assert "control_realization_by_stress_bucket" in result["trained_policy_diagnostics"]
+    assert set(result["fixed_posture_policies"].keys()) == {"risk_on", "neutral", "risk_off"}
+    assert "metrics" in result["fixed_posture_policies"]["risk_on"]
+    assert "diagnostics" in result["fixed_posture_policies"]["risk_on"]
+    assert result["fixed_posture_policies"]["risk_on"]["diagnostics"]["posture_counts"]["risk_on"] > 0
+    assert result["fixed_posture_policies"]["risk_off"]["diagnostics"]["posture_counts"]["risk_off"] > 0
     assert result["trained_policy_behavior_flags"]["advisory_only"] is True
     assert "unique_posture_count" in result["trained_policy_behavior_flags"]
     assert "posture_change_rate" in result["trained_policy_behavior_flags"]
