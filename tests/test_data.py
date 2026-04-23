@@ -477,6 +477,59 @@ class TestOptimizer:
         assert turnover <= 0.10 + 1e-6
         assert result.get("CASH", 0.0) >= current_weights["CASH"]
 
+    def test_optimizer_honors_explicit_cash_target_when_feasible(self):
+        from src.optimizer.portfolio_optimizer import PortfolioOptimizer
+
+        cfg = load_config()
+        opt = PortfolioOptimizer(cfg)
+        alpha = {"A.NS": 1.0, "B.NS": 0.8, "C.NS": 0.6, "D.NS": 0.4}
+        sector_map = {
+            "A.NS": "IT",
+            "B.NS": "Banking",
+            "C.NS": "Energy",
+            "D.NS": "Pharma",
+        }
+        current_weights = {"A.NS": 0.18, "B.NS": 0.18, "C.NS": 0.17, "D.NS": 0.17, "CASH": 0.30}
+
+        result = opt.optimize(
+            alpha,
+            None,
+            sector_map,
+            current_weights=current_weights,
+            cash_target=0.35,
+            max_turnover_override=0.15,
+            posture="risk_off",
+        )
+
+        assert result["CASH"] == pytest.approx(0.35, abs=0.02)
+
+    def test_no_trade_band_postprocess_preserves_solver_cash(self):
+        from src.optimizer.portfolio_optimizer import PortfolioOptimizer
+
+        cfg = load_config()
+        cfg["optimizer"]["no_trade_band"] = 0.05
+        opt = PortfolioOptimizer(cfg)
+        alpha = {"A.NS": 1.0, "B.NS": 0.99, "C.NS": 0.98, "D.NS": 0.97}
+        sector_map = {
+            "A.NS": "IT",
+            "B.NS": "Banking",
+            "C.NS": "Energy",
+            "D.NS": "Pharma",
+        }
+        current_weights = {"A.NS": 0.16, "B.NS": 0.16, "C.NS": 0.16, "D.NS": 0.17, "CASH": 0.35}
+
+        result = opt.optimize(
+            alpha,
+            None,
+            sector_map,
+            current_weights=current_weights,
+            cash_target=0.35,
+            max_turnover_override=0.15,
+            posture="risk_off",
+        )
+
+        assert result["CASH"] >= 0.34
+
 
 # ── Risk engine tests ─────────────────────────────────────────────────────────
 

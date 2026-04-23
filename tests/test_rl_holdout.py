@@ -99,6 +99,9 @@ def test_evaluate_holdout_returns_trained_vs_neutral_comparison(monkeypatch):
     assert "posture_optimality_rate_by_stress_bucket" in result["trained_policy_diagnostics"]
     assert "mean_posture_utility_dispersion" in result["trained_policy_diagnostics"]
     assert "posture_utility_dispersion_by_stress_bucket" in result["trained_policy_diagnostics"]
+    assert "mean_requested_vs_realized_cash_gap" in result["trained_policy_diagnostics"]
+    assert "optimizer_reason_counts" in result["trained_policy_diagnostics"]
+    assert "optimizer_fallback_counts" in result["trained_policy_diagnostics"]
     assert "control_realization_by_posture" in result["trained_policy_diagnostics"]
     assert "control_realization_by_stress_bucket" in result["trained_policy_diagnostics"]
     assert result["trained_policy_behavior_flags"]["advisory_only"] is True
@@ -182,3 +185,6 @@ def test_summarize_trace_reports_dispersion_and_bucketed_decision_quality():
     assert summary["regret_by_stress_bucket"]["high"] == pytest.approx(0.0)
     assert summary["mean_posture_utility_dispersion"] == pytest.approx(0.01)
     assert summary["posture_utility_dispersion_by_stress_bucket"]["low"] == pytest.approx(0.0)
+    assert "mean_requested_vs_realized_cash_gap" in summary
+    assert "optimizer_reason_counts" in summary
+    assert "optimizer_fallback_counts" in summary

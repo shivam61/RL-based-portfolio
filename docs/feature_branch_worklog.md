@@ -219,6 +219,31 @@ Each task should record:
   - posture now activates, but still does not switch conditionally
   - the immediate next problem is regime discrimination / posture switching quality, not missing action activation
 
+## 2026-04-23
+
+### Task: Stage 2 cash-target realization tightening
+- Scope:
+  - tighten optimizer handling of explicit RL cash targets
+  - preserve solver cash through no-trade-band cleanup instead of renormalizing it downward
+  - keep reward/regret unchanged so the measured effect stays execution-only
+- Validation:
+  - `./.venv/bin/python -m py_compile src/optimizer/portfolio_optimizer.py tests/test_data.py`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_data.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `33 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `17.97% CAGR`, `0.961 Sharpe`, `-11.18% MaxDD`, `17.21% avg turnover`
+    - neutral full-stack -> `31.41% CAGR`, `1.460 Sharpe`, `-14.42% MaxDD`, `24.73% avg turnover`
+    - execution diagnostics:
+      - mean requested-vs-realized cash gap improved from `7.65 pts` to `5.56 pts`
+      - optimizer fallback count in the live holdout path remained `0`
+      - realized `risk_off` cash now sits close to `35%` after the early turnover-limited windows
+- Decision:
+  - keep the execution tightening
+  - do not promote the resulting policy as the new RL incumbent
+- Learning:
+  - the optimizer was indeed too soft about explicit cash targets
+  - tightening that path made posture execution more faithful, but did not improve economics because the controller is still choosing `risk_off` too often
+  - this narrows the next hypothesis: the remaining issue is decision quality, not cash-target realization drift
+
 ### Task: Stage 2 target-aware switching state and reward
 - Scope:
   - expose control-target features directly in RL state:

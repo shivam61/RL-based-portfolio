@@ -258,6 +258,58 @@ Copy this block for each future change:
   - posture profiles and optimizer caps only
 - Evaluation artifacts:
   - `artifacts/reports/rl_holdout_comparison.json`
+
+## Iteration 11 — Stage 2 Cash-Target Realization Tightening
+
+- Date:
+  - `2026-04-23`
+- Scope:
+  - tighten optimizer-side realization when RL explicitly requests cash
+  - preserve solver cash through no-trade-band post-processing instead of renormalizing it away
+  - keep reward/regret unchanged so the effect stays isolated to execution quality
+- Control levers changed:
+  - optimizer cash band tightened from `target ± 5%` to `target ± 1%`
+  - added explicit optimizer penalty for missing a requested cash target
+  - post-solve no-trade-band cleanup now preserves solver cash and scales equities down instead of renormalizing cash lower
+- Config flags:
+  - `optimizer.cash_target_tolerance`
+  - `optimizer.cash_target_penalty`
+- Evaluation artifacts:
+  - `artifacts/reports/rl_holdout_comparison.json`
+- Full-window result vs `neutral_full_stack`:
+  - not re-run in this iteration
+- Holdout result vs `neutral_full_stack`:
+  - candidate RL:
+    - CAGR `17.97%`
+    - Sharpe `0.961`
+    - MaxDD `-11.18%`
+    - avg turnover `17.21%`
+  - neutral full-stack:
+    - CAGR `31.41%`
+    - Sharpe `1.460`
+    - MaxDD `-14.42%`
+    - avg turnover `24.73%`
+- Stress-window behavior:
+  - holdout-only review in this iteration
+  - posture diagnostics:
+    - `unique_postures = ['neutral', 'risk_off']`
+    - `posture_counts = {'risk_off': 11, 'neutral': 1}`
+    - `posture_change_rate = 9.1%`
+  - execution diagnostics:
+    - `mean_requested_vs_realized_cash_gap = 5.56 pts`
+    - previous iteration: `7.65 pts`
+    - optimizer reasons:
+      - `optimal = 8`
+      - `optimal_without_turnover_constraint = 4`
+    - optimizer fallback:
+      - `none = 12`
+- Decision:
+  - keep as a diagnostic execution improvement
+  - reject promotion as a better RL controller
+- Learning:
+  - the cash-target realization path is now materially tighter once turnover permits it
+  - the policy still stays mostly `risk_off`, and the more honest execution makes the return drag larger rather than smaller
+  - this is useful because it shows the remaining problem is now posture choice / objective quality, not cash-target drift inside the optimizer
 - Full-window result vs `neutral_full_stack`:
   - not run
 - Holdout result vs `neutral_full_stack`:

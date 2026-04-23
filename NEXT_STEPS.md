@@ -280,6 +280,24 @@ Current Stage 2A result:
       - we fixed bookkeeping honesty and made fallback outputs safer
       - we did not materially reduce solver infeasibility yet
       - the next execution fix should target why the optimizer is infeasible without turnover, not just how fallback behaves
+  - Stage 2E live-execution instrumentation:
+    - per-step optimizer diagnostics now include:
+      - reason code
+      - fallback mode
+      - requested cash / realized cash
+      - requested turnover cap / effective turnover budget
+    - `risk_off` solver failure now routes to a dedicated de-risk fallback instead of generic rank fallback
+    - 2016 holdout still lands at:
+      - RL -> CAGR `20.80%`, Sharpe `1.112`, MaxDD `-12.23%`, turnover `18.05%`
+      - neutral -> CAGR `33.20%`, Sharpe `1.508`, MaxDD `-15.10%`, turnover `25.21%`
+    - but the new diagnostics narrow the problem:
+      - `optimizer_reason_counts = {'optimal': 9, 'optimal_without_turnover_constraint': 3}`
+      - `optimizer_fallback_counts = {'none': 12}`
+      - `mean_requested_vs_realized_cash_gap = 7.65 pts`
+    - interpretation:
+      - the holdout execution path is not dominated by generic fallback anymore
+      - the current live bottleneck is cash attainment under `risk_off`, not fallback mode selection
+      - the next fix should target post-optimizer realization and cash attainment rather than reward or sector breadth
 
 #### Stage 3 — Add breadth control
 
@@ -674,6 +692,14 @@ Decision rule:
 ---
 
 ## Ops Notes
+- RL controller status after the latest execution pass:
+  - optimizer fallback is not the main live holdout bottleneck
+  - explicit cash-target realization is tighter now
+  - the candidate still camps in `risk_off`, so more honest execution worsened return while improving drawdown/turnover
+- Next RL hypothesis:
+  - move back to posture decision quality
+  - the controller now has enough execution fidelity that poor regime choice is showing through directly
+  - next change should target the objective / posture-choice economics, not broader execution plumbing
 - Always `rm artifacts/models/rl_agent/ppo_model.zip meta.pkl experience_buffer.pkl`
   before running backtest when STATE_DIM changes
 - Always reset `_metadata.json` macro last_date when `macro_features.py` changes

@@ -172,6 +172,16 @@ def _run_holdout_policy(
                     if info.get("turnover_cap") is not None
                     else None
                 ),
+                "requested_cash_target": float(info.get("requested_cash_target", info.get("cash_target", result.cash_target))),
+                "requested_turnover_cap": (
+                    float(info.get("requested_turnover_cap"))
+                    if info.get("requested_turnover_cap") is not None
+                    else None
+                ),
+                "realized_cash_weight": float(info.get("realized_cash_weight", result.next_portfolio.weights.get("CASH", 0.0))),
+                "optimizer_reason_code": str(info.get("optimizer_reason_code", "unknown")),
+                "optimizer_fallback_mode": str(info.get("optimizer_fallback_mode", "none")),
+                "optimizer_diagnostics": dict(info.get("optimizer_diagnostics", {})),
                 "posture": str(info.get("posture", decision.get("posture", "neutral"))),
                 "aggressiveness": float(info.get("aggressiveness", decision.get("aggressiveness", 1.0))),
                 "should_rebalance": bool(decision.get("should_rebalance", True)),
@@ -438,6 +448,22 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
         "mean_turnover": float(np.mean([entry["turnover"] for entry in trace])),
         "cash_usage_rate": usage_rate("cash_target", neutral_cash),
         "turnover_cap_usage_rate": usage_rate("turnover_cap", neutral_turnover_cap),
+        "mean_requested_vs_realized_cash_gap": float(
+            np.mean(
+                [
+                    abs(float(entry.get("requested_cash_target", entry["cash_target"])) - float(entry.get("realized_cash_weight", 0.0)))
+                    for entry in trace
+                ]
+            )
+        ),
+        "optimizer_reason_counts": {
+            reason: int(sum(1 for entry in trace if str(entry.get("optimizer_reason_code", "unknown")) == reason))
+            for reason in sorted({str(entry.get("optimizer_reason_code", "unknown")) for entry in trace})
+        },
+        "optimizer_fallback_counts": {
+            mode: int(sum(1 for entry in trace if str(entry.get("optimizer_fallback_mode", "none")) == mode))
+            for mode in sorted({str(entry.get("optimizer_fallback_mode", "none")) for entry in trace})
+        },
         "aggressiveness_usage_rate": usage_rate("aggressiveness", neutral_aggressiveness),
         "posture_usage_rate": float(
             np.mean([1.0 if posture != neutral_posture else 0.0 for posture in postures])

@@ -323,6 +323,7 @@ class WalkForwardEngine:
                         )
 
             # ── H. Optimize portfolio ─────────────────────────────────────────
+            optimizer_diagnostics = {}
             if self.mode == "selection_only":
                 target_weights = self._build_equal_weight_targets(
                     alpha_scores=alpha_scores,
@@ -356,8 +357,10 @@ class WalkForwardEngine:
                         else None
                     ),
                     forced_exclude=risk_action.exclude_tickers,
+                    posture=str(rl_decision.get("posture", "neutral")),
                 )
                 pre_risk_target_weights = dict(target_weights)
+                optimizer_diagnostics = dict(getattr(self.optimizer, "last_optimize_diagnostics", {}) or {})
 
             # ── I. Pre-trade risk checks ──────────────────────────────────────
             if self.mode != "selection_only":
@@ -655,6 +658,17 @@ class WalkForwardEngine:
                         else None
                     ),
                     "posture": str(rl_decision.get("posture", "neutral")),
+                    "optimizer_diagnostics": optimizer_diagnostics if self.mode != "selection_only" else {},
+                    "optimizer_reason_code": (
+                        str(optimizer_diagnostics.get("status", "selection_only"))
+                        if self.mode != "selection_only"
+                        else "selection_only"
+                    ),
+                    "optimizer_fallback_mode": (
+                        str(optimizer_diagnostics.get("fallback_mode", "none"))
+                        if self.mode != "selection_only"
+                        else "none"
+                    ),
                     "selected_sectors": [str(sector) for sector in selected_sectors],
                 }
                 outcome = {

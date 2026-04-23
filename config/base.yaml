@@ -108,6 +108,8 @@ optimizer:
   min_stock_weight: 0.005
   max_cash: 0.40
   min_cash: 0.0
+  cash_target_tolerance: 0.01
+  cash_target_penalty: 0.75
   max_turnover_per_rebalance: 0.45
   no_trade_band: 0.005          # ignore weight changes below this
   solver: "CLARABEL"

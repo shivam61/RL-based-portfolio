@@ -257,6 +257,7 @@ class HistoricalPeriodExecutor:
         )
 
         alpha_scores, selected_stock_rows = self._build_alpha_scores(prepared, decision)
+        optimizer_diagnostics = {}
         if self.mode == "selection_only":
             target_weights = self.engine._build_equal_weight_targets(
                 alpha_scores=alpha_scores,
@@ -290,8 +291,10 @@ class HistoricalPeriodExecutor:
                     else None
                 ),
                 forced_exclude=prepared.risk_action.exclude_tickers,
+                posture=str(decision.get("posture", "neutral")),
             )
             pre_risk_target_weights = dict(target_weights)
+            optimizer_diagnostics = dict(getattr(self.engine.optimizer, "last_optimize_diagnostics", {}) or {})
 
         if self.mode != "selection_only":
             target_weights = self.engine.risk_engine.check_pre_trade(
@@ -427,6 +430,16 @@ class HistoricalPeriodExecutor:
                 "aggressiveness": float(decision.get("aggressiveness", 1.0)),
                 "posture": str(decision.get("posture", "neutral")),
                 "control_guidance": control_guidance,
+                "optimizer_diagnostics": optimizer_diagnostics,
+                "optimizer_reason_code": str(optimizer_diagnostics.get("status", "selection_only")),
+                "optimizer_fallback_mode": str(optimizer_diagnostics.get("fallback_mode", "none")),
+                "requested_cash_target": float(decision.get("cash_target", cash_target)),
+                "requested_turnover_cap": (
+                    float(decision.get("turnover_cap"))
+                    if decision.get("turnover_cap") is not None
+                    else None
+                ),
+                "realized_cash_weight": float(next_portfolio.weights.get("CASH", 0.0)),
                 "reward_components": reward_components,
             },
         )
