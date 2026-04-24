@@ -819,3 +819,24 @@ Each task should record:
 - Learning:
   - the production edge survives with posture frozen, so the live RL value is still in sector tilts
   - posture should move to a separate realized-outcome research track instead of staying inside the current PPO reward loop
+
+### Task: posture research dataset builder
+- Scope:
+  - added a realized forward-outcome builder for `risk_on / neutral / risk_off`
+  - uses the neutral full-stack path as the reference state stream
+  - saves both a parquet row dataset and a JSON summary
+- Validation:
+  - focused tests passed:
+    - `tests/test_posture_dataset.py`
+    - `tests/test_rl_holdout.py`
+    - `tests/test_api_recommender.py`
+  - sample run:
+    - `scripts/build_posture_dataset.py --end-date 2016-12-31 --horizon-rebalances 2 --max-samples 4`
+    - summary:
+      - `sample_count = 4`
+      - `best_posture_counts = {'risk_off': 4}`
+      - `mean_utility_margin = 0.0751`
+- Learning:
+  - the research dataset path is now real and labelable from realized outcomes instead of proxy regret
+  - the first implementation is compute-heavy because it retrains models redundantly across counterfactual paths
+  - the next engineering improvement should be rebalance-date model caching before scaling the dataset

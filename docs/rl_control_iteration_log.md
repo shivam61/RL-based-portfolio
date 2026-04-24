@@ -274,6 +274,47 @@ Copy this block for each future change:
   - the production uplift survives with posture frozen, which confirms the current RL value is primarily in sector tilts
   - fixed posture paths are materially different in realized breadth and concentration, so execution-path separability exists
   - the remaining posture problem is training-signal mismatch, not lack of structural posture differences
+
+## Iteration 11 — Posture Research Dataset Builder
+
+- Date:
+  - `2026-04-24`
+- Scope:
+  - build the first realized forward-outcome dataset for posture research
+  - use the neutral full-stack path as the reference state stream
+  - simulate `risk_on / neutral / risk_off` over a fixed horizon from the same starting state
+- Control levers changed:
+  - none in production
+  - research-only additions:
+    - `src/rl/posture_dataset.py`
+    - `scripts/build_posture_dataset.py`
+- Config flags:
+  - none
+- Evaluation artifacts:
+  - `artifacts/reports/posture_dataset.parquet`
+  - `artifacts/reports/posture_dataset_summary.json`
+- Full-window result vs `neutral_full_stack`:
+  - not re-run
+- Holdout result vs `neutral_full_stack`:
+  - not re-run in this iteration
+- Research sample build:
+  - command:
+    - `scripts/build_posture_dataset.py --end-date 2016-12-31 --horizon-rebalances 2 --max-samples 4`
+  - sample summary:
+    - `sample_count = 4`
+    - `best_posture_counts = {'risk_off': 4}`
+    - `mean_utility_margin = 0.0751`
+    - `risk_on` mean utility `-0.1519`
+    - `neutral` mean utility `-0.1522`
+    - `risk_off` mean utility `-0.0353`
+- Decision:
+  - keep
+  - use this as the base research artifact for posture learnability
+  - next improve compute efficiency before scaling the dataset materially
+- Learning:
+  - the realized-label path is working and produces non-trivial utility margins
+  - the builder is computationally expensive because counterfactual replay retrains models redundantly
+  - the next research-engineering step should cache model snapshots per rebalance date inside the posture dataset builder
     - Sharpe `1.496`
     - MaxDD `-14.99%`
     - avg turnover `25.53%`
