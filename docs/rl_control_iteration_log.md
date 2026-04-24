@@ -1013,3 +1013,36 @@ Copy this block for each future change:
     - to now always `risk_off`
   - this confirms the core remaining problem is not missing signal transport anymore
   - the next Stage 2 step should add explicit posture-usage gates or constrained supervision so PPO cannot satisfy the objective with one static posture
+
+## Iteration 12 — Posture Dataset Model-State Caching
+
+- Date:
+  - `2026-04-24`
+- Scope:
+  - optimize the realized posture dataset builder so counterfactual replay does not retrain sector/stock models redundantly for each posture path
+- Implementation:
+  - added a rebalance-index model-state timeline in `src/rl/posture_dataset.py`
+  - model snapshots are trained once on a separate helper engine and restored into counterfactual executors
+  - counterfactual posture replay now runs with `allow_model_retraining = false`
+- Validation:
+  - focused suites:
+    - `10 passed, 1 skipped`
+  - sample build:
+    - `scripts/build_posture_dataset.py --end-date 2016-12-31 --horizon-rebalances 2 --max-samples 8`
+- Result:
+  - `sample_count = 8`
+  - `best_posture_counts = {'risk_off': 7, 'neutral': 1}`
+  - `mean_utility_margin = 0.0817`
+  - `mean_utility_margin_by_stress_bucket`:
+    - `low = 0.1178`
+    - `medium = 0.0202`
+    - `high = 0.1215`
+- Decision:
+  - keep the caching implementation
+  - do not train a posture model yet
+- Learning:
+  - the builder is now fast enough to scale beyond toy samples
+  - the immediate research bottleneck has shifted from compute to label economics
+  - short-horizon realized labels are currently dominated by `risk_off`, so the next pass must test whether that is:
+    - a true short-horizon control signal
+    - or an artifact of the current horizon utility weighting

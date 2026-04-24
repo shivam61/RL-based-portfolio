@@ -840,3 +840,26 @@ Each task should record:
   - the research dataset path is now real and labelable from realized outcomes instead of proxy regret
   - the first implementation is compute-heavy because it retrains models redundantly across counterfactual paths
   - the next engineering improvement should be rebalance-date model caching before scaling the dataset
+
+### Task: posture dataset model-state caching
+- Scope:
+  - added an incremental model-state timeline in `src/rl/posture_dataset.py`
+  - caches trained scorer/ranker snapshots by rebalance index on a separate helper engine
+  - restores cached model state into counterfactual executors so posture horizon replay runs with `allow_model_retraining=False`
+- Validation:
+  - focused suites passed:
+    - `tests/test_posture_dataset.py`
+    - `tests/test_rl_holdout.py`
+    - `tests/test_api_recommender.py`
+  - cache snapshot round-trip is now covered in `tests/test_posture_dataset.py`
+  - larger sample run:
+    - `scripts/build_posture_dataset.py --end-date 2016-12-31 --horizon-rebalances 2 --max-samples 8`
+- Learning:
+  - duplicate model retraining across posture paths is removed
+  - larger sample builds are now feasible enough to inspect label balance before any posture model training
+  - first larger sample still shows heavy `risk_off` dominance:
+    - `best_posture_counts = {'risk_off': 7, 'neutral': 1}`
+    - `mean_utility_margin = 0.0817`
+  - next question is no longer builder correctness; it is label economics:
+    - whether `risk_off` is genuinely best over short horizons
+    - or whether the current horizon utility overweights drawdown / turnover relative to return

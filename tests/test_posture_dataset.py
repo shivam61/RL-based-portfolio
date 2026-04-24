@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -10,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.rl.posture_dataset import (
     _fixed_posture_decision,
+    _restore_model_snapshot,
+    _snapshot_model_state,
     _summarize_dataset,
 )
 
@@ -129,3 +132,42 @@ def test_summarize_dataset_reports_best_posture_distribution():
     assert summary["best_posture_by_stress_bucket"]["low"]["risk_on"] == 1
     assert summary["best_posture_by_stress_bucket"]["high"]["neutral"] == 1
     assert summary["posture_outcome_stats"]["risk_off"]["mean_fallback_count"] == pytest.approx(1.0)
+
+
+def test_model_snapshot_round_trip_restores_trained_state():
+    engine = SimpleNamespace(
+        sector_scorer=SimpleNamespace(
+            model={"name": "sector_v1"},
+            scaler={"kind": "sector_scaler"},
+            feature_names=["a", "b"],
+            is_fitted=True,
+        ),
+        stock_ranker=SimpleNamespace(
+            models={"IT": {"name": "stock_v1"}},
+            scalers={"IT": {"kind": "stock_scaler"}},
+            feature_names=["x", "y"],
+            is_fitted=True,
+        ),
+    )
+
+    snapshot = _snapshot_model_state(engine)
+
+    engine.sector_scorer.model = None
+    engine.sector_scorer.scaler = None
+    engine.sector_scorer.feature_names = []
+    engine.sector_scorer.is_fitted = False
+    engine.stock_ranker.models = {}
+    engine.stock_ranker.scalers = {}
+    engine.stock_ranker.feature_names = []
+    engine.stock_ranker.is_fitted = False
+
+    _restore_model_snapshot(engine, snapshot)
+
+    assert engine.sector_scorer.model == {"name": "sector_v1"}
+    assert engine.sector_scorer.scaler == {"kind": "sector_scaler"}
+    assert engine.sector_scorer.feature_names == ["a", "b"]
+    assert engine.sector_scorer.is_fitted is True
+    assert engine.stock_ranker.models == {"IT": {"name": "stock_v1"}}
+    assert engine.stock_ranker.scalers == {"IT": {"kind": "stock_scaler"}}
+    assert engine.stock_ranker.feature_names == ["x", "y"]
+    assert engine.stock_ranker.is_fitted is True

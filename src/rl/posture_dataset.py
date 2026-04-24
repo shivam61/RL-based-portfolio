@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import pickle
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,33 @@ from src.data.contracts import PortfolioState
 from src.rl.environment import SectorAllocationEnv
 from src.rl.historical_executor import HistoricalPeriodExecutor, PreparedHistoricalStep
 from src.rl.policy_utils import default_decision
+
+
+class _ModelStateTimeline:
+    """Incrementally cache trained model state by rebalance index."""
+
+    def __init__(self, engine: WalkForwardEngine):
+        self._engine = engine
+        self._trainer = HistoricalPeriodExecutor(engine, mode="full_rl", allow_model_retraining=True)
+        self._cached_snapshots: dict[int, dict[str, bytes]] = {}
+        self._last_idx = -1
+
+    def restore(self, idx: int, engine: WalkForwardEngine) -> None:
+        snapshot = self._ensure(idx)
+        _restore_model_snapshot(engine, snapshot)
+
+    def _ensure(self, idx: int) -> dict[str, bytes]:
+        idx = int(idx)
+        if idx in self._cached_snapshots:
+            return self._cached_snapshots[idx]
+
+        for step_idx in range(self._last_idx + 1, idx + 1):
+            current_date = self._trainer.rebalance_dates[step_idx]
+            if self._engine._should_retrain_models(step_idx, current_date):
+                self._engine._train_models(current_date, idx=step_idx)
+            self._cached_snapshots[step_idx] = _snapshot_model_state(self._engine)
+            self._last_idx = step_idx
+        return self._cached_snapshots[idx]
 
 
 def build_posture_dataset(
@@ -48,6 +76,15 @@ def build_posture_dataset(
     portfolio = executor.initial_portfolio(0)
     nav_points = executor.initial_nav_points(0)
     executor.reset_runtime_state(nav_points)
+    timeline_engine = WalkForwardEngine(
+        price_matrix=price_matrix.loc[:end_ts],
+        volume_matrix=volume_matrix.loc[:end_ts],
+        macro_df=macro_df.loc[:end_ts],
+        cfg=deepcopy(cfg_eval),
+        mode="full_rl",
+        use_rl=False,
+    )
+    model_timeline = _ModelStateTimeline(timeline_engine)
 
     end_idx = len(executor.rebalance_dates) - 2
     horizon = max(1, int(horizon_rebalances))
@@ -66,6 +103,7 @@ def build_posture_dataset(
                 horizon_rebalances=horizon,
                 portfolio=portfolio,
                 nav_points=nav_points,
+                model_timeline=model_timeline,
             )
             rows.extend(sample.pop("rows"))
             sample_payloads.append(sample)
@@ -143,6 +181,7 @@ def _build_sample(
     horizon_rebalances: int,
     portfolio: PortfolioState,
     nav_points: list[tuple[pd.Timestamp, float]],
+    model_timeline: _ModelStateTimeline,
 ) -> dict[str, Any]:
     state = deepcopy(prepared.transition_state)
     stress_signal = float(reference_executor._stress_signal(state))
@@ -159,6 +198,7 @@ def _build_sample(
             portfolio=portfolio,
             nav_points=nav_points,
             posture=posture,
+            model_timeline=model_timeline,
         )
         posture_outcomes[posture] = outcome
         rows.append(
@@ -213,8 +253,9 @@ def _simulate_fixed_posture_horizon(
     portfolio: PortfolioState,
     nav_points: list[tuple[pd.Timestamp, float]],
     posture: str,
+    model_timeline: _ModelStateTimeline,
 ) -> dict[str, Any]:
-    executor = HistoricalPeriodExecutor(engine, mode="full_rl", allow_model_retraining=True)
+    executor = HistoricalPeriodExecutor(engine, mode="full_rl", allow_model_retraining=False)
     _copy_runtime_state(executor, reference_executor, nav_points)
     sim_portfolio = _clone_portfolio(portfolio)
     sim_nav_points = _clone_nav_points(nav_points)
@@ -222,6 +263,7 @@ def _simulate_fixed_posture_horizon(
 
     final_idx = min(len(executor.rebalance_dates) - 2, start_idx + horizon_rebalances - 1)
     for idx in range(start_idx, final_idx + 1):
+        model_timeline.restore(idx, executor.engine)
         prepared = executor.prepare_step(idx, sim_portfolio, sim_nav_points)
         decision = _fixed_posture_decision(executor.engine.cfg, list(prepared.snapshot.sectors), posture)
         result = executor.execute_prepared_step(
@@ -306,6 +348,43 @@ def _copy_runtime_state(
     dst._prev_stress_signal = float(src._prev_stress_signal)
     dst._target_posture_streak = int(src._target_posture_streak)
     dst._prev_posture_mismatch = float(src._prev_posture_mismatch)
+
+
+def _snapshot_model_state(engine: WalkForwardEngine) -> dict[str, bytes]:
+    return {
+        "sector_scorer": pickle.dumps(
+            {
+                "model": engine.sector_scorer.model,
+                "scaler": engine.sector_scorer.scaler,
+                "feature_names": list(engine.sector_scorer.feature_names),
+                "is_fitted": bool(engine.sector_scorer.is_fitted),
+            },
+            protocol=pickle.HIGHEST_PROTOCOL,
+        ),
+        "stock_ranker": pickle.dumps(
+            {
+                "models": engine.stock_ranker.models,
+                "scalers": engine.stock_ranker.scalers,
+                "feature_names": list(engine.stock_ranker.feature_names),
+                "is_fitted": bool(engine.stock_ranker.is_fitted),
+            },
+            protocol=pickle.HIGHEST_PROTOCOL,
+        ),
+    }
+
+
+def _restore_model_snapshot(engine: WalkForwardEngine, snapshot: dict[str, bytes]) -> None:
+    sector_state = pickle.loads(snapshot["sector_scorer"])
+    engine.sector_scorer.model = sector_state["model"]
+    engine.sector_scorer.scaler = sector_state["scaler"]
+    engine.sector_scorer.feature_names = list(sector_state["feature_names"])
+    engine.sector_scorer.is_fitted = bool(sector_state["is_fitted"])
+
+    stock_state = pickle.loads(snapshot["stock_ranker"])
+    engine.stock_ranker.models = stock_state["models"]
+    engine.stock_ranker.scalers = stock_state["scalers"]
+    engine.stock_ranker.feature_names = list(stock_state["feature_names"])
+    engine.stock_ranker.is_fitted = bool(stock_state["is_fitted"])
 
 
 def _clone_portfolio(portfolio: PortfolioState) -> PortfolioState:

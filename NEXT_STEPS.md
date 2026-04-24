@@ -704,9 +704,22 @@ Decision rule:
   - keep the production path fixed as tilt-only RL
   - move posture research to realized `k`-step outcome labeling for `risk_on / neutral / risk_off`
   - do not keep tuning the current posture regret proxy in the production loop
-  - immediate research-engineering follow-up:
-    - cache model training per rebalance date in the posture dataset builder
-    - current first sample build is correct but slower than it should be because counterfactual replay retrains models redundantly
+  - latest research-engineering update:
+    - model training is now cached per rebalance index in the posture dataset builder
+    - counterfactual replay restores scorer/ranker snapshots instead of retraining for every posture path
+    - the builder is now practical for larger sample passes, though horizon replay is still the remaining cost center
+  - latest label-quality read from the cached `H=2` sample build through `2016-12-31`:
+    - `sample_count = 8`
+    - `best_posture_counts = {'risk_off': 7, 'neutral': 1}`
+    - `mean_utility_margin = 0.0817`
+    - by stress bucket:
+      - `low`: `risk_off 3`, `neutral 1`
+      - `medium`: `risk_off 3`
+      - `high`: `risk_off 1`
+  - immediate research follow-up:
+    - scale the dataset beyond the current sample cap
+    - compare `H = 2` vs `H = 3`
+    - inspect whether `risk_off` is winning because of real forward utility or because the current horizon utility is too drawdown/turnover-heavy
 - Always `rm artifacts/models/rl_agent/ppo_model.zip meta.pkl experience_buffer.pkl`
   before running backtest when STATE_DIM changes
 - Always reset `_metadata.json` macro last_date when `macro_features.py` changes
