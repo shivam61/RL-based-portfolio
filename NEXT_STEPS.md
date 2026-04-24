@@ -709,17 +709,28 @@ Decision rule:
     - counterfactual replay restores scorer/ranker snapshots instead of retraining for every posture path
     - the builder is now practical for larger sample passes, though horizon replay is still the remaining cost center
   - latest label-quality read from the cached `H=2` sample build through `2016-12-31`:
-    - `sample_count = 8`
-    - `best_posture_counts = {'risk_off': 7, 'neutral': 1}`
-    - `mean_utility_margin = 0.0817`
-    - by stress bucket:
-      - `low`: `risk_off 3`, `neutral 1`
-      - `medium`: `risk_off 3`
-      - `high`: `risk_off 1`
+    - superseded by the larger `16`-sample horizon comparison below
+  - latest horizon comparison through `2016-12-31`:
+    - `H = 2` rebalances:
+      - `sample_count = 16`
+      - `best_posture_counts = {'risk_off': 15, 'neutral': 1}`
+      - `mean_utility_margin = 0.0925`
+    - `H = 3` rebalances:
+      - `sample_count = 16`
+      - `best_posture_counts = {'risk_off': 16}`
+      - `mean_utility_margin = 0.1100`
+  - current research read:
+    - longer horizon does not restore balance to the posture labels
+    - `risk_off` dominance persists and gets slightly stronger at `H = 3`
+    - this points to either:
+      - a genuinely defensive short-horizon regime in this sample window
+      - or a horizon utility that is still too drawdown / turnover heavy for posture labeling
   - immediate research follow-up:
-    - scale the dataset beyond the current sample cap
-    - compare `H = 2` vs `H = 3`
-    - inspect whether `risk_off` is winning because of real forward utility or because the current horizon utility is too drawdown/turnover-heavy
+    - add alternate posture-label utilities for comparison:
+      - return-only
+      - return minus drawdown
+      - current full utility
+    - then compare label balance before training any posture classifier
 - Always `rm artifacts/models/rl_agent/ppo_model.zip meta.pkl experience_buffer.pkl`
   before running backtest when STATE_DIM changes
 - Always reset `_metadata.json` macro last_date when `macro_features.py` changes

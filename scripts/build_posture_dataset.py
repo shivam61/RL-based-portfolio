@@ -27,8 +27,9 @@ from src.rl.posture_dataset import build_posture_dataset, save_posture_dataset
 @click.option("--end-date", default=None, help="Optional dataset end date.")
 @click.option("--horizon-rebalances", default=2, type=int, show_default=True)
 @click.option("--max-samples", default=None, type=int, help="Optional cap for quick research builds.")
+@click.option("--prefix", default=None, help="Optional output prefix for report artifacts.")
 @click.option("--config", default=None, help="Path to custom config file")
-def main(start_date, end_date, horizon_rebalances, max_samples, config):
+def main(start_date, end_date, horizon_rebalances, max_samples, prefix, config):
     cfg = load_config(config)
     setup_logging(cfg)
     logger = logging.getLogger(__name__)
@@ -51,7 +52,7 @@ def main(start_date, end_date, horizon_rebalances, max_samples, config):
     saved = save_posture_dataset(
         payload,
         report_dir=cfg["paths"]["report_dir"],
-        prefix="posture_dataset",
+        prefix=prefix or f"posture_dataset_h{int(horizon_rebalances)}",
     )
     summary_path = Path(saved["summary_path"])
     print(summary_path.read_text())

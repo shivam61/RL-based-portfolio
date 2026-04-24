@@ -863,3 +863,30 @@ Each task should record:
   - next question is no longer builder correctness; it is label economics:
     - whether `risk_off` is genuinely best over short horizons
     - or whether the current horizon utility overweights drawdown / turnover relative to return
+
+### Task: posture horizon comparison
+- Scope:
+  - added artifact prefix support to `scripts/build_posture_dataset.py`
+  - ran side-by-side posture dataset builds for:
+    - `H = 2` rebalances
+    - `H = 3` rebalances
+  - both through `2016-12-31` with `max_samples = 16`
+- Artifacts:
+  - `artifacts/reports/posture_dataset_h2_2016_s16_summary.json`
+  - `artifacts/reports/posture_dataset_h3_2016_s16_summary.json`
+- Result:
+  - `H = 2`:
+    - `best_posture_counts = {'risk_off': 15, 'neutral': 1}`
+    - `mean_utility_margin = 0.0925`
+  - `H = 3`:
+    - `best_posture_counts = {'risk_off': 16}`
+    - `mean_utility_margin = 0.1100`
+- Learning:
+  - extending the realized label horizon did not reduce defensive bias
+  - `risk_off` dominance persisted and strengthened slightly at `H = 3`
+  - the next posture-research question is not “longer horizon or shorter horizon”
+  - it is “what utility definition should define the label?”
+  - next experiment should compare label balance under:
+    - return-only
+    - return minus drawdown
+    - current full utility

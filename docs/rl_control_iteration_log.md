@@ -1046,3 +1046,35 @@ Copy this block for each future change:
   - short-horizon realized labels are currently dominated by `risk_off`, so the next pass must test whether that is:
     - a true short-horizon control signal
     - or an artifact of the current horizon utility weighting
+
+## Iteration 13 — Posture Label Horizon Comparison
+
+- Date:
+  - `2026-04-24`
+- Scope:
+  - compare realized posture labels at `H = 2` versus `H = 3` rebalances using the cached dataset builder
+- Implementation:
+  - added `--prefix` support to `scripts/build_posture_dataset.py` so multiple horizon runs can coexist
+- Validation:
+  - script compile check passed
+  - builds run:
+    - `scripts/build_posture_dataset.py --end-date 2016-12-31 --horizon-rebalances 2 --max-samples 16 --prefix posture_dataset_h2_2016_s16`
+    - `scripts/build_posture_dataset.py --end-date 2016-12-31 --horizon-rebalances 3 --max-samples 16 --prefix posture_dataset_h3_2016_s16`
+- Result:
+  - `H = 2`:
+    - `best_posture_counts = {'risk_off': 15, 'neutral': 1}`
+    - `mean_utility_margin = 0.0925`
+  - `H = 3`:
+    - `best_posture_counts = {'risk_off': 16}`
+    - `mean_utility_margin = 0.1100`
+- Decision:
+  - keep the horizon-artifact support
+  - do not train a posture model yet
+- Learning:
+  - longer realized horizons did not rebalance the labels toward `neutral` or `risk_on`
+  - `risk_off` remained dominant and became even more dominant at `H = 3`
+  - the next likely bottleneck is the label utility definition itself, not horizon length
+  - the next research pass should compare label balance across alternate utilities:
+    - return-only
+    - return minus drawdown
+    - current full utility with turnover penalty
