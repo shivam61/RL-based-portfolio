@@ -1,5 +1,344 @@
 # Next Steps — Improvement Backlog
 
+## Active Program — RL Control Roadmap (2026-04-22)
+
+The current portfolio stack is now split into three permanent reference modes. These are the gates for every future RL change and should not be redefined mid-stream:
+
+- `neutral_full_stack`
+  - same alpha, sector filter, optimizer, and constraints as `full_rl`
+  - fixed neutral action: equal sector tilts, neutral aggressiveness, neutral cash target
+  - full-window reference in `artifacts/reports/rl_full_neutral_comparison.json`
+  - current full-window metrics:
+    - CAGR `17.85%`
+    - Sharpe `0.720`
+    - MaxDD `-32.80%`
+    - avg turnover `27.43%`
+- `current_rl`
+  - current trained PPO overlay on the causal historical env
+  - full-window reference in `artifacts/reports/metrics.json`
+  - current full-window metrics:
+    - CAGR `18.27%`
+    - Sharpe `0.750`
+    - MaxDD `-32.62%`
+    - avg turnover `28.03%`
+- `optimizer_only`
+  - lower-level structural benchmark; useful, but not the main RL gate
+  - reference in `artifacts/reports/rl_full_backtest_comparison.json`
+  - current full-window metrics:
+    - CAGR `9.48%`
+    - Sharpe `0.234`
+    - MaxDD `-34.27%`
+    - avg turnover `48.65%`
+
+Primary RL gate:
+- compare candidate RL against `neutral_full_stack` on:
+  - full backtest
+  - holdout
+  - named stress windows
+
+Current diagnosis:
+- RL is now causally valid and slightly better than neutral, but it is still a weak control policy.
+- Full-window uplift vs true neutral is only:
+  - CAGR `+0.42 pts`
+  - Sharpe `+0.029`
+  - MaxDD `+0.18 pts`
+  - turnover `+0.60 pts` worse
+- Prior holdout uplift vs true neutral is only:
+  - CAGR `+0.29 pts`
+  - Sharpe `+0.044`
+- Stress review from `artifacts/reports/rebalance_log.csv` shows the core weakness:
+  - in stress windows since 2017, trained RL averaged `5.96%` cash vs neutral `9.52%`
+  - trained RL averaged `1.037` aggressiveness vs neutral `1.000`
+  - trained RL averaged `30.52%` turnover vs neutral `29.32%`
+  - RL mostly behaved like a mild tilt engine, not a decisive risk controller
+
+### Permanent Evaluation Outputs
+
+Every promoted RL run must publish a control-evaluation artifact that includes:
+
+- CAGR
+- Sharpe
+- Sortino
+- MaxDD
+- avg turnover
+- avg cash
+- stress-window realized loss vs neutral
+- stress-window recovery time
+- behavior metrics in drawdowns:
+  - avg cash
+  - avg aggressiveness
+  - avg turnover
+  - avg stock count
+  - avg sector count
+
+Named stress windows are fixed:
+
+- `2018_q4`
+- `2020_covid`
+- `2022_rate_shock`
+- `2024_late_drawdown`
+- `2025_prolonged_drawdown`
+- `2026_early_weakness`
+
+The working iteration log for these runs lives in `docs/rl_control_iteration_log.md`.
+
+### Staged RL Build Order
+
+#### Stage 0 — Freeze the current strong baseline
+
+- keep `neutral_full_stack`, `current_rl`, and `optimizer_only` immutable
+- make the control-evaluation artifact mandatory for:
+  - full backtest
+  - holdout
+  - any candidate RL redesign
+- do not merge RL changes without the control review
+
+Status:
+- implemented
+- canonical artifact: `artifacts/reports/rl_control_evaluation.json`
+- next active build: `Stage 1 — Risk budget control only`
+
+#### Stage 1 — Risk budget control only
+
+Add first:
+
+- better control-state features:
+  - current drawdown
+  - drawdown slope
+  - realized vol shock
+  - breadth deterioration
+  - rolling correlation spike
+  - trend decay
+  - turnover pressure
+  - transaction-cost pressure
+- explicit cash control:
+  - start with tight buckets or a tight band
+  - example: `0%`, `10%`, `20%`, `30%`
+- stronger aggressiveness effect with clear portfolio impact
+- optional turnover budget / turnover cap
+
+Do not add yet:
+
+- sector inclusion
+- stock-count control
+- top-k sector selection
+
+Stage 1 success criteria:
+
+- more cash in stress
+- less churn in stress
+- same or better full-period CAGR
+- improved drawdown profile vs `current_rl` and `neutral_full_stack`
+- improvement in at least `3/6` named stress windows
+
+Status:
+- implementation slice landed behind bounded controls:
+  - control-state features
+  - cash buckets
+  - turnover caps
+  - stronger aggressiveness scaling
+- feature-correctness coverage added for:
+  - clipped/default control features
+  - finite RL observation vectors
+  - report schema carrying `turnover_cap_pct`
+- action-activation fix is now in place:
+  - non-neutral cash usage rate
+  - non-neutral turnover-cap usage rate
+  - non-neutral aggressiveness usage rate
+  are tracked directly in holdout/full diagnostics
+- latest 2016 holdout still does not clear the promotion gate:
+  - candidate RL CAGR `21.00%` vs neutral `32.39%`
+  - candidate RL Sharpe `0.916` vs neutral `1.465`
+  - candidate RL MaxDD `-14.89%` vs neutral `-15.00%`
+  - candidate RL avg turnover `24.66%` vs neutral `25.74%`
+  - policy behavior:
+    - cash is now state-conditional instead of fixed
+    - stress/posture correlation improved to `0.64`
+    - turnover cap is still effectively fixed at `30%`
+    - sector set is still unchanged at `15` sectors / `~69` names
+- decision:
+  - keep the implementation and validation work
+  - do not promote this policy as the new incumbent
+  - keep Stage 1 open until conditional control improves economics, not just behavior
+
+#### Stage 2 — Add a posture layer
+
+- use discrete posture selected by RL:
+  - `risk_on`
+  - `neutral`
+  - `risk_off`
+- each posture maps to:
+  - cash band
+  - aggressiveness cap
+  - turnover cap
+
+This is safer than giving RL unconstrained continuous authority too early.
+
+Status:
+- implementation slice landed:
+  - posture is now the primary RL control primitive
+  - posture is persisted in rebalance logs and RL comparison traces
+  - each posture maps to bounded cash / aggressiveness / turnover settings
+- first measured holdout after the posture rollout:
+  - candidate RL CAGR `38.08%` vs neutral `32.39%`
+  - candidate RL Sharpe `1.745` vs neutral `1.465`
+  - policy behavior:
+    - `unique_postures = ['neutral']`
+    - `posture_usage_rate = 0.0`
+    - `posture_change_rate = 0.0`
+    - target posture still varied across `risk_on / neutral / risk_off`
+- second measured holdout after tightening posture activation:
+  - candidate RL CAGR `36.77%` vs neutral `32.39%`
+  - candidate RL Sharpe `1.675` vs neutral `1.465`
+  - policy behavior:
+    - `unique_postures = ['risk_on']`
+    - `posture_usage_rate = 1.0`
+    - `posture_change_rate = 0.0`
+    - target posture still varied across `risk_on / neutral / risk_off`
+- decision:
+  - keep the posture-controller implementation
+  - do not promote the resulting policy as a valid regime controller yet
+  - next Stage 2 work must focus on conditional posture switching, not more generic action activation
+
+Recommended Stage 2 build order from here:
+- `2A` target-aware posture state
+  - expose current target posture, prior posture, prior target posture, stress persistence, and mismatch state directly in the RL observation
+- `2B` switching-quality reward
+  - reward improvement toward the current target posture
+  - penalize stale mismatch when the target persists
+  - penalize posture flips that do not improve alignment
+- `2C` posture-guided evaluation diagnostics
+  - measure posture stagnation explicitly
+  - do not hard-gate on switching frequency
+  - use switching data to judge whether the next reward change is fixing the real objective
+
+Current Stage 2A result:
+- implementation landed and validated
+- latest 2016 holdout:
+  - candidate RL CAGR `27.04%` vs neutral `32.39%`
+  - candidate RL Sharpe `1.299` vs neutral `1.465`
+  - candidate RL MaxDD `-14.08%` vs neutral `-15.00%`
+  - candidate RL avg turnover `19.64%` vs neutral `25.54%`
+- posture behavior:
+  - `unique_postures = ['risk_off']`
+  - `posture_usage_rate = 1.0`
+  - `posture_change_rate = 0.0`
+  - target posture still varied across `risk_on / neutral / risk_off`
+- current instrumentation baseline:
+  - `posture_counts = {'risk_off': 12}`
+  - `target_posture_counts = {'neutral': 5, 'risk_on': 5, 'risk_off': 2}`
+  - `decision_quality_basis = target_posture_proxy`
+  - `posture_optimality_rate = 16.7%`
+  - `mean_regret = 0.583`
+- interpretation:
+  - the target-aware state is working mechanically
+  - the controller still collapses to one posture, now `risk_off`
+  - next Stage 2 step should make posture correctness economically dominant, not force posture switching as a fixed condition
+  - the first bounded-utility / soft-regret prototype is now implemented, but not yet promoted:
+    - targeted tests pass
+    - real holdout runtime is currently too slow because every reward step launches multiple counterfactual posture rollouts
+    - next refinement should cut regret compute cost before wider evaluation
+  - cached one-step regret is now the active prototype:
+    - 2016 holdout -> CAGR `30.74%`, Sharpe `1.577`, MaxDD `-13.33%`, turnover `19.83%`
+    - neutral full-stack -> CAGR `32.99%`, Sharpe `1.496`, MaxDD `-14.99%`, turnover `25.53%`
+    - decision-quality basis: `cached_one_step_soft_regret_v1`
+    - posture optimality improved to `41.7%`, but posture utility dispersion is only `2.32e-05`
+    - interpretation:
+      - runtime is acceptable again
+      - posture separation is still too weak to break the static `risk_off` policy
+  - first separability pass with stronger posture authority:
+    - widened posture profiles:
+      - `risk_on -> cash 2%, aggressiveness 1.30, turnover cap 45%`
+      - `neutral -> cash 5%, aggressiveness 1.00, turnover cap 35%`
+      - `risk_off -> cash 35%, aggressiveness 0.75, turnover cap 15%`
+    - changed the posture transform so cash shift is executed before mix rotation under the turnover budget
+    - 2016 holdout -> CAGR `20.80%`, Sharpe `1.112`, MaxDD `-12.23%`, turnover `18.05%`
+    - neutral full-stack -> CAGR `33.20%`, Sharpe `1.508`, MaxDD `-15.10%`, turnover `25.21%`
+    - posture behavior:
+      - `unique_postures = ['neutral', 'risk_off']`
+      - `posture_change_rate = 9.1%`
+      - `posture_counts = {'risk_off': 11, 'neutral': 1}`
+    - decision quality:
+      - `posture_optimality_rate = 8.3%`
+      - `mean_regret = 0.061`
+      - `mean_posture_utility_dispersion = 8.05e-05`
+    - interpretation:
+      - posture separability improved about `3.5x`, but is still far too weak
+      - the stronger control envelope pushed the policy into a more persistent defensive basin
+      - the next cut should target posture realization / optimizer feasibility before touching reward again
+  - execution-honesty pass:
+    - optimizer fallback is now turnover-aware when the solver drops to rank fallback
+    - target-posture streak / previous-target bookkeeping is internally consistent again in the trace
+    - `mean_target_posture_penalty` was removed from promoted diagnostics because it is not part of reward
+    - 2016 holdout economics were unchanged in practice:
+      - RL -> CAGR `20.80%`, Sharpe `1.112`, MaxDD `-12.23%`, turnover `18.05%`
+      - neutral -> CAGR `33.20%`, Sharpe `1.508`, MaxDD `-15.10%`, turnover `25.21%`
+    - optimizer warning pressure barely moved:
+      - prior holdout log match count `200`
+      - current holdout log match count `199`
+    - interpretation:
+      - we fixed bookkeeping honesty and made fallback outputs safer
+      - we did not materially reduce solver infeasibility yet
+      - the next execution fix should target why the optimizer is infeasible without turnover, not just how fallback behaves
+  - Stage 2E live-execution instrumentation:
+    - per-step optimizer diagnostics now include:
+      - reason code
+      - fallback mode
+      - requested cash / realized cash
+      - requested turnover cap / effective turnover budget
+    - `risk_off` solver failure now routes to a dedicated de-risk fallback instead of generic rank fallback
+    - 2016 holdout still lands at:
+      - RL -> CAGR `20.80%`, Sharpe `1.112`, MaxDD `-12.23%`, turnover `18.05%`
+      - neutral -> CAGR `33.20%`, Sharpe `1.508`, MaxDD `-15.10%`, turnover `25.21%`
+    - but the new diagnostics narrow the problem:
+      - `optimizer_reason_counts = {'optimal': 9, 'optimal_without_turnover_constraint': 3}`
+      - `optimizer_fallback_counts = {'none': 12}`
+      - `mean_requested_vs_realized_cash_gap = 7.65 pts`
+    - interpretation:
+      - the holdout execution path is not dominated by generic fallback anymore
+      - the current live bottleneck is cash attainment under `risk_off`, not fallback mode selection
+      - the next fix should target post-optimizer realization and cash attainment rather than reward or sector breadth
+
+#### Stage 3 — Add breadth control
+
+Add constrained stock-count / concentration buckets:
+
+- `wide`: `18–24` names
+- `medium`: `12–18` names
+- `focused`: `8–12` names
+
+Breadth control changes concentration while still preserving the ranker and optimizer as the base engine.
+
+#### Stage 4 — Add constrained sector inclusion last
+
+Only after RL proves it can manage risk budget, posture, and breadth:
+
+- allow:
+  - include all sectors
+  - exclude up to `1–2` weakest sectors
+  - focus on top-`k` sectors from the sector model
+- do not start with free-form sector choice
+
+### Rollback Rules
+
+Reject a candidate RL change if it:
+
+- materially lowers full-period CAGR
+- worsens MaxDD
+- loses to `neutral_full_stack` on both return and behavior
+- increases stress-window turnover without reducing realized stress losses
+- fails to improve at least `3/6` named stress windows
+- claims better reward while showing weaker cash/aggressiveness response in stress
+
+### Working Principles
+
+- add one control lever at a time
+- keep each new lever behind a config flag
+- prefer discrete buckets over wide continuous freedom at first
+- do not give RL more authority until it proves it can use the current increment responsibly
+
+---
+
 Each item is implemented one at a time, backtested, committed, and measured before moving on.
 Best known result: **run_020 — 22.19% CAGR, Sharpe 0.96, MaxDD −23.5%** (12w retrain, no triggers, dropped zero-importance binary features)
 Stable ceiling on corrected data: **~22–25% CAGR** (12w retrain config — ablation D2 showed 24.98% single-pass; run_020 is 22.19% accumulated)
@@ -353,6 +692,68 @@ Decision rule:
 ---
 
 ## Ops Notes
+- RL controller status after the latest execution pass:
+  - production track is now `tilt_only_rl`:
+    - posture fixed to `neutral`
+    - learned sector tilts remain live
+    - serving fallback uses the neutral full-stack baseline rather than the old rule path
+  - latest 2016 holdout for the production track:
+    - `tilt_only_rl`: CAGR `33.70%`, Sharpe `1.464`, MaxDD `-14.73%`, turnover `27.34%`
+    - `neutral_full_stack`: CAGR `32.55%`, Sharpe `1.433`, MaxDD `-14.67%`, turnover `29.63%`
+- Next RL hypothesis:
+  - keep the production path fixed as tilt-only RL
+  - move posture research to realized `k`-step outcome labeling for `risk_on / neutral / risk_off`
+  - do not keep tuning the current posture regret proxy in the production loop
+  - latest research-engineering update:
+    - model training is now cached per rebalance index in the posture dataset builder
+    - counterfactual replay restores scorer/ranker snapshots instead of retraining for every posture path
+    - the builder is now practical for larger sample passes, though horizon replay is still the remaining cost center
+  - latest label-quality read from the cached `H=2` sample build through `2016-12-31`:
+    - superseded by the larger `16`-sample horizon comparison below
+  - latest horizon comparison through `2016-12-31`:
+    - `H = 2` rebalances:
+      - `sample_count = 16`
+      - `best_posture_counts = {'risk_off': 15, 'neutral': 1}`
+      - `mean_utility_margin = 0.0925`
+    - `H = 3` rebalances:
+      - `sample_count = 16`
+      - `best_posture_counts = {'risk_off': 16}`
+      - `mean_utility_margin = 0.1100`
+  - current research read:
+    - longer horizon does not restore balance to the posture labels
+    - `risk_off` dominance persists and gets slightly stronger at `H = 3`
+    - this points to either:
+      - a genuinely defensive short-horizon regime in this sample window
+      - or a horizon utility that is still too drawdown / turnover heavy for posture labeling
+  - immediate research follow-up:
+    - completed utility comparison on the same realized `H = 2` sample window:
+      - artifact: `artifacts/reports/posture_dataset_utilcmp_h2_2016_s16_summary.json`
+      - `full_utility`:
+        - `risk_off = 15`
+        - `neutral = 1`
+        - `mean_utility_margin = 0.0925`
+      - `return_only`:
+        - `risk_off = 8`
+        - `neutral = 6`
+        - `risk_on = 2`
+        - `mean_utility_margin = 0.0153`
+      - `return_minus_drawdown`:
+        - `risk_off = 8`
+        - `neutral = 6`
+        - `risk_on = 2`
+        - `mean_utility_margin = 0.0172`
+      - interpretation:
+        - posture labels are not inherently all `risk_off`
+        - the strong defensive skew is created mainly by the current full utility, especially turnover-heavy scoring
+        - margins under return-only and return-minus-drawdown are much smaller, so any posture model should predict utility, not just class labels
+      - additional diagnostics:
+        - `winner_by_metric.total_return = {risk_off: 8, neutral: 6, risk_on: 2}`
+        - `winner_by_metric.max_drawdown = {neutral: 9, risk_off: 7}`
+        - `winner_by_metric.avg_turnover = {risk_off: 15, risk_on: 1}`
+        - `execution_clean_subset.sample_count = 0`
+      - next step:
+        - keep production path unchanged
+        - add a posture-utility regression baseline on top of this dataset rather than a classifier or PPO posture loop
 - Always `rm artifacts/models/rl_agent/ppo_model.zip meta.pkl experience_buffer.pkl`
   before running backtest when STATE_DIM changes
 - Always reset `_metadata.json` macro last_date when `macro_features.py` changes

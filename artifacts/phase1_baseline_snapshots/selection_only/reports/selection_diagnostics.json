@@ -1,0 +1,30 @@
+{
+  "_report_metadata": {
+    "artifact_type": "selection_diagnostics",
+    "backtest_end_date": "2026-04-17",
+    "backtest_start_date": "2013-01-01",
+    "freshness_verified_at_utc": "2026-04-21T17:05:41Z",
+    "manifest_file": "run_manifest.json",
+    "report_generated_at_utc": "2026-04-21T17:05:41Z",
+    "run_id": "selection_only_2013_01_01_2026_04_17_20260421T170541Z",
+    "run_mode": "selection_only",
+    "schema_version": 1
+  },
+  "avg_selected_count": 21.693877551020407,
+  "intra_sector_dispersion": 0.06004535128042289,
+  "periods": 147,
+  "precision_at_k": 0.5503450655624568,
+  "rank_ic": 0.016647332520635993,
+  "stability": 0.29474547978570537,
+  "top_bottom_spread": 0.007270535407390255,
+  "top_k_avg_forward_return": 0.01327197515267925,
+  "top_k_minus_sector_median": 0.0022722552054642887,
+  "top_k_minus_universe": -0.0017466940248109593,
+  "universe_avg_forward_return": 0.015018669177490207,
+  "within_sector_ic": 0.011541739026188394,
+  "within_sector_ic_weighted": 0.013281519604051708,
+  "within_sector_top_bottom_spread": 0.004579956745742678,
+  "within_sector_top_bottom_spread_weighted": 0.0037611886989219207,
+  "within_sector_top_k_minus_sector_median": 0.004505799239707818,
+  "within_sector_top_k_minus_sector_median_weighted": 0.004267237587016026
+}

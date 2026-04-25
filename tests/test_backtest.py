@@ -156,6 +156,7 @@ class TestWalkForwardIntegration:
         cfg["rl"]["use_rl"] = False
         cfg["sector_model"]["n_estimators"] = 5
         cfg["stock_model"]["n_estimators"] = 5
+        cfg["sector_model"]["fwd_window_days"] = 28
         cfg["stock_model"]["fwd_window_days"] = 56
 
         price_matrix, volume_matrix, macro_df = synthetic_data
@@ -168,4 +169,36 @@ class TestWalkForwardIntegration:
             cfg=cfg,
             use_rl=False,
         )
+        assert engine.sector_fwd_window_days == 28
         assert engine.stock_fwd_window_days == 56
+
+    def test_retrain_frequency_weeks_are_converted_to_rebalances(self, synthetic_data):
+        cfg = load_config()
+        cfg["backtest"]["start_date"] = "2013-01-01"
+        cfg["backtest"]["end_date"] = "2014-06-30"
+        cfg["backtest"]["min_train_years"] = 1
+        cfg["backtest"]["rebalance_freq_weeks"] = 4
+        cfg["rl"]["use_rl"] = False
+        cfg["sector_model"]["n_estimators"] = 5
+        cfg["stock_model"]["n_estimators"] = 5
+        cfg["sector_model"].pop("retrain_every_rebalances", None)
+        cfg["stock_model"].pop("retrain_every_rebalances", None)
+        cfg["rl"].pop("retrain_every_rebalances", None)
+        cfg["sector_model"]["retrain_freq_weeks"] = 12
+        cfg["stock_model"]["retrain_freq_weeks"] = 12
+        cfg["rl"]["retrain_freq_weeks"] = 12
+
+        price_matrix, volume_matrix, macro_df = synthetic_data
+
+        from src.backtest.walk_forward import WalkForwardEngine
+        engine = WalkForwardEngine(
+            price_matrix=price_matrix,
+            volume_matrix=volume_matrix,
+            macro_df=macro_df,
+            cfg=cfg,
+            use_rl=False,
+        )
+
+        assert engine._retrain_every_rebalances("sector_model", fallback_weeks=4) == 3
+        assert engine._retrain_every_rebalances("stock_model", fallback_weeks=12) == 3
+        assert engine._retrain_every_rebalances("rl", fallback_weeks=12) == 3

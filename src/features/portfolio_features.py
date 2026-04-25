@@ -13,6 +13,7 @@ def compute_portfolio_features(
     state: PortfolioState,
     recent_returns: pd.Series,           # recent portfolio daily returns
     benchmark_returns: pd.Series | None = None,
+    control_context: dict[str, float] | None = None,
 ) -> dict[str, float]:
     """
     Compute a fixed-length portfolio state feature vector.
@@ -100,5 +101,56 @@ def compute_portfolio_features(
     else:
         feats["active_ret_1m"] = 0.0
         feats["tracking_error_1m"] = 0.0
+
+    # ── Control-state features ───────────────────────────────────────────────
+    ctx = control_context or {}
+    if len(recent_returns) >= 21:
+        recent_window = recent_returns.iloc[-21:]
+        cumulative = (1 + recent_window).cumprod()
+        rolling_max = cumulative.cummax()
+        drawdown = (cumulative - rolling_max) / rolling_max.replace(0, np.nan)
+        if len(drawdown) >= 6:
+            feats["drawdown_slope_1m"] = float(drawdown.iloc[-1] - drawdown.iloc[-6])
+        else:
+            feats["drawdown_slope_1m"] = float(drawdown.iloc[-1])
+    else:
+        feats["drawdown_slope_1m"] = 0.0
+
+    vol_3m = feats.get("vol_3m", 0.0)
+    vol_1m = feats.get("vol_1m", 0.0)
+    feats["vol_shock_1m_3m"] = (
+        float(vol_1m / vol_3m - 1.0)
+        if vol_3m and np.isfinite(vol_3m) and abs(vol_3m) > 1e-9
+        else 0.0
+    )
+
+    breadth_level = float(ctx.get("market_breadth_3m", 1.0) or 0.0)
+    breadth_level = float(np.clip(breadth_level, 0.0, 1.0))
+    feats["breadth_deterioration"] = float(1.0 - breadth_level)
+    feats["recent_turnover_3p"] = float(max(0.0, ctx.get("recent_turnover_3p", 0.0) or 0.0))
+    feats["recent_cost_ratio_3p"] = float(max(0.0, ctx.get("recent_cost_ratio_3p", 0.0) or 0.0))
+    feats["risk_cash_floor"] = float(max(0.0, ctx.get("risk_cash_floor", 0.0) or 0.0))
+    feats["emergency_flag"] = float(1.0 if ctx.get("emergency_rebalance", 0.0) else 0.0)
+    feats["current_stress_signal"] = float(
+        np.clip(ctx.get("current_stress_signal", 0.0) or 0.0, 0.0, 1.0)
+    )
+    feats["previous_stress_signal"] = float(
+        np.clip(ctx.get("previous_stress_signal", 0.0) or 0.0, 0.0, 1.0)
+    )
+    feats["target_posture_score"] = float(
+        np.clip(ctx.get("target_posture_score", 0.0) or 0.0, -1.0, 1.0)
+    )
+    feats["previous_posture_score"] = float(
+        np.clip(ctx.get("previous_posture_score", 0.0) or 0.0, -1.0, 1.0)
+    )
+    feats["previous_target_posture_score"] = float(
+        np.clip(ctx.get("previous_target_posture_score", 0.0) or 0.0, -1.0, 1.0)
+    )
+    feats["target_posture_streak"] = float(
+        np.clip(ctx.get("target_posture_streak", 0.0) or 0.0, 0.0, 6.0)
+    )
+    feats["previous_posture_mismatch"] = float(
+        np.clip(ctx.get("previous_posture_mismatch", 0.0) or 0.0, 0.0, 1.0)
+    )
 
     return feats

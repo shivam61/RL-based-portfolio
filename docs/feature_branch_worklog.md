@@ -8,6 +8,445 @@ Each task should record:
 - outcome
 - learning
 
+## 2026-04-22
+
+### Task: RL control baseline freeze and evaluation-plan lock
+- Scope:
+  - promote the new causal RL stack into a permanent control-evaluation workflow
+  - freeze three reference modes for future RL work:
+    - `neutral_full_stack`
+    - `current_rl`
+    - `optimizer_only`
+  - add the staged RL-control roadmap to `NEXT_STEPS.md`
+  - add a dedicated iteration log for future RL redesigns in `docs/rl_control_iteration_log.md`
+- Validation:
+  - current full-window references:
+    - `current_rl` -> `18.27% CAGR`, `0.750 Sharpe`, `-32.62% MaxDD`, `28.03% avg turnover`
+    - `neutral_full_stack` -> `17.85% CAGR`, `0.720 Sharpe`, `-32.80% MaxDD`, `27.43% avg turnover`
+    - `optimizer_only` -> `9.48% CAGR`, `0.234 Sharpe`, `-34.27% MaxDD`, `48.65% avg turnover`
+  - current holdout reference:
+    - `current_rl` vs neutral -> `+0.29% CAGR`, `+0.044 Sharpe`
+  - stress-window control review from `rebalance_log.csv`:
+    - trained RL average stress cash since 2017 -> `5.96%`
+    - neutral average stress cash -> `9.52%`
+    - trained RL average stress aggressiveness -> `1.037`
+    - neutral average stress aggressiveness -> `1.000`
+    - trained RL average stress turnover -> `30.52%`
+    - neutral average stress turnover -> `29.32%`
+- Decision:
+  - keep the current RL stack as the incumbent policy
+  - do not widen RL authority yet
+  - Stage 1 should focus only on risk-budget control:
+    - better control-state features
+    - explicit cash control
+    - stronger aggressiveness effect
+    - optional turnover cap / budget
+- Learning:
+  - the causal RL path is now real enough to measure, but still too weak as a controller
+  - the main gating problem is behavior in drawdowns, not headline CAGR
+  - future RL iterations need a permanent audit trail or they will drift back into reward-first evaluation
+
+### Task: Stage 0 control-evaluation harness
+- Scope:
+  - add a canonical RL control-evaluation artifact and CLI
+  - unify:
+    - full-window RL vs neutral
+    - full-window RL vs optimizer-only baseline
+    - holdout RL vs neutral
+    - named stress-window behavior
+  - extend future rebalance logs with selected sector / stock counts for control analysis
+- Validation:
+  - `./.venv/bin/python -m py_compile src/rl/control_evaluation.py scripts/evaluate_rl_control.py src/reporting/report.py src/backtest/walk_forward.py src/data/contracts.py`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_control_evaluation.py tests/test_reporting_artifacts.py -q` -> `3 passed`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q` -> `113 passed, 1 skipped`
+  - `./.venv/bin/python scripts/evaluate_rl_control.py` generated `artifacts/reports/rl_control_evaluation.json`
+  - current canonical full-window control result:
+    - `current_rl` vs `neutral_full_stack` -> `+0.42 pts` CAGR, `+0.029` Sharpe, turnover worse by `+0.60 pts`
+  - current canonical drawdown-behavior summary at `drawdown <= -8%`:
+    - RL average cash `5.30%`
+    - neutral average cash `9.70%`
+    - RL average aggressiveness `1.024`
+    - neutral average aggressiveness `1.000`
+    - RL average turnover `30.34%`
+    - neutral average turnover `28.96%`
+- Decision:
+  - keep
+  - Stage 0 complete
+  - move to Stage 1:
+    - control-state features
+    - explicit cash control
+    - stronger aggressiveness effect
+    - optional turnover cap / budget
+- Learning:
+  - the new artifact makes the control problem measurable in one place
+  - the current policy still fails the economic smell test in stress even though it is causally valid and slightly additive on returns
+  - future stages can now be rejected quickly when behavior gets worse even if reward improves
+
+### Task: Stage 1 risk-budget controls and validation hardening
+- Scope:
+  - add bounded RL control levers for:
+    - cash buckets
+    - turnover caps
+    - stronger aggressiveness scaling
+  - enrich the RL portfolio-state surface with control-specific features:
+    - drawdown slope
+    - volatility shock
+    - breadth deterioration
+    - recent turnover pressure
+    - recent cost pressure
+    - risk cash floor
+    - emergency flag
+  - harden validation so the new control inputs cannot introduce silent data issues
+- Validation:
+  - `./.venv/bin/python -m py_compile src/rl/environment.py src/rl/agent.py src/rl/historical_executor.py src/backtest/walk_forward.py src/features/portfolio_features.py src/optimizer/portfolio_optimizer.py src/rl/policy_utils.py tests/test_portfolio_features.py`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_portfolio_features.py tests/test_rl_environment_contract.py tests/test_data.py::TestOptimizer tests/test_reporting_artifacts.py -q` -> `19 passed`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q` -> `118 passed, 1 skipped`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 64`
+    - candidate RL -> `28.01% CAGR`, `1.236 Sharpe`, `-15.15% MaxDD`, `26.18% avg turnover`
+    - neutral full-stack -> `32.39% CAGR`, `1.465 Sharpe`, `-15.00% MaxDD`, `25.54% avg turnover`
+- Decision:
+  - keep the implementation and validation additions
+  - do not promote the resulting policy as the new RL incumbent
+  - continue Stage 1 until the candidate improves control behavior without losing to neutral
+- Learning:
+  - the new control levers are functioning and bounded, but the first candidate policy is still economically weaker than neutral
+  - the added tests materially reduce data-risk on this surface:
+    - control features are clipped/defaulted safely
+    - RL observations remain finite at the expanded state dimension
+    - rebalance reports now preserve turnover-cap metadata for audit
+  - the next Stage 1 work should focus on the economics of how the policy uses these levers, not on widening authority further
+
+### Task: Stage 1 action activation and stress-aware control diagnostics
+- Scope:
+  - make cash / turnover bucket actions easier to activate from PPO outputs
+  - add direct control-usage diagnostics to holdout and neutral comparison traces
+  - add stress-aware reward alignment so constant defensive posture is penalized relative to state stress
+- Validation:
+  - `./.venv/bin/python -m py_compile src/rl/environment.py src/rl/holdout.py src/rl/full_comparison.py src/rl/control_evaluation.py src/rl/historical_executor.py`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `14 passed`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q` -> `121 passed, 1 skipped`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 64`
+    - candidate RL -> `24.07% CAGR`, `1.094 Sharpe`, `-14.58% MaxDD`, `23.25% avg turnover`
+    - neutral full-stack -> `32.39% CAGR`, `1.465 Sharpe`, `-15.00% MaxDD`, `25.54% avg turnover`
+    - control diagnostics:
+      - cash usage rate `1.0`
+      - turnover-cap usage rate `1.0`
+      - executed cash fixed at `15%`
+      - executed turnover cap fixed at `30%`
+- Decision:
+  - keep the action-activation and diagnostics work
+  - do not promote the resulting policy as the new RL incumbent
+- Learning:
+  - the control-lever activation problem is fixed
+  - the next problem is now explicit:
+    - policy uses the controls
+    - but uses them statically rather than conditionally
+  - that is a better failure mode to debug than silent neutral collapse, but it is still below the economic gate
+
+### Task: Stage 1 regime-conditioned control guidance
+- Scope:
+  - add stress-conditioned target controls for:
+    - cash
+    - aggressiveness
+    - turnover cap
+  - blend executed RL controls toward those targets at runtime
+  - add alignment diagnostics between stress and realized posture
+- Validation:
+  - `./.venv/bin/python -m py_compile src/rl/historical_executor.py src/rl/holdout.py src/rl/full_comparison.py src/rl/control_evaluation.py`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `16 passed`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q` -> `123 passed, 1 skipped`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 64`
+    - candidate RL -> `21.00% CAGR`, `0.916 Sharpe`, `-14.89% MaxDD`, `24.66% avg turnover`
+    - neutral full-stack -> `32.39% CAGR`, `1.465 Sharpe`, `-15.00% MaxDD`, `25.74% avg turnover`
+    - behavior:
+      - mean cash target `13.36%`
+      - unique cash targets from `5%` to `21.3%`
+      - `stress_posture_correlation = 0.642`
+- Decision:
+  - keep the regime-conditioned guidance implementation
+  - do not promote the resulting policy as the RL incumbent
+- Learning:
+  - the controller is now meaningfully state-conditional on cash
+  - this is the first iteration where posture varies with stress instead of staying flat
+  - but returns degraded further, so the remaining problem is economic quality of control decisions, not missing control movement
+
+### Task: Stage 2 discrete posture controller
+- Scope:
+  - replace continuous risk-budget control with a posture controller:
+    - `risk_on`
+    - `neutral`
+    - `risk_off`
+  - map posture to bounded cash / aggressiveness / turnover settings
+  - persist posture in:
+    - rebalance logs
+    - holdout traces
+    - full neutral comparison diagnostics
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py tests/test_reporting_artifacts.py -q` -> `18 passed`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q` -> `123 passed, 1 skipped`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `38.08% CAGR`, `1.745 Sharpe`, `-14.70% MaxDD`, `24.62% avg turnover`
+    - neutral full-stack -> `32.39% CAGR`, `1.465 Sharpe`, `-15.00% MaxDD`, `25.54% avg turnover`
+    - posture diagnostics:
+      - `unique_postures = ['neutral']`
+      - `posture_usage_rate = 0.0`
+      - `posture_change_rate = 0.0`
+- Decision:
+  - keep the implementation
+  - do not promote the resulting policy as a working posture controller
+- Learning:
+  - the discrete posture execution path is now correct and observable
+  - better holdout economics alone are not enough here, because the policy never left neutral posture
+
+### Task: Stage 2 posture activation tightening
+- Scope:
+  - reduce neutral-band stickiness for posture decoding
+  - increase reward pressure on target-posture mismatch
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py -q` -> `15 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `36.77% CAGR`, `1.675 Sharpe`, `-15.03% MaxDD`, `24.83% avg turnover`
+    - neutral full-stack -> `32.39% CAGR`, `1.465 Sharpe`, `-15.00% MaxDD`, `25.54% avg turnover`
+    - posture diagnostics:
+      - `unique_postures = ['risk_on']`
+      - `posture_usage_rate = 1.0`
+      - `posture_change_rate = 0.0`
+      - target posture still varied across `risk_on / neutral / risk_off`
+- Decision:
+  - keep the activation adjustments
+  - keep Stage 2 open
+- Learning:
+  - posture now activates, but still does not switch conditionally
+  - the immediate next problem is regime discrimination / posture switching quality, not missing action activation
+
+## 2026-04-23
+
+### Task: Stage 2 cash-target realization tightening
+- Scope:
+  - tighten optimizer handling of explicit RL cash targets
+  - preserve solver cash through no-trade-band cleanup instead of renormalizing it downward
+  - keep reward/regret unchanged so the measured effect stays execution-only
+- Validation:
+  - `./.venv/bin/python -m py_compile src/optimizer/portfolio_optimizer.py tests/test_data.py`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_data.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `33 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `17.97% CAGR`, `0.961 Sharpe`, `-11.18% MaxDD`, `17.21% avg turnover`
+    - neutral full-stack -> `31.41% CAGR`, `1.460 Sharpe`, `-14.42% MaxDD`, `24.73% avg turnover`
+    - execution diagnostics:
+      - mean requested-vs-realized cash gap improved from `7.65 pts` to `5.56 pts`
+      - optimizer fallback count in the live holdout path remained `0`
+      - realized `risk_off` cash now sits close to `35%` after the early turnover-limited windows
+- Decision:
+  - keep the execution tightening
+  - do not promote the resulting policy as the new RL incumbent
+- Learning:
+  - the optimizer was indeed too soft about explicit cash targets
+  - tightening that path made posture execution more faithful, but did not improve economics because the controller is still choosing `risk_off` too often
+  - this narrows the next hypothesis: the remaining issue is decision quality, not cash-target realization drift
+
+### Task: Stage 2 sector-preserved stock breadth gate
+- Scope:
+  - add posture-specific stock breadth gates before optimization
+  - keep reward/regret unchanged
+  - keep a light sector-presence guard so all sectors remain represented
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_data.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `35 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `12.96% CAGR`, `0.575 Sharpe`, `-10.76% MaxDD`, `10.92% avg turnover`
+    - neutral full-stack -> `28.96% CAGR`, `1.228 Sharpe`, `-14.89% MaxDD`, `29.32% avg turnover`
+    - diagnostics:
+      - `unique_postures = ['risk_off']`
+      - `mean_posture_utility_dispersion = 8.42e-05`
+      - `optimizer_fallback_counts = {'risk_off_de_risk': 7, 'none': 5}`
+      - `mean_selected_stock_count = 42.0`
+      - `mean_selected_sector_count = 15.0`
+- Decision:
+  - reject
+- Learning:
+  - stock-breadth masking alone was too diluted because all sectors stayed present
+  - the active stock count changed, but the active sector count did not
+  - that created a thinner `risk_off` book, not a meaningfully different posture
+  - the next structural experiment should change sector breadth by posture before changing stock breadth again
+
+### Task: Stage 2 sector-first breadth gate
+- Scope:
+  - replace rejected global stock-breadth masking with posture-specific sector breadth
+  - apply posture-specific stock `top_k` inside the selected sectors
+  - keep reward/regret unchanged
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_data.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py tests/test_rl_environment_contract.py -q` -> `53 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `34.79% CAGR`, `1.583 Sharpe`, `-12.86% MaxDD`, `27.90% avg turnover`
+    - neutral full-stack -> `32.55% CAGR`, `1.433 Sharpe`, `-14.67% MaxDD`, `29.63% avg turnover`
+    - diagnostics:
+      - `unique_postures = ['neutral']`
+      - `mean_posture_utility_dispersion = 5.33e-05`
+      - `optimizer_fallback_counts = {'none': 12}`
+      - `mean_selected_stock_count = 51.75`
+      - `mean_selected_sector_count = 11.0`
+- Decision:
+  - reject as a solved RL-controller iteration
+- Learning:
+  - sector-first breadth is much healthier structurally than the prior stock-breadth-only pass
+  - it improved economics and restored clean execution
+  - but the policy used only `neutral`, so it did not actually demonstrate posture separability or multi-posture control
+
+### Task: Stage 2 target-aware switching state and reward
+- Scope:
+  - expose control-target features directly in RL state:
+    - current target posture
+    - previous posture
+    - previous target posture
+    - stress persistence
+    - mismatch memory
+  - add switching-quality reward terms:
+    - bonus for moving closer to target posture
+    - penalty for staying in a mismatched posture while the target persists
+    - penalty for posture flips that do not improve alignment
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_portfolio_features.py tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `18 passed`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q` -> `123 passed, 1 skipped`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `27.04% CAGR`, `1.299 Sharpe`, `-14.08% MaxDD`, `19.64% avg turnover`
+    - neutral full-stack -> `32.39% CAGR`, `1.465 Sharpe`, `-15.00% MaxDD`, `25.54% avg turnover`
+    - posture diagnostics:
+      - `unique_postures = ['risk_off']`
+      - `posture_usage_rate = 1.0`
+      - `posture_change_rate = 0.0`
+      - `mean_posture_progress_bonus = -0.0025`
+      - `mean_posture_stale_penalty = 0.0213`
+- Decision:
+  - keep the state / reward instrumentation
+  - do not promote the resulting policy as the new RL incumbent
+- Learning:
+  - the state now carries enough explicit posture-target information to diagnose switching quality directly
+  - the remaining failure is not hidden anymore: policy still collapses to one posture, now `risk_off`
+  - the next Stage 2 build should introduce explicit posture-usage gates or constrained supervision rather than only more reward shaping
+
+### Task: Stage 2 decision-quality instrumentation and advisory-only posture diagnostics
+- Scope:
+  - add explicit holdout diagnostics for:
+    - posture counts
+    - posture by stress bucket
+    - proxy decision quality
+    - realized control settings by posture and by stress bucket
+  - remove hard posture-switch thresholds from config and evaluation
+  - keep posture stagnation as an advisory diagnostic only
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_holdout.py tests/test_rl_control_evaluation.py tests/test_rl_environment_contract.py -q` -> `17 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `29.96% CAGR`, `1.464 Sharpe`, `-13.58% MaxDD`, `20.77% avg turnover`
+    - neutral full-stack -> `32.99% CAGR`, `1.496 Sharpe`, `-14.99% MaxDD`, `25.53% avg turnover`
+    - posture behavior:
+      - `posture_counts = {'risk_off': 12}`
+      - `target_posture_counts = {'neutral': 5, 'risk_on': 5, 'risk_off': 2}`
+    - decision quality, current proxy:
+      - `decision_quality_basis = target_posture_proxy`
+      - `posture_optimality_rate = 16.7%`
+      - `mean_regret = 0.583`
+- Decision:
+  - keep
+  - do not use posture switching as a promotion gate
+  - use these diagnostics as the baseline for the next reward redesign
+- Learning:
+  - the current candidate is still statically defensive, but now that failure is measurable in economic terms
+  - the next reward change should target posture correctness directly, not enforce switching frequency
+
+### Task: Stage 2 bounded utility and soft-regret reward prototype
+- Scope:
+  - replace the Stage 2 reward backbone with bounded regime-weighted utility
+  - add soft regret over posture counterfactuals using:
+    - static postures
+    - one-switch posture baselines
+  - switch holdout diagnostics from target-proxy decision quality to reward-native decision quality
+- Validation:
+  - `./.venv/bin/python -m py_compile src/rl/historical_executor.py src/rl/holdout.py src/rl/control_evaluation.py tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py`
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `19 passed`
+  - real holdout runs with the new reward did not complete on a practical research timescale:
+    - `scripts/evaluate_rl_holdout.py --timesteps 128`
+    - `scripts/evaluate_rl_holdout.py --timesteps 8`
+    both remained materially slower than the prior objective because every reward step now launches multiple counterfactual rollouts
+- Decision:
+  - keep the implementation as a prototype, not as the new default research loop
+  - do not promote the reward yet
+  - next step is to reduce counterfactual cost before trusting economics from this objective
+- Learning:
+  - the reward shape is now closer to the intended control problem:
+    - bounded regime weights
+    - no forced posture-switch gate
+    - soft regret instead of hard max
+  - the first operational bottleneck is compute, not correctness
+  - the counterfactual term needs approximation, caching, or a smaller candidate set before full holdout evaluation is practical
+
+### Task: Stage 2 cached one-step soft-regret optimization
+- Scope:
+  - replace full rollout regret with cached one-step approximate regret from:
+    - current weights
+    - feasible target weights
+    - realized next-step asset returns
+    - observed turnover/cost
+  - keep the new diagnostics and reward structure intact
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `19 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `30.74% CAGR`, `1.577 Sharpe`, `-13.33% MaxDD`, `19.83% avg turnover`
+    - neutral full-stack -> `32.99% CAGR`, `1.496 Sharpe`, `-14.99% MaxDD`, `25.53% avg turnover`
+    - decision-quality diagnostics:
+      - `decision_quality_basis = cached_one_step_soft_regret_v1`
+      - `posture_optimality_rate = 41.7%`
+      - `mean_regret = 0.057`
+      - `mean_posture_utility_dispersion = 2.32e-05`
+- Decision:
+  - keep
+  - use this as the active Stage 2 reward baseline, not the slower rollout version
+- Learning:
+  - the research loop is usable again
+  - the dominant remaining problem is not compute; it is weak posture separability
+  - posture utility dispersion is extremely small, which explains why the policy still collapses to static `risk_off`
+
+### Task: Stage 2 stronger posture authority and cash-first realization
+- Scope:
+  - widen posture envelopes materially without changing the reward surface
+  - make the posture transform spend turnover on cash movement first, then on equity-mix rotation
+  - keep cached one-step soft regret as the active objective
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q` -> `20 passed`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+    - candidate RL -> `20.80% CAGR`, `1.112 Sharpe`, `-12.23% MaxDD`, `18.05% avg turnover`
+    - neutral full-stack -> `33.20% CAGR`, `1.508 Sharpe`, `-15.10% MaxDD`, `25.21% avg turnover`
+    - decision-quality diagnostics:
+      - `unique_postures = ['neutral', 'risk_off']`
+      - `posture_change_rate = 9.1%`
+      - `posture_optimality_rate = 8.3%`
+      - `mean_regret = 0.061`
+      - `mean_posture_utility_dispersion = 8.05e-05`
+- Decision:
+  - keep as a measured regression
+  - do not promote
+- Learning:
+  - posture separability improved about `3.5x`, but remained far too weak
+  - the wider control envelope mostly increased defensive persistence rather than useful regime switching
+  - the next Stage 2 step should attack posture realization quality and optimizer feasibility, not add more reward complexity yet
+
+### Task: Stage 2 execution honesty and target-context cleanup
+- Scope:
+  - make fallback outputs safer when the optimizer drops to rank mode
+  - fix target-streak / previous-target consistency in posture context
+  - stop promoting target-posture penalty as a top-line diagnostic since it is not part of reward
+- Validation:
+  - `MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/test_data.py tests/test_rl_environment_contract.py tests/test_rl_holdout.py tests/test_rl_control_evaluation.py -q`
+  - `MPLCONFIGDIR=/tmp/mpl PYTHONPATH=. ./.venv/bin/python scripts/evaluate_rl_holdout.py --holdout-start 2016-01-01 --holdout-end 2016-12-31 --timesteps 128`
+- Result:
+  - holdout economics were effectively unchanged
+  - target-streak trace is now internally consistent on repeated regimes
+  - fallback warning pressure barely changed
+- Decision:
+  - keep as a correctness / honesty improvement
+  - do not count it as a solved execution issue
+- Learning:
+  - the real problem is still solver infeasibility upstream of fallback
+  - the next optimizer pass should target infeasibility directly, not fallback cosmetics
+
 ## 2026-04-21
 
 ### Task: sector_relative_strength block
@@ -361,3 +800,129 @@ Each task should record:
   - expose the horizon as `stock_model.fwd_window_days` plus a `run_backtest.py` CLI override
 - Rationale:
   - the ranker has little to no 4W signal; the next hypothesis is that the signal is slower-moving momentum rather than a broken model wiring path
+
+### Task: production split to tilt-only RL
+- Scope:
+  - froze the production RL path to neutral posture while preserving learned sector tilts
+  - aligned serving fallback to the neutral full-stack baseline instead of the old rule path
+  - retained fixed posture holdout baselines for posture research
+- Validation:
+  - focused suites passed:
+    - `tests/test_api_recommender.py`
+    - `tests/test_rl_environment_contract.py`
+    - `tests/test_rl_holdout.py`
+    - `tests/test_rl_control_evaluation.py`
+    - `tests/test_data.py`
+  - 2016 holdout:
+    - `tilt_only_rl`: `33.70% CAGR`, `1.464 Sharpe`, `-14.73% MaxDD`, `27.34% turnover`
+    - `neutral_full_stack`: `32.55% CAGR`, `1.433 Sharpe`, `-14.67% MaxDD`, `29.63% turnover`
+- Learning:
+  - the production edge survives with posture frozen, so the live RL value is still in sector tilts
+  - posture should move to a separate realized-outcome research track instead of staying inside the current PPO reward loop
+
+### Task: posture research dataset builder
+- Scope:
+  - added a realized forward-outcome builder for `risk_on / neutral / risk_off`
+  - uses the neutral full-stack path as the reference state stream
+  - saves both a parquet row dataset and a JSON summary
+- Validation:
+  - focused tests passed:
+    - `tests/test_posture_dataset.py`
+    - `tests/test_rl_holdout.py`
+    - `tests/test_api_recommender.py`
+  - sample run:
+    - `scripts/build_posture_dataset.py --end-date 2016-12-31 --horizon-rebalances 2 --max-samples 4`
+    - summary:
+      - `sample_count = 4`
+      - `best_posture_counts = {'risk_off': 4}`
+      - `mean_utility_margin = 0.0751`
+- Learning:
+  - the research dataset path is now real and labelable from realized outcomes instead of proxy regret
+  - the first implementation is compute-heavy because it retrains models redundantly across counterfactual paths
+  - the next engineering improvement should be rebalance-date model caching before scaling the dataset
+
+### Task: posture dataset model-state caching
+- Scope:
+  - added an incremental model-state timeline in `src/rl/posture_dataset.py`
+  - caches trained scorer/ranker snapshots by rebalance index on a separate helper engine
+  - restores cached model state into counterfactual executors so posture horizon replay runs with `allow_model_retraining=False`
+- Validation:
+  - focused suites passed:
+    - `tests/test_posture_dataset.py`
+    - `tests/test_rl_holdout.py`
+    - `tests/test_api_recommender.py`
+  - cache snapshot round-trip is now covered in `tests/test_posture_dataset.py`
+  - larger sample run:
+    - `scripts/build_posture_dataset.py --end-date 2016-12-31 --horizon-rebalances 2 --max-samples 8`
+- Learning:
+  - duplicate model retraining across posture paths is removed
+  - larger sample builds are now feasible enough to inspect label balance before any posture model training
+  - first larger sample still shows heavy `risk_off` dominance:
+    - `best_posture_counts = {'risk_off': 7, 'neutral': 1}`
+    - `mean_utility_margin = 0.0817`
+  - next question is no longer builder correctness; it is label economics:
+    - whether `risk_off` is genuinely best over short horizons
+    - or whether the current horizon utility overweights drawdown / turnover relative to return
+
+### Task: posture horizon comparison
+- Scope:
+  - added artifact prefix support to `scripts/build_posture_dataset.py`
+  - ran side-by-side posture dataset builds for:
+    - `H = 2` rebalances
+    - `H = 3` rebalances
+  - both through `2016-12-31` with `max_samples = 16`
+- Artifacts:
+  - `artifacts/reports/posture_dataset_h2_2016_s16_summary.json`
+  - `artifacts/reports/posture_dataset_h3_2016_s16_summary.json`
+- Result:
+  - `H = 2`:
+    - `best_posture_counts = {'risk_off': 15, 'neutral': 1}`
+    - `mean_utility_margin = 0.0925`
+  - `H = 3`:
+    - `best_posture_counts = {'risk_off': 16}`
+    - `mean_utility_margin = 0.1100`
+- Learning:
+  - extending the realized label horizon did not reduce defensive bias
+  - `risk_off` dominance persisted and strengthened slightly at `H = 3`
+  - the next posture-research question is not “longer horizon or shorter horizon”
+  - it is “what utility definition should define the label?”
+  - next experiment should compare label balance under:
+    - return-only
+    - return minus drawdown
+    - current full utility
+
+### Task: posture label utility comparison + repo bootstrap docs
+- Scope:
+  - extend the posture dataset builder so the same realized replay emits:
+    - `return_only`
+    - `return_minus_drawdown`
+    - `full_utility`
+  - add near-tie, winner-by-metric, and label-stability diagnostics
+  - document the current production/research split and new-machine bootstrap path
+- Validation:
+  - `pytest tests/test_posture_dataset.py -q` -> `4 passed`
+  - build:
+    - `scripts/build_posture_dataset.py --end-date 2016-12-31 --horizon-rebalances 2 --max-samples 16 --utility-mode full_utility --prefix posture_dataset_utilcmp_h2_2016_s16`
+- Result:
+  - `full_utility` winners:
+    - `risk_off = 15`
+    - `neutral = 1`
+  - `return_only` winners:
+    - `risk_off = 8`
+    - `neutral = 6`
+    - `risk_on = 2`
+  - `return_minus_drawdown` winners:
+    - `risk_off = 8`
+    - `neutral = 6`
+    - `risk_on = 2`
+  - margins:
+    - `full_utility = 0.0925`
+    - `return_only = 0.0153`
+    - `return_minus_drawdown = 0.0172`
+  - execution-clean subset:
+    - `0` samples
+- Learning:
+  - short-horizon posture labels are not intrinsically all `risk_off`
+  - the heavy defensive skew comes mostly from the current full utility
+  - balanced utilities have much smaller margins, so the next posture model should regress posture utility rather than classify posture labels
+  - reproducibility needed explicit documentation because raw data, processed matrices, feature-store snapshots, and reports are intentionally not committed

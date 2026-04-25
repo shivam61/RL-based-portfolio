@@ -79,8 +79,9 @@ sector_model:
   subsample: 0.8
   colsample_bytree: 0.8
   min_child_samples: 20
-  retrain_freq_weeks: 12        # Ablation 2 optimal: 12w beats 4/6/8/26w on clean data
+  retrain_every_rebalances: 3   # 3 x 4-week rebalances = 12 calendar weeks
   target: "fwd_4w_return_rank"  # cross-sectional rank of 4-week forward return
+  fwd_window_days: 28           # sector scorer horizon (~4 trading weeks)
 
 # ── Stock ranking model ───────────────────────────────────────────────────────
 stock_model:
@@ -93,7 +94,7 @@ stock_model:
   subsample: 0.8
   colsample_bytree: 0.8
   min_child_samples: 30
-  retrain_freq_weeks: 12        # Ablation 2 optimal: 12w beats 4/6/8/26w on clean data
+  retrain_every_rebalances: 3   # 3 x 4-week rebalances = 12 calendar weeks
   top_k_per_sector: 5           # stocks selected per sector
   fwd_window_days: 56           # truth baseline label horizon for stock ranking (~8 weeks)
 
@@ -101,12 +102,15 @@ stock_model:
 optimizer:
   objective: "mean_variance"
   risk_aversion: 2.0
+  aggressiveness_effect_scale: 2.25
   max_stock_weight: 0.08
   max_sector_weight: 0.35
   min_stock_weight: 0.005
-  max_cash: 0.30
+  max_cash: 0.40
   min_cash: 0.0
-  max_turnover_per_rebalance: 0.40
+  cash_target_tolerance: 0.01
+  cash_target_penalty: 0.75
+  max_turnover_per_rebalance: 0.45
   no_trade_band: 0.005          # ignore weight changes below this
   solver: "CLARABEL"
 
@@ -123,7 +127,41 @@ risk:
 # ── RL agent ─────────────────────────────────────────────────────────────────
 rl:
   algorithm: "PPO"
+  training_backend: "causal_historical_env_v1"   # causal_historical_env_v1 is the supported backend; serving falls back to neutral full-stack when no trained RL artifact is available
   total_timesteps: 20000         # 20k confirmed optimal (50k = 23.37% vs 20k = 23.57%)
+  enable_control_state_features: true
+  enable_posture_control: true
+  force_neutral_posture: true     # production track: keep posture fixed to neutral while continuing to learn sector tilts
+  posture_neutral_band: 0.10
+  posture_profiles:
+    risk_on:
+      cash_target: 0.02
+      aggressiveness: 1.30
+      turnover_cap: 0.45
+      max_stock_weight: 0.11
+      sector_top_n: 13
+      stock_top_k_per_sector: 6
+    neutral:
+      cash_target: 0.05
+      aggressiveness: 1.00
+      turnover_cap: 0.35
+      max_stock_weight: 0.08
+      sector_top_n: 11
+      stock_top_k_per_sector: 5
+    risk_off:
+      cash_target: 0.35
+      aggressiveness: 0.75
+      turnover_cap: 0.15
+      max_stock_weight: 0.05
+      sector_top_n: 8
+      stock_top_k_per_sector: 5
+  enable_cash_control: true
+  cash_buckets: [0.00, 0.05, 0.15, 0.30]
+  enable_turnover_control: true
+  turnover_buckets: [0.20, 0.30, 0.40]
+  bucket_activation_threshold: 0.10
+  aggressiveness_min: 0.60
+  aggressiveness_max: 1.40
   learning_rate: 3.0e-4
   n_steps: 36                   # match minimum buffer size (36 periods before first retrain)
   batch_size: 16
@@ -132,11 +170,52 @@ rl:
   gae_lambda: 0.95
   clip_range: 0.2
   ent_coef: 0.01
-  reward_lambda_dd: 2.0         # drawdown penalty weight
+  reward_lambda_dd: 0.25        # drawdown penalty weight; calibrated so active return is not swamped
   reward_lambda_to: 0.5         # turnover penalty weight
   reward_lambda_conc: 0.3       # concentration penalty
   reward_lambda_liq: 0.2        # liquidity penalty
-  retrain_freq_weeks: 12        # Ablation 2 optimal: 12w beats 4/6/8/26w on clean data
+  reward_lambda_action_dev: 0.05  # discourage extreme departures from the neutral policy
+  reward_return_weight_low: 1.15
+  reward_return_weight_high: 0.70
+  reward_drawdown_weight_low: 0.80
+  reward_drawdown_weight_high: 1.35
+  reward_turnover_weight_low: 0.85
+  reward_turnover_weight_high: 1.20
+  reward_return_weight_low_reduced: 1.00
+  reward_return_weight_high_reduced: 0.80
+  reward_drawdown_weight_low_reduced: 0.75
+  reward_drawdown_weight_high_reduced: 1.15
+  reward_turnover_weight_low_reduced: 0.90
+  reward_turnover_weight_high_reduced: 1.05
+  reward_regret_concentration_scale: 0.50
+  reward_regret_liquidity_scale: 0.50
+  enable_soft_posture_regret: true
+  reward_regret_lambda: 0.15
+  reward_regret_temperature: 0.05
+  reward_regret_horizon_low: 4
+  reward_regret_horizon_medium: 3
+  reward_regret_horizon_high: 2
+  reward_regret_switch_anchor_fracs: [0.4, 0.7]
+  reward_regret_switch_jitter_steps: 1
+  reward_regret_variance_threshold: 1.0e-5
+  reward_lambda_defense_gap: 0.02   # penalize being too risk-on when state stress is high
+  reward_lambda_overdefense: 0.015  # penalize staying too defensive when state stress is low
+  reward_lambda_stress_turnover: 0.01  # extra churn penalty during stressed periods
+  reward_lambda_target_posture: 0.10   # penalize deviation from the stress-conditioned target posture
+  reward_lambda_posture_progress: 0.06 # reward moving closer to the current target posture
+  reward_lambda_posture_stale: 0.03    # penalize staying in a mismatched posture when the target persists
+  reward_lambda_posture_flip: 0.00     # keep off in the first regret iteration to avoid blocking exploration
+  enable_target_posture_guidance: true
+  target_posture_guidance_min_streak: 2
+  target_posture_guidance_min_stress: 0.16
+  target_posture_guidance_max_step: 1
+  enable_target_control_blend: false
+  target_control_blend_min: 0.15
+  target_control_blend_max: 0.85
+  stress_target_moderate: 0.18
+  stress_target_high: 0.35
+  retrain_every_rebalances: 3   # 3 x 4-week rebalances = 12 calendar weeks
+  min_history_rebalances: 12    # require about one year of prior rebalance windows before causal PPO training
   use_rl: true                  # set false to disable RL overlay
 
 # ── Adaptive retrain triggers ─────────────────────────────────────────────────
