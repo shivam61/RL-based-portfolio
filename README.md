@@ -1,21 +1,41 @@
 # RL-Based Indian Equity Portfolio System
 
-A hierarchical AI portfolio management system for Indian equities, combining LightGBM supervised
-ranking, PPO reinforcement learning sector overlay, and CVXPY constrained optimization.
+An Indian equity portfolio system with:
 
-**Current best result (run_020):** 22.19% CAGR | Sharpe 0.96 | MaxDD −23.5% | 2013–2026
+- LightGBM sector scoring
+- LightGBM stock ranking
+- RL-driven sector tilts
+- CVXPY constrained portfolio construction
+
+The repo currently runs in a **split mode**:
+
+- production: `tilt_only_rl` with posture fixed to `neutral`
+- research: posture learning from realized forward outcomes
+
+The concise source of truth for that split is:
+
+- [docs/CURRENT_SYSTEM_STATE.md](docs/CURRENT_SYSTEM_STATE.md)
+
+The new-machine bootstrap path is:
+
+- [docs/SETUP_AND_REPRODUCIBILITY.md](docs/SETUP_AND_REPRODUCIBILITY.md)
 
 ---
 
-## What it builds
+## What it builds now
 
 A walk-forward portfolio that:
 - Rebalances every **4 weeks** using only information available at that date (no lookahead)
 - Uses **LightGBM LambdaRank** to cross-sectionally rank stocks within each of 15 NSE sectors
-- Uses a **PPO RL agent** to dynamically tilt sector weights, manage cash, and scale risk
+- Uses RL to learn **sector tilts**
 - Uses **CVXPY mean-variance optimization** with realistic constraints (turnover, concentration, liquidity)
 - Enforces transaction costs (25 bps one-way) + slippage (10 bps one-way)
 - Outputs full performance metrics, attribution, and current portfolio recommendation
+
+Important current behavior:
+
+- posture is frozen to `neutral` in the production RL path
+- dynamic posture control is still a research problem, not a production claim
 
 Backtest period: **2013-01-01 → 2026-04-17** | Initial capital: **INR 5,00,000**
 
@@ -25,20 +45,27 @@ Backtest period: **2013-01-01 → 2026-04-17** | Initial capital: **INR 5,00,000
 
 ```bash
 # 1. Install dependencies
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+./.venv/bin/pip install -r requirements.txt
 
-# 2. Download 10+ years of NSE data (~30-60 min)
-python scripts/download_data.py
+# 2. Download 10+ years of NSE data
+PYTHONPATH=. ./.venv/bin/python scripts/download_data.py
 
-# 3. Run full walk-forward backtest with RL
-python scripts/run_backtest.py
+# 3. Build the feature store
+PYTHONPATH=. ./.venv/bin/python scripts/build_features.py
 
-# 4. Compare without RL overlay
-python scripts/run_backtest.py --no-rl
+# 4. Run the current production backtest path
+PYTHONPATH=. ./.venv/bin/python scripts/run_backtest.py
 
-# 5. Run tests
-pytest tests/ -v
+# 5. Compare without RL overlay
+PYTHONPATH=. ./.venv/bin/python scripts/run_backtest.py --no-rl
+
+# 6. Run tests
+MPLCONFIGDIR=/tmp/mpl ./.venv/bin/pytest tests/ -q
 ```
+
+Raw data, processed data, feature-store snapshots, and generated reports are **not** committed to git. The exact bootstrap and rebuild path is documented in [docs/SETUP_AND_REPRODUCIBILITY.md](docs/SETUP_AND_REPRODUCIBILITY.md).
 
 ---
 
@@ -169,6 +196,8 @@ All saved to `artifacts/reports/`:
 | Doc | Contents |
 |-----|----------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Full system design, RL state/action/reward, ablation results |
+| [docs/CURRENT_SYSTEM_STATE.md](docs/CURRENT_SYSTEM_STATE.md) | Current production vs research split and the decisions behind it |
+| [docs/SETUP_AND_REPRODUCIBILITY.md](docs/SETUP_AND_REPRODUCIBILITY.md) | New-machine bootstrap and what is / is not committed |
 | [docs/feature_experiment_plan.md](docs/feature_experiment_plan.md) | Step-by-step stock feature improvement plan (runs 021–025) |
 | [docs/feature_update_flow.md](docs/feature_update_flow.md) | How the feature store cache and schema invalidation works |
 | [NEXT_STEPS.md](NEXT_STEPS.md) | Full run history, ablation tables, lessons learned |
@@ -194,9 +223,18 @@ All saved to `artifacts/reports/`:
 
 | Artifact | Status | Notes |
 |----------|--------|-------|
-| `artifacts/models/sector_scorer.pkl` | ✅ committed | run_020 trained model |
-| `artifacts/models/stock_ranker.pkl` | ✅ committed | run_020 trained model |
-| `artifacts/models/rl_agent/experience_buffer.pkl` | ✅ committed | Accumulated walk-forward experience |
-| `artifacts/models/rl_agent/meta.pkl` | ✅ committed | PPO training metadata |
-| `artifacts/models/rl_agent/ppo_model.zip` | ✅ committed | PPO network weights — 269KB, tracked directly |
-| `artifacts/run_history/` | ✅ committed | Metrics + charts for all named runs |
+| `artifacts/models/sector_scorer.pkl` | committed | current saved scorer |
+| `artifacts/models/stock_ranker.pkl` | committed | current saved ranker |
+| `artifacts/models/rl_agent/experience_buffer.pkl` | committed | RL buffer state |
+| `artifacts/models/rl_agent/meta.pkl` | committed | RL metadata |
+| `artifacts/models/rl_agent/ppo_model.zip` | committed | PPO weights |
+
+Not committed by default:
+
+- `data/raw/`
+- `data/processed/`
+- `artifacts/feature_store/`
+- `artifacts/reports/`
+- generated parquet reports
+
+Use [docs/SETUP_AND_REPRODUCIBILITY.md](docs/SETUP_AND_REPRODUCIBILITY.md) to recreate them on a new machine.

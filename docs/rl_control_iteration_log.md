@@ -1078,3 +1078,70 @@ Copy this block for each future change:
     - return-only
     - return minus drawdown
     - current full utility with turnover penalty
+
+## Iteration 14 — Posture Label Utility Comparison
+
+- Date:
+  - `2026-04-25`
+- Scope:
+  - compare posture winners on the same realized `H = 2` replay under:
+    - `return_only`
+    - `return_minus_drawdown`
+    - `full_utility`
+  - add richer label-quality diagnostics:
+    - near-tie rate
+    - winner-by-metric counts
+    - label stability across utility definitions
+    - execution-clean subset reporting
+- Implementation:
+  - posture dataset builder now computes all three utility views from the same realized replay
+  - summary emits utility-mode comparisons in a single artifact
+  - added docs:
+    - `docs/CURRENT_SYSTEM_STATE.md`
+    - `docs/SETUP_AND_REPRODUCIBILITY.md`
+- Validation:
+  - `pytest tests/test_posture_dataset.py -q` -> `4 passed`
+  - utility comparison build:
+    - `scripts/build_posture_dataset.py --end-date 2016-12-31 --horizon-rebalances 2 --max-samples 16 --utility-mode full_utility --prefix posture_dataset_utilcmp_h2_2016_s16`
+- Result:
+  - artifact:
+    - `artifacts/reports/posture_dataset_utilcmp_h2_2016_s16_summary.json`
+  - `full_utility` winners:
+    - `risk_off = 15`
+    - `neutral = 1`
+    - `mean_utility_margin = 0.0925`
+    - `near_tie_rate = 6.25%`
+  - `return_only` winners:
+    - `risk_off = 8`
+    - `neutral = 6`
+    - `risk_on = 2`
+    - `mean_utility_margin = 0.0153`
+    - `near_tie_rate = 50.0%`
+  - `return_minus_drawdown` winners:
+    - `risk_off = 8`
+    - `neutral = 6`
+    - `risk_on = 2`
+    - `mean_utility_margin = 0.0172`
+    - `near_tie_rate = 37.5%`
+  - winner attribution:
+    - total return winners:
+      - `risk_off = 8`
+      - `neutral = 6`
+      - `risk_on = 2`
+    - max drawdown winners:
+      - `neutral = 9`
+      - `risk_off = 7`
+    - turnover winners:
+      - `risk_off = 15`
+      - `risk_on = 1`
+  - execution-clean subset:
+    - `sample_count = 0`
+- Decision:
+  - keep the multi-utility label path
+  - do not train a posture classifier yet
+- Learning:
+  - the posture label problem is now much clearer:
+    - `risk_off` dominance is mainly a `full_utility` effect, not a raw return effect
+    - return-based utilities produce a materially more balanced winner mix
+    - margins under the balanced utilities are small, so posture should be modeled as utility prediction first, not hard classification
+  - execution cleanliness still needs work because no sampled date had zero fallback across all three fixed postures

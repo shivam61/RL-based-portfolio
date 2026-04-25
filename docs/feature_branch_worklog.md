@@ -890,3 +890,39 @@ Each task should record:
     - return-only
     - return minus drawdown
     - current full utility
+
+### Task: posture label utility comparison + repo bootstrap docs
+- Scope:
+  - extend the posture dataset builder so the same realized replay emits:
+    - `return_only`
+    - `return_minus_drawdown`
+    - `full_utility`
+  - add near-tie, winner-by-metric, and label-stability diagnostics
+  - document the current production/research split and new-machine bootstrap path
+- Validation:
+  - `pytest tests/test_posture_dataset.py -q` -> `4 passed`
+  - build:
+    - `scripts/build_posture_dataset.py --end-date 2016-12-31 --horizon-rebalances 2 --max-samples 16 --utility-mode full_utility --prefix posture_dataset_utilcmp_h2_2016_s16`
+- Result:
+  - `full_utility` winners:
+    - `risk_off = 15`
+    - `neutral = 1`
+  - `return_only` winners:
+    - `risk_off = 8`
+    - `neutral = 6`
+    - `risk_on = 2`
+  - `return_minus_drawdown` winners:
+    - `risk_off = 8`
+    - `neutral = 6`
+    - `risk_on = 2`
+  - margins:
+    - `full_utility = 0.0925`
+    - `return_only = 0.0153`
+    - `return_minus_drawdown = 0.0172`
+  - execution-clean subset:
+    - `0` samples
+- Learning:
+  - short-horizon posture labels are not intrinsically all `risk_off`
+  - the heavy defensive skew comes mostly from the current full utility
+  - balanced utilities have much smaller margins, so the next posture model should regress posture utility rather than classify posture labels
+  - reproducibility needed explicit documentation because raw data, processed matrices, feature-store snapshots, and reports are intentionally not committed

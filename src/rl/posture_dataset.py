@@ -17,6 +17,12 @@ from src.rl.environment import SectorAllocationEnv
 from src.rl.historical_executor import HistoricalPeriodExecutor, PreparedHistoricalStep
 from src.rl.policy_utils import default_decision
 
+UTILITY_MODES = (
+    "return_only",
+    "return_minus_drawdown",
+    "full_utility",
+)
+
 
 class _ModelStateTimeline:
     """Incrementally cache trained model state by rebalance index."""
@@ -55,8 +61,11 @@ def build_posture_dataset(
     end_date: str | None = None,
     horizon_rebalances: int = 2,
     max_samples: int | None = None,
+    utility_mode: str = "full_utility",
+    near_tie_threshold: float = 0.01,
 ) -> dict[str, Any]:
     """Build a realized forward posture-outcome dataset from a neutral reference path."""
+    utility_mode = _normalize_utility_mode(utility_mode)
     cfg_eval = load_config() if cfg is None else deepcopy(cfg)
     if start_date is not None:
         cfg_eval["backtest"]["start_date"] = str(pd.Timestamp(start_date).date())
@@ -104,6 +113,7 @@ def build_posture_dataset(
                 portfolio=portfolio,
                 nav_points=nav_points,
                 model_timeline=model_timeline,
+                utility_mode=utility_mode,
             )
             rows.extend(sample.pop("rows"))
             sample_payloads.append(sample)
@@ -128,7 +138,13 @@ def build_posture_dataset(
             break
 
     frame = pd.DataFrame(rows)
-    summary = _summarize_dataset(frame, sample_payloads, horizon)
+    summary = _summarize_dataset(
+        frame,
+        sample_payloads,
+        horizon,
+        utility_mode=utility_mode,
+        near_tie_threshold=float(near_tie_threshold),
+    )
     return {
         "generated_at_utc": _isoformat_utc(datetime.now(timezone.utc)),
         "dataset_type": "realized_posture_outcomes_v1",
@@ -137,6 +153,8 @@ def build_posture_dataset(
             "end_date": str(engine.end_date.date()),
         },
         "horizon_rebalances": horizon,
+        "primary_utility_mode": utility_mode,
+        "near_tie_threshold": float(near_tie_threshold),
         "reference_policy": {
             "name": "neutral_full_stack",
             "posture": "neutral",
@@ -182,6 +200,7 @@ def _build_sample(
     portfolio: PortfolioState,
     nav_points: list[tuple[pd.Timestamp, float]],
     model_timeline: _ModelStateTimeline,
+    utility_mode: str,
 ) -> dict[str, Any]:
     state = deepcopy(prepared.transition_state)
     stress_signal = float(reference_executor._stress_signal(state))
@@ -209,7 +228,11 @@ def _build_sample(
                 "stress_signal": stress_signal,
                 "stress_bucket": stress_bucket,
                 "posture": posture,
-                "utility": float(outcome["utility"]),
+                "utility": float(outcome["utility_by_mode"][utility_mode]),
+                "utility_mode": str(utility_mode),
+                "utility_return_only": float(outcome["utility_by_mode"]["return_only"]),
+                "utility_return_minus_drawdown": float(outcome["utility_by_mode"]["return_minus_drawdown"]),
+                "utility_full_utility": float(outcome["utility_by_mode"]["full_utility"]),
                 "total_return": float(outcome["total_return"]),
                 "max_drawdown": float(outcome["max_drawdown"]),
                 "avg_turnover": float(outcome["avg_turnover"]),
@@ -221,14 +244,23 @@ def _build_sample(
             }
         )
 
-    ordered = sorted(
-        posture_outcomes.items(),
-        key=lambda item: (float(item[1]["utility"]), float(item[1]["total_return"])),
-        reverse=True,
-    )
-    best_posture, best_metrics = ordered[0]
-    second_metrics = ordered[1][1] if len(ordered) > 1 else ordered[0][1]
-    utility_margin = float(best_metrics["utility"] - second_metrics["utility"])
+    winner_by_mode: dict[str, str] = {}
+    margin_by_mode: dict[str, float] = {}
+    for mode in UTILITY_MODES:
+        ordered = sorted(
+            posture_outcomes.items(),
+            key=lambda item: (
+                float(item[1]["utility_by_mode"][mode]),
+                float(item[1]["total_return"]),
+            ),
+            reverse=True,
+        )
+        best_posture, best_metrics = ordered[0]
+        second_metrics = ordered[1][1] if len(ordered) > 1 else ordered[0][1]
+        winner_by_mode[mode] = str(best_posture)
+        margin_by_mode[mode] = float(
+            best_metrics["utility_by_mode"][mode] - second_metrics["utility_by_mode"][mode]
+        )
 
     return {
         "date": str(prepared.current_date.date()),
@@ -237,8 +269,10 @@ def _build_sample(
         "state": state,
         "stress_signal": stress_signal,
         "stress_bucket": stress_bucket,
-        "best_posture": best_posture,
-        "utility_margin": utility_margin,
+        "best_posture": winner_by_mode[utility_mode],
+        "utility_margin": margin_by_mode[utility_mode],
+        "winner_by_utility_mode": winner_by_mode,
+        "margin_by_utility_mode": margin_by_mode,
         "posture_outcomes": posture_outcomes,
         "rows": rows,
     }
@@ -304,15 +338,20 @@ def _simulate_fixed_posture_horizon(
     max_drawdown = _nav_max_drawdown(nav_series)
     avg_turnover = float(np.mean([entry["turnover"] for entry in trace])) if trace else 0.0
     avg_cost_ratio = float(np.mean([entry["cost_ratio"] for entry in trace])) if trace else 0.0
-    utility = _horizon_utility(
-        engine.cfg,
-        total_return=total_return,
-        max_drawdown=max_drawdown,
-        avg_turnover=avg_turnover,
-        avg_cost_ratio=avg_cost_ratio,
-    )
+    utility_by_mode = {
+        mode: _horizon_utility(
+            engine.cfg,
+            total_return=total_return,
+            max_drawdown=max_drawdown,
+            avg_turnover=avg_turnover,
+            avg_cost_ratio=avg_cost_ratio,
+            utility_mode=mode,
+        )
+        for mode in UTILITY_MODES
+    }
     return {
-        "utility": utility,
+        "utility": float(utility_by_mode["full_utility"]),
+        "utility_by_mode": utility_by_mode,
         "total_return": total_return,
         "max_drawdown": max_drawdown,
         "avg_turnover": avg_turnover,
@@ -417,11 +456,17 @@ def _horizon_utility(
     max_drawdown: float,
     avg_turnover: float,
     avg_cost_ratio: float,
+    utility_mode: str = "full_utility",
 ) -> float:
+    utility_mode = _normalize_utility_mode(utility_mode)
     rl_cfg = cfg.get("rl", {}) if isinstance(cfg, dict) else {}
     dd_weight = float(rl_cfg.get("reward_lambda_dd", 0.25))
     to_weight = float(rl_cfg.get("reward_lambda_to", 0.5))
     cost_weight = float(rl_cfg.get("reward_lambda_liq", 0.2))
+    if utility_mode == "return_only":
+        return float(total_return)
+    if utility_mode == "return_minus_drawdown":
+        return float(total_return - dd_weight * abs(float(max_drawdown)))
     return float(
         total_return
         - dd_weight * abs(float(max_drawdown))
@@ -442,16 +487,26 @@ def _summarize_dataset(
     rows: pd.DataFrame,
     samples: list[dict[str, Any]],
     horizon_rebalances: int,
+    *,
+    utility_mode: str = "full_utility",
+    near_tie_threshold: float = 0.01,
 ) -> dict[str, Any]:
+    utility_mode = _normalize_utility_mode(utility_mode)
     if rows.empty:
         return {
             "sample_count": 0,
             "horizon_rebalances": int(horizon_rebalances),
+            "primary_utility_mode": utility_mode,
+            "near_tie_threshold": float(near_tie_threshold),
             "best_posture_counts": {},
             "best_posture_by_stress_bucket": {},
             "mean_utility_margin": None,
             "mean_utility_margin_by_stress_bucket": {},
+            "near_tie_rate": None,
+            "utility_mode_summaries": {},
             "posture_outcome_stats": {},
+            "winner_by_metric": {},
+            "execution_clean_subset": {},
         }
 
     sample_frame = pd.DataFrame(
@@ -461,6 +516,23 @@ def _summarize_dataset(
             "stress_signal": [float(sample["stress_signal"]) for sample in samples],
             "best_posture": [sample["best_posture"] for sample in samples],
             "utility_margin": [float(sample["utility_margin"]) for sample in samples],
+            "winner_return_only": [sample["winner_by_utility_mode"]["return_only"] for sample in samples],
+            "winner_return_minus_drawdown": [
+                sample["winner_by_utility_mode"]["return_minus_drawdown"] for sample in samples
+            ],
+            "winner_full_utility": [sample["winner_by_utility_mode"]["full_utility"] for sample in samples],
+            "margin_return_only": [float(sample["margin_by_utility_mode"]["return_only"]) for sample in samples],
+            "margin_return_minus_drawdown": [
+                float(sample["margin_by_utility_mode"]["return_minus_drawdown"]) for sample in samples
+            ],
+            "margin_full_utility": [float(sample["margin_by_utility_mode"]["full_utility"]) for sample in samples],
+            "execution_clean": [
+                bool(all(
+                    int(metrics.get("fallback_count", 0)) == 0
+                    for metrics in sample.get("posture_outcomes", {}).values()
+                ))
+                for sample in samples
+            ],
         }
     )
     outcome_stats: dict[str, Any] = {}
@@ -470,31 +542,131 @@ def _summarize_dataset(
             "mean_total_return": float(posture_rows["total_return"].mean()),
             "mean_max_drawdown": float(posture_rows["max_drawdown"].mean()),
             "mean_avg_turnover": float(posture_rows["avg_turnover"].mean()),
+            "mean_avg_cost_ratio": float(posture_rows["avg_cost_ratio"].mean()),
             "mean_fallback_count": float(posture_rows["fallback_count"].mean()),
             "mean_selected_sector_count": float(posture_rows["mean_selected_sector_count"].mean()),
             "mean_selected_stock_count": float(posture_rows["mean_selected_stock_count"].mean()),
         }
 
+    utility_mode_summaries = {
+        mode: _utility_mode_summary(
+            sample_frame=sample_frame,
+            winner_col=f"winner_{mode}",
+            margin_col=f"margin_{mode}",
+            near_tie_threshold=float(near_tie_threshold),
+        )
+        for mode in UTILITY_MODES
+    }
+
+    winner_by_metric = {
+        "total_return": _winner_counts_from_rows(rows, metric="total_return", higher_is_better=True),
+        "max_drawdown": _winner_counts_from_rows(rows, metric="max_drawdown", higher_is_better=True),
+        "avg_turnover": _winner_counts_from_rows(rows, metric="avg_turnover", higher_is_better=False),
+        "avg_cost_ratio": _winner_counts_from_rows(rows, metric="avg_cost_ratio", higher_is_better=False),
+    }
+
     return {
         "sample_count": int(len(sample_frame)),
         "horizon_rebalances": int(horizon_rebalances),
+        "primary_utility_mode": utility_mode,
+        "near_tie_threshold": float(near_tie_threshold),
+        "best_posture_counts": dict(utility_mode_summaries[utility_mode]["best_posture_counts"]),
+        "best_posture_by_stress_bucket": dict(utility_mode_summaries[utility_mode]["best_posture_by_stress_bucket"]),
+        "mean_utility_margin": float(utility_mode_summaries[utility_mode]["mean_utility_margin"]),
+        "mean_utility_margin_by_stress_bucket": dict(utility_mode_summaries[utility_mode]["mean_utility_margin_by_stress_bucket"]),
+        "near_tie_rate": float(utility_mode_summaries[utility_mode]["near_tie_rate"]),
+        "utility_mode_summaries": utility_mode_summaries,
+        "posture_outcome_stats": outcome_stats,
+        "winner_by_metric": winner_by_metric,
+        "execution_clean_subset": _utility_mode_summary(
+            sample_frame=sample_frame[sample_frame["execution_clean"]].copy(),
+            winner_col=f"winner_{utility_mode}",
+            margin_col=f"margin_{utility_mode}",
+            near_tie_threshold=float(near_tie_threshold),
+        ),
+        "label_stability_across_utility_modes": _label_stability_summary(sample_frame),
+    }
+
+
+def _utility_mode_summary(
+    *,
+    sample_frame: pd.DataFrame,
+    winner_col: str,
+    margin_col: str,
+    near_tie_threshold: float,
+) -> dict[str, Any]:
+    if sample_frame.empty:
+        return {
+            "sample_count": 0,
+            "best_posture_counts": {},
+            "best_posture_by_stress_bucket": {},
+            "mean_utility_margin": None,
+            "mean_utility_margin_by_stress_bucket": {},
+            "near_tie_rate": None,
+        }
+    return {
+        "sample_count": int(len(sample_frame)),
         "best_posture_counts": {
-            str(key): int(value) for key, value in sample_frame["best_posture"].value_counts().to_dict().items()
+            str(key): int(value) for key, value in sample_frame[winner_col].value_counts().to_dict().items()
         },
         "best_posture_by_stress_bucket": {
-            bucket: {
+            str(bucket): {
                 str(key): int(value)
-                for key, value in bucket_frame["best_posture"].value_counts().to_dict().items()
+                for key, value in bucket_frame[winner_col].value_counts().to_dict().items()
             }
             for bucket, bucket_frame in sample_frame.groupby("stress_bucket", sort=False)
         },
-        "mean_utility_margin": float(sample_frame["utility_margin"].mean()),
+        "mean_utility_margin": float(sample_frame[margin_col].mean()),
         "mean_utility_margin_by_stress_bucket": {
-            str(bucket): float(bucket_frame["utility_margin"].mean())
+            str(bucket): float(bucket_frame[margin_col].mean())
             for bucket, bucket_frame in sample_frame.groupby("stress_bucket", sort=False)
         },
-        "posture_outcome_stats": outcome_stats,
+        "near_tie_rate": float((sample_frame[margin_col] <= float(near_tie_threshold)).mean()),
     }
+
+
+def _winner_counts_from_rows(rows: pd.DataFrame, *, metric: str, higher_is_better: bool) -> dict[str, int]:
+    if rows.empty or metric not in rows.columns:
+        return {}
+    counts: dict[str, int] = {}
+    for _, frame in rows.groupby("date", sort=False):
+        ordered = frame.sort_values(
+            [metric, "posture"],
+            ascending=[not higher_is_better, True],
+            kind="mergesort",
+        )
+        winner = str(ordered.iloc[0]["posture"])
+        counts[winner] = counts.get(winner, 0) + 1
+    return counts
+
+
+def _label_stability_summary(sample_frame: pd.DataFrame) -> dict[str, Any]:
+    if sample_frame.empty:
+        return {
+            "all_modes_agree_rate": None,
+            "return_only_vs_full_utility_agree_rate": None,
+            "return_minus_drawdown_vs_full_utility_agree_rate": None,
+        }
+    all_agree = (
+        (sample_frame["winner_return_only"] == sample_frame["winner_return_minus_drawdown"])
+        & (sample_frame["winner_return_only"] == sample_frame["winner_full_utility"])
+    )
+    return {
+        "all_modes_agree_rate": float(all_agree.mean()),
+        "return_only_vs_full_utility_agree_rate": float(
+            (sample_frame["winner_return_only"] == sample_frame["winner_full_utility"]).mean()
+        ),
+        "return_minus_drawdown_vs_full_utility_agree_rate": float(
+            (sample_frame["winner_return_minus_drawdown"] == sample_frame["winner_full_utility"]).mean()
+        ),
+    }
+
+
+def _normalize_utility_mode(value: str) -> str:
+    mode = str(value).strip().lower()
+    if mode not in UTILITY_MODES:
+        raise ValueError(f"Unsupported utility mode: {value}")
+    return mode
 
 
 def _json_dumps(payload: dict[str, Any]) -> str:

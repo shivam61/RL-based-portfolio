@@ -726,11 +726,34 @@ Decision rule:
       - a genuinely defensive short-horizon regime in this sample window
       - or a horizon utility that is still too drawdown / turnover heavy for posture labeling
   - immediate research follow-up:
-    - add alternate posture-label utilities for comparison:
-      - return-only
-      - return minus drawdown
-      - current full utility
-    - then compare label balance before training any posture classifier
+    - completed utility comparison on the same realized `H = 2` sample window:
+      - artifact: `artifacts/reports/posture_dataset_utilcmp_h2_2016_s16_summary.json`
+      - `full_utility`:
+        - `risk_off = 15`
+        - `neutral = 1`
+        - `mean_utility_margin = 0.0925`
+      - `return_only`:
+        - `risk_off = 8`
+        - `neutral = 6`
+        - `risk_on = 2`
+        - `mean_utility_margin = 0.0153`
+      - `return_minus_drawdown`:
+        - `risk_off = 8`
+        - `neutral = 6`
+        - `risk_on = 2`
+        - `mean_utility_margin = 0.0172`
+      - interpretation:
+        - posture labels are not inherently all `risk_off`
+        - the strong defensive skew is created mainly by the current full utility, especially turnover-heavy scoring
+        - margins under return-only and return-minus-drawdown are much smaller, so any posture model should predict utility, not just class labels
+      - additional diagnostics:
+        - `winner_by_metric.total_return = {risk_off: 8, neutral: 6, risk_on: 2}`
+        - `winner_by_metric.max_drawdown = {neutral: 9, risk_off: 7}`
+        - `winner_by_metric.avg_turnover = {risk_off: 15, risk_on: 1}`
+        - `execution_clean_subset.sample_count = 0`
+      - next step:
+        - keep production path unchanged
+        - add a posture-utility regression baseline on top of this dataset rather than a classifier or PPO posture loop
 - Always `rm artifacts/models/rl_agent/ppo_model.zip meta.pkl experience_buffer.pkl`
   before running backtest when STATE_DIM changes
 - Always reset `_metadata.json` macro last_date when `macro_features.py` changes
