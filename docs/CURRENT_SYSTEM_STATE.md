@@ -2,6 +2,10 @@
 
 This document is the concise source of truth for what the repo is doing now, why those decisions were taken, and what remains research-only.
 
+The operating rules for how future decisions should be made are defined in:
+
+- [docs/DECISION_PROTOCOL.md](docs/DECISION_PROTOCOL.md)
+
 ## Production Track
 
 The current production policy is:

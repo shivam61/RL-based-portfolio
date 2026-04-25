@@ -197,6 +197,7 @@ All saved to `artifacts/reports/`:
 |-----|----------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Full system design, RL state/action/reward, ablation results |
 | [docs/CURRENT_SYSTEM_STATE.md](docs/CURRENT_SYSTEM_STATE.md) | Current production vs research split and the decisions behind it |
+| [docs/DECISION_PROTOCOL.md](docs/DECISION_PROTOCOL.md) | Rules for diagnosis, planning, experimentation, and promotion decisions |
 | [docs/SETUP_AND_REPRODUCIBILITY.md](docs/SETUP_AND_REPRODUCIBILITY.md) | New-machine bootstrap and what is / is not committed |
 | [docs/feature_experiment_plan.md](docs/feature_experiment_plan.md) | Step-by-step stock feature improvement plan (runs 021–025) |
 | [docs/feature_update_flow.md](docs/feature_update_flow.md) | How the feature store cache and schema invalidation works |
