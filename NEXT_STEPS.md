@@ -2,6 +2,18 @@
 
 ## Active Program — RL Control Roadmap (2026-04-22)
 
+Decisioning for all future work on this roadmap should follow:
+
+- `docs/DECISION_PROTOCOL.md`
+
+In particular:
+
+- diagnose root cause before changing code
+- plan and discuss before major implementation
+- change one major variable per measured run
+- do not tune reward before structural diagnosis is credible
+- log rejected runs as first-class research output
+
 The current portfolio stack is now split into three permanent reference modes. These are the gates for every future RL change and should not be redefined mid-stream:
 
 - `neutral_full_stack`

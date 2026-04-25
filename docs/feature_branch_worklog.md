@@ -8,6 +8,17 @@ Each task should record:
 - outcome
 - learning
 
+This branch now also follows an explicit decision protocol:
+
+- `docs/DECISION_PROTOCOL.md`
+
+That protocol was added because repeated iterations showed the need to formalize:
+
+- root-cause-first diagnosis
+- plan / debate before implementation
+- one-major-change-per-run discipline
+- documentation of rejected paths
+
 ## 2026-04-22
 
 ### Task: RL control baseline freeze and evaluation-plan lock
