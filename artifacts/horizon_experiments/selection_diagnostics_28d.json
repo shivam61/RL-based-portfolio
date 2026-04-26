@@ -1,0 +1,36 @@
+{
+  "_report_metadata": {
+    "artifact_type": "selection_diagnostics",
+    "backtest_end_date": "2016-12-31",
+    "backtest_start_date": "2013-01-01",
+    "freshness_verified_at_utc": "2026-04-25T20:55:14Z",
+    "manifest_file": "run_manifest.json",
+    "report_generated_at_utc": "2026-04-25T20:55:14Z",
+    "run_id": "selection_only_2013_01_01_2016_12_31_20260425T205514Z",
+    "run_mode": "selection_only",
+    "schema_version": 1
+  },
+  "avg_selected_count": 13.384615384615385,
+  "intra_sector_dispersion": 0.05287928439722323,
+  "periods": 26,
+  "precision_at_k": 0.5186769370979897,
+  "rank_ic": -0.10304852613999367,
+  "stability": 0.38416307368100766,
+  "top_bottom_spread": -0.003816209582355067,
+  "top_k_avg_forward_return": 0.010457641980764433,
+  "top_k_minus_sector_median": 0.004580775768919376,
+  "top_k_minus_universe": 0.0009043590262879902,
+  "universe_avg_forward_return": 0.009553282954476446,
+  "within_sector_ic": 0.09415720422365477,
+  "within_sector_ic_by_year": {
+    "2015": 0.333333,
+    "2016": -0.025431
+  },
+  "within_sector_ic_positive_fraction": 0.6111111111111112,
+  "within_sector_ic_std": 0.6457250755111973,
+  "within_sector_ic_weighted": 0.12104239669373168,
+  "within_sector_top_bottom_spread": -0.005771367125313432,
+  "within_sector_top_bottom_spread_weighted": -0.004262699982444728,
+  "within_sector_top_k_minus_sector_median": -0.0005024327997144688,
+  "within_sector_top_k_minus_sector_median_weighted": 0.0005774360504927842
+}

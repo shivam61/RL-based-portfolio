@@ -542,6 +542,21 @@ def _summarize_trace(trace: list[dict[str, Any]], cfg: dict | None = None) -> di
                 }
             )
         },
+        "mean_fallback_cash_target_gap": float(np.mean([
+            float((entry.get("optimizer_diagnostics") or {}).get("fallback_cash_target_gap", 0.0))
+            for entry in trace
+            if str(entry.get("optimizer_fallback_mode", "none")) == "risk_off_de_risk"
+        ])) if any(str(e.get("optimizer_fallback_mode", "none")) == "risk_off_de_risk" for e in trace) else None,
+        "fallback_cash_delta_hit_rate": float(np.mean([
+            1.0 if float((entry.get("optimizer_diagnostics") or {}).get("fallback_cash_delta", 0.0)) >= 0.01 else 0.0
+            for entry in trace
+            if str(entry.get("optimizer_fallback_mode", "none")) == "risk_off_de_risk"
+        ])) if any(str(e.get("optimizer_fallback_mode", "none")) == "risk_off_de_risk" for e in trace) else None,
+        "mean_fallback_turnover": float(np.mean([
+            float((entry.get("optimizer_diagnostics") or {}).get("fallback_turnover", 0.0))
+            for entry in trace
+            if str(entry.get("optimizer_fallback_mode", "none")) == "risk_off_de_risk"
+        ])) if any(str(e.get("optimizer_fallback_mode", "none")) == "risk_off_de_risk" for e in trace) else None,
         "aggressiveness_usage_rate": usage_rate("aggressiveness", neutral_aggressiveness),
         "posture_usage_rate": float(
             np.mean([1.0 if posture != neutral_posture else 0.0 for posture in postures])

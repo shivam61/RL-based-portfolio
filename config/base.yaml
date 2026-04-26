@@ -113,6 +113,8 @@ optimizer:
   max_turnover_per_rebalance: 0.45
   no_trade_band: 0.005          # ignore weight changes below this
   solver: "CLARABEL"
+  separate_cash_turnover_budget: false    # decouple cash movement from equity turnover budget
+  max_cash_delta_per_rebalance: 0.20      # max single-step cash change when separate_cash_turnover_budget=true
 
 # ── Risk engine ───────────────────────────────────────────────────────────────
 risk:

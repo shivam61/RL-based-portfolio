@@ -565,6 +565,9 @@ def _summarize_dataset(
         "avg_cost_ratio": _winner_counts_from_rows(rows, metric="avg_cost_ratio", higher_is_better=False),
     }
 
+    # Regression pivot: one row per sample, utilities for all 3 postures side-by-side
+    regression_rows = _build_regression_pivot(rows, sample_frame)
+
     return {
         "sample_count": int(len(sample_frame)),
         "horizon_rebalances": int(horizon_rebalances),
@@ -585,6 +588,7 @@ def _summarize_dataset(
             near_tie_threshold=float(near_tie_threshold),
         ),
         "label_stability_across_utility_modes": _label_stability_summary(sample_frame),
+        "posture_utility_regression_rows": regression_rows,
     }
 
 
@@ -667,6 +671,52 @@ def _normalize_utility_mode(value: str) -> str:
     if mode not in UTILITY_MODES:
         raise ValueError(f"Unsupported utility mode: {value}")
     return mode
+
+
+def _build_regression_pivot(
+    rows: pd.DataFrame,
+    sample_frame: pd.DataFrame,
+) -> list[dict[str, Any]]:
+    """Pivot 3 posture rows per sample date into one regression row.
+
+    Output schema (one dict per sample):
+      date, stress_bucket, stress_signal,
+      risk_on_utility_return_only, neutral_utility_return_only, risk_off_utility_return_only,
+      target_posture_return_only, utility_margin_return_only
+    """
+    if rows.empty:
+        return []
+
+    result = []
+    for date, group in rows.groupby("date", sort=True):
+        posture_utils: dict[str, float] = {}
+        for _, row in group.iterrows():
+            posture_utils[str(row["posture"])] = float(row["utility_return_only"])
+
+        if len(posture_utils) < 3:
+            continue
+
+        best_posture = max(posture_utils, key=lambda p: posture_utils[p])
+        sorted_vals = sorted(posture_utils.values(), reverse=True)
+        margin = sorted_vals[0] - sorted_vals[1] if len(sorted_vals) > 1 else 0.0
+
+        # stress context from sample_frame (one row per sample)
+        sf_row = sample_frame[sample_frame["date"] == date]
+        stress_bucket = str(sf_row["stress_bucket"].iloc[0]) if not sf_row.empty else ""
+        stress_signal = float(sf_row["stress_signal"].iloc[0]) if not sf_row.empty else 0.0
+
+        result.append({
+            "date": str(date),
+            "stress_bucket": stress_bucket,
+            "stress_signal": round(stress_signal, 6),
+            "risk_on_utility_return_only": round(posture_utils.get("risk_on", 0.0), 8),
+            "neutral_utility_return_only": round(posture_utils.get("neutral", 0.0), 8),
+            "risk_off_utility_return_only": round(posture_utils.get("risk_off", 0.0), 8),
+            "target_posture_return_only": best_posture,
+            "utility_margin_return_only": round(margin, 8),
+        })
+
+    return result
 
 
 def _json_dumps(payload: dict[str, Any]) -> str:

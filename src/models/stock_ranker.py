@@ -103,7 +103,7 @@ class StockRanker:
                 "min_child_samples": self._model_cfg["min_child_samples"],
                 "random_state": int(self.cfg.get("backtest", {}).get("random_seed", 42)),
                 "verbose": -1,
-                "n_jobs": 1,
+                "n_jobs": -1,
             }
             model = lgb.LGBMRanker(**params)
             model.fit(X_scaled, y.values, group=groups)

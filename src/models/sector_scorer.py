@@ -82,7 +82,7 @@ class SectorScorer:
                 "min_child_samples": self._model_cfg["min_child_samples"],
                 "random_state": int(self.cfg.get("backtest", {}).get("random_seed", 42)),
                 "verbose": -1,
-                "n_jobs": 1,
+                "n_jobs": -1,
             }
             self.model = lgb.LGBMRegressor(**params)
             self.model.fit(X_arr, y.values)
