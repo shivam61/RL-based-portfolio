@@ -683,44 +683,45 @@ Decision rule:
 - require positive local metrics and non-collapsing stability before calling the feature layer useful
 - if local metrics are weak too, the feature layer needs redesign rather than more universe or taxonomy changes
 
-### TASK-8 — Horizon shift experiment [INCONCLUSIVE — NEEDS WIDER WINDOW]
+### TASK-8 — Horizon shift experiment [CLOSED — 56D RETAINED]
 Goal: test whether the current stock signal is slow-moving momentum rather than a 4W alpha.
-Keep the raw-minimal stock contract fixed and vary only the label horizon:
-- 4W baseline: `--stock-fwd-window-days 28`
-- 8W test: `--stock-fwd-window-days 56`
-- 12W test: `--stock-fwd-window-days 84`
 
-Measure `selection_only` first on the frozen universe, then compare:
-- within-sector IC
-- within-sector top-bottom spread
-- top-k vs sector median
-- stability
-- turnover
+**Final result (2013-2020 window, 6 prediction years):**
+- 28D: within_sector_ic=0.0102, std=0.4024, stability=31.6%, CAGR=8.82%, Sharpe=0.16, RankIC=-0.062
+  - Per-year IC: 2015=+0.333, 2016=-0.002, 2017=-0.060, 2018=-0.092, 2019=-0.040, 2020=+0.103
+  - **Positive years: 2/6 — FAILS gate (required ≥4/6)**
+- 56D (baseline): CAGR=10.64%, Sharpe=0.26, stability=32.5%, RankIC=-0.021 — better on all visible metrics
 
-Decision rule:
-- if IC/spread improve with horizon, keep the longer horizon and reduce rebalance frequency to match
-- if nothing improves, stop horizon tuning and move to orthogonal alpha blocks
+**Decision: REJECT 28D. Keep `fwd_window_days: 56`. TASK-8 closed.**
 
-**Result (2013-2016 window, 3 selection_only runs — inconclusive):**
-- 28D: within_sector_ic=0.050 (positive fraction=61%), std=0.142 — BEST mean but only 2 prediction years available
-- 56D: within_sector_ic=0.008 (positive fraction=44%), std=0.183
-- 84D: within_sector_ic=-0.008 (positive fraction=33%), std=0.213
-- IC gate not resolvable: 2013-2016 window yields only 2 prediction years (2015-2016 after warmup); sign consistency gate requires ≥3/4 years
-- 28D shows +0.042 mean IC improvement and higher positive-fraction vs 56D — promising but unverifiable
-- **Next step**: re-run 28D vs 56D on `--start 2013-01-01 --end 2020-12-31` to get 5+ prediction years for proper sign consistency gate
+**Structural finding**: IC is positive only in 2015 (range-bound) and 2020 (COVID crash+recovery). Negative in 2016-2019 (India bull run). The 6-feature momentum contract produces near-zero within-sector differentiation in one-directional trending markets — this is a property of the signal, not the horizon. Horizon shift cannot fix this. Next orthogonal improvement requires either earnings/fundamental data (parked — data unavailable) or a regime-conditioned feature weighting approach.
 
-### Track 2 — Posture Utility Regression [CLOSED — NO SIGNAL]
+### Track 2 — Posture Utility Regression [PARKED — KNOWN FAILURE MODE, CLEAR REOPEN CONDITIONS]
 **Result (2026-04-26, n=20 samples, return_only utilities, H=2, through 2016-12-31):**
-- LOO accuracy (non-indifferent, n=15): **20.0%** — far below 50% gate
+- LOO accuracy (non-indifferent, n=15): **33.3%** (first clean run after feature fixes) — below 50% gate
 - Baseline always_neutral: 37.5%, always_risk_off: 50.0%
-- Utility capture (non-indifferent): 75.0% — below 90% gate
-- Mean regret: 0.0149
+- Utility capture (non-indifferent): 84.5% — below 90% gate
+- Mean regret: 0.0106
 - ε (p25): 0.0037; 15/20 samples non-indifferent
-- Top features: bottom_decile_return_1m, turnover_1m, nifty_trend_duration (no regime/breadth features in top-3 — model fitting noise)
-- Residual pattern: accuracy in high-stress bucket = 0.0% (0/3) — worst accuracy in high-stress
-- Mean Spearman rank corr: 0.133 (low positive, not meaningful)
-- **Conclusion**: No learnable posture signal at current sample size (20 samples, 18-month window). Margins are too small (median 0.009) relative to N. Per decision protocol: **do not proceed to PPO posture loop. Posture research track closed.**
+- Top features: nifty_vol_1m, turnover_1m, bottom_decile_return_1m (no regime feature dominant — model fitting noise at n=20)
+- **Conclusion**: No learnable posture signal at current formulation + sample size. Two failure modes identified:
+  - Wrong abstraction: 3-class argmax is unstable when margin << regime variance; should use pairwise Δ_on_neutral / Δ_off_neutral regression
+  - Insufficient data: n=20 samples — even with perfect formulation, LOO accuracy is not interpretable (1 correct = 5pp change in reported accuracy)
+- Per decision protocol: do not proceed to PPO posture loop. **Posture research track parked (not closed).**
 - Artifacts: `artifacts/reports/posture_regression_eval.json`, `artifacts/models/posture_model/`
+
+**Reopen conditions (both required):**
+1. Dataset ≥ 80 non-indifferent samples (requires 2013-2020 window rebuild)
+2. Switch to Δ modeling: targets = Δ_on_neutral, Δ_off_neutral (continuous); vol-normalized utilities; binary Stage 1 = deviate_from_neutral; Stage 2 = direction
+- Do NOT reopen with n<80 or 3-class argmax — will reproduce 33% result
+
+### Track 4 — Earnings Bootstrap [PARKED — DATA SOURCE INSUFFICIENT]
+**Result (2026-04-26, coverage audit):**
+- `eps_growth_yoy` / `rev_growth_yoy`: 84.8% missing, only 2/97 tickers usable, data starts 2019-08-15
+- `opm_level`: 77.8% missing average, starts 2012 for some tickers
+- For a 2013-2020 backtest window: essentially no usable earnings data before 2019
+- **Conclusion**: Screener.in historical depth insufficient. Track parked.
+- **Reopen conditions**: access to a paid source with quarterly EPS/revenue history from 2013 (BSE bulk filings, paid screener API). Do not attempt Screener.in scrape again without verifying historical depth first.
 
 ---
 
