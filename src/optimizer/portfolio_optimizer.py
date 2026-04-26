@@ -224,11 +224,18 @@ class PortfolioOptimizer:
 
         # Build full-portfolio turnover expression once; reuse in objective + constraint.
         # effective_max_to: floored so the constraint is never infeasible by itself.
+        separate_cash_budget = bool(opt_cfg.get("separate_cash_turnover_budget", False))
+        max_cash_delta = float(opt_cfg.get("max_cash_delta_per_rebalance", 0.20))
+
         if current_weights:
             equity_to = cp.norm1(w - w_prev)
             cash_to   = cp.abs(cash - w_prev_cash)
             one_way_turnover = 0.5 * (equity_to + cash_to + liquidation_cost)
-            cash_move_floor = abs(w_prev_cash - (cash_target or cash_min))
+            # When cash budget is separate, floor equity turnover without the cash component.
+            if separate_cash_budget:
+                cash_move_floor = 0.0
+            else:
+                cash_move_floor = abs(w_prev_cash - (cash_target or cash_min))
             min_feasible = (
                 0.5 * liquidation_cost
                 + cash_move_floor
@@ -238,6 +245,7 @@ class PortfolioOptimizer:
             diagnostics["effective_turnover_budget"] = float(effective_max_to)
             diagnostics["effective_turnover_needed"] = float(min_feasible)
             diagnostics["turnover_shortfall"] = float(max(0.0, min_feasible - max_to))
+            diagnostics["separate_cash_budget"] = separate_cash_budget
 
             objective_terms.append(
                 -opt_cfg.get("turnover_cost", 0.3) * one_way_turnover
@@ -277,7 +285,15 @@ class PortfolioOptimizer:
                 )
             )
             if current_weights:
-                constrs.append(one_way_turnover <= turnover_budget)
+                if separate_cash_budget:
+                    # Equity and cash turnover are budgeted independently.
+                    # Equity: half the one-way norm of equity weight changes + liquidation.
+                    # Cash: absolute cash change capped separately (no ×0.5 — it is already one-way).
+                    equity_only_to = 0.5 * (equity_to + liquidation_cost)
+                    constrs.append(equity_only_to <= turnover_budget)
+                    constrs.append(cash_to <= max_cash_delta)
+                else:
+                    constrs.append(one_way_turnover <= turnover_budget)
             return constrs
 
         relaxation_tiers = [
