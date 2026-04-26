@@ -683,7 +683,7 @@ Decision rule:
 - require positive local metrics and non-collapsing stability before calling the feature layer useful
 - if local metrics are weak too, the feature layer needs redesign rather than more universe or taxonomy changes
 
-### TASK-8 — Horizon shift experiment [NEXT]
+### TASK-8 — Horizon shift experiment [INCONCLUSIVE — NEEDS WIDER WINDOW]
 Goal: test whether the current stock signal is slow-moving momentum rather than a 4W alpha.
 Keep the raw-minimal stock contract fixed and vary only the label horizon:
 - 4W baseline: `--stock-fwd-window-days 28`
@@ -700,6 +700,27 @@ Measure `selection_only` first on the frozen universe, then compare:
 Decision rule:
 - if IC/spread improve with horizon, keep the longer horizon and reduce rebalance frequency to match
 - if nothing improves, stop horizon tuning and move to orthogonal alpha blocks
+
+**Result (2013-2016 window, 3 selection_only runs — inconclusive):**
+- 28D: within_sector_ic=0.050 (positive fraction=61%), std=0.142 — BEST mean but only 2 prediction years available
+- 56D: within_sector_ic=0.008 (positive fraction=44%), std=0.183
+- 84D: within_sector_ic=-0.008 (positive fraction=33%), std=0.213
+- IC gate not resolvable: 2013-2016 window yields only 2 prediction years (2015-2016 after warmup); sign consistency gate requires ≥3/4 years
+- 28D shows +0.042 mean IC improvement and higher positive-fraction vs 56D — promising but unverifiable
+- **Next step**: re-run 28D vs 56D on `--start 2013-01-01 --end 2020-12-31` to get 5+ prediction years for proper sign consistency gate
+
+### Track 2 — Posture Utility Regression [CLOSED — NO SIGNAL]
+**Result (2026-04-26, n=20 samples, return_only utilities, H=2, through 2016-12-31):**
+- LOO accuracy (non-indifferent, n=15): **20.0%** — far below 50% gate
+- Baseline always_neutral: 37.5%, always_risk_off: 50.0%
+- Utility capture (non-indifferent): 75.0% — below 90% gate
+- Mean regret: 0.0149
+- ε (p25): 0.0037; 15/20 samples non-indifferent
+- Top features: bottom_decile_return_1m, turnover_1m, nifty_trend_duration (no regime/breadth features in top-3 — model fitting noise)
+- Residual pattern: accuracy in high-stress bucket = 0.0% (0/3) — worst accuracy in high-stress
+- Mean Spearman rank corr: 0.133 (low positive, not meaningful)
+- **Conclusion**: No learnable posture signal at current sample size (20 samples, 18-month window). Margins are too small (median 0.009) relative to N. Per decision protocol: **do not proceed to PPO posture loop. Posture research track closed.**
+- Artifacts: `artifacts/reports/posture_regression_eval.json`, `artifacts/models/posture_model/`
 
 ---
 

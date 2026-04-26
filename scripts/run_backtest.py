@@ -19,10 +19,12 @@ import os
 import sys
 from pathlib import Path
 
-# Prevent OpenMP/loky workers from conflicting with PyTorch thread pool
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+# Give numpy/LightGBM/CVXPY half the available cores; leave the rest for PyTorch.
+# On a 4-core VM this means 2 threads each — avoids contention while using idle capacity.
+_N_THREADS = str(max(1, os.cpu_count() // 2))
+os.environ.setdefault("OMP_NUM_THREADS", _N_THREADS)
+os.environ.setdefault("MKL_NUM_THREADS", _N_THREADS)
+os.environ.setdefault("OPENBLAS_NUM_THREADS", _N_THREADS)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

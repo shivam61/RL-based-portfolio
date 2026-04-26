@@ -1,0 +1,30 @@
+{
+  "epsilon": 0.00370949362750167,
+  "epsilon_percentile": 25,
+  "feature_names": [
+    "nifty_ret_1m",
+    "nifty_ret_3m",
+    "nifty_vol_1m",
+    "vol_percentile_1y",
+    "india_vix",
+    "vix_percentile_1y",
+    "max_drawdown_3m",
+    "trend_50_200",
+    "top_decile_return_1m",
+    "bottom_decile_return_1m",
+    "spread_decile",
+    "cross_sectional_vol",
+    "hit_rate_top_k",
+    "sector_dispersion",
+    "cash_ratio",
+    "current_drawdown",
+    "portfolio_vol_1m",
+    "turnover_1m",
+    "exposure_concentration",
+    "top5_weight_sum",
+    "avg_cost_per_turnover",
+    "turnover_capacity_utilization",
+    "nifty_trend_duration"
+  ],
+  "is_fitted": true
+}
