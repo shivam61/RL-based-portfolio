@@ -310,6 +310,17 @@ Current Stage 2A result:
       - the holdout execution path is not dominated by generic fallback anymore
       - the current live bottleneck is cash attainment under `risk_off`, not fallback mode selection
       - the next fix should target post-optimizer realization and cash attainment rather than reward or sector breadth
+  - Track 3 — separate_cash_turnover_budget validation [FAILED — REVERTED]:
+    - flag enabled: `separate_cash_turnover_budget: true`, `max_cash_delta_per_rebalance: 0.20`
+    - 2016 holdout result:
+      - neutral cash_gap: 9.42 pts (worse than baseline 7.65 pts)
+      - risk_off fixed posture: cash_gap=65 pts, 12/12 `risk_off_de_risk` fallback, avg_turnover=0%, CAGR=0%
+    - root cause: `risk_off_de_risk` fallback fires 100% before the separate budget constraint is reached
+      - fallback liquidates all equity → 100% cash → overshoots 35% target by 65 pts
+      - the turnover budget split is irrelevant when the fallback path preempts the solver
+    - next fix must target: why `risk_off_de_risk` fallback fires on every period and why it ignores cash target
+      - specifically: does the fallback path respect `max_cash_delta`? Does it set cash to min(1.0, prev+delta) or just dump to 100%?
+    - flag reverted to `false`. Do not re-enable until fallback path is fixed.
 
 #### Stage 3 — Add breadth control
 
