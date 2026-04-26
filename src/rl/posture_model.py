@@ -14,6 +14,13 @@ Feature set (23 features, hard cap 25):
   Group D — Execution/Friction (2): avg_cost_per_turnover, turnover_capacity_utilization
   Group E — Regime Persistence (1): nifty_trend_duration
 
+Data source rules (enforced by validate_feature_matrix):
+  Group A Nifty features: computed from price_matrix (^NSEI) — not from macro parquet
+    (macro parquet only has nifty_* columns from 2016; price_matrix has full history from 2012)
+  Group A VIX: vix_level column from macro parquet (US VIX, available from 2013)
+  Groups B/E: computed from price_matrix
+  Groups C/D: extracted from posture simulation dataset
+
 Evaluation: LOO cross-validation (not held-out) — correct for ≤16 post-filter samples.
 Success gate: LOO accuracy > 50% (beats always_risk_off baseline) AND
               utility_capture ≥ 90% of oracle on non-indifferent samples.
@@ -32,8 +39,17 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 POSTURES = ("risk_on", "neutral", "risk_off")
+# 16 features — hard cap 25.
+# Dropped from original 23 (all had genuine data issues):
+#   cash_ratio, exposure_concentration, top5_weight_sum — no per-sample data in posture dataset
+#   avg_cost_per_turnover — avg_cost_ratio=0 in current dataset; add back when cost tracking is wired
+#   sector_dispersion — duplicated cross_sectional_vol (same rets.std() computation); replace with
+#                       true sector-level dispersion when sector membership is available at feature time
+#   portfolio_vol_1m — was derived as abs(drawdown)*0.5, not a real computation; drop until
+#                      per-rebalance portfolio returns are stored in the posture dataset
+#   turnover_capacity_utilization — constant-scale duplicate of turnover_1m (÷0.45); no extra info
 FEATURE_NAMES = [
-    # Group A — Macro / Regime
+    # Group A — Macro / Regime (8)
     "nifty_ret_1m",
     "nifty_ret_3m",
     "nifty_vol_1m",
@@ -42,26 +58,105 @@ FEATURE_NAMES = [
     "vix_percentile_1y",
     "max_drawdown_3m",
     "trend_50_200",
-    # Group B — Cross-sectional / Breadth
+    # Group B — Cross-sectional / Breadth (5)
     "top_decile_return_1m",
     "bottom_decile_return_1m",
     "spread_decile",
     "cross_sectional_vol",
     "hit_rate_top_k",
-    "sector_dispersion",
-    # Group C — Portfolio State
-    "cash_ratio",
+    # Group C — Portfolio State (2)
     "current_drawdown",
-    "portfolio_vol_1m",
     "turnover_1m",
-    "exposure_concentration",
-    "top5_weight_sum",
-    # Group D — Execution / Friction
-    "avg_cost_per_turnover",
-    "turnover_capacity_utilization",
-    # Group E — Regime Persistence
+    # Group E — Regime Persistence (1)
     "nifty_trend_duration",
 ]
+
+
+class FeatureValidationError(ValueError):
+    """Raised when feature matrix fails hard quality gates before model training."""
+
+
+# Features that are allowed to be binary/near-constant by design.
+_BINARY_OR_DESIGN_CONSTANT_FEATURES: frozenset[str] = frozenset()
+
+# Hard gate thresholds — changing these requires a comment explaining why.
+_MAX_ZERO_FRACTION = 0.30        # > 30% exact zeros → data source likely broken
+_MIN_NONZERO_STD = 1e-5          # std ≤ this → constant feature, no information
+_MAX_NAN_FRACTION = 0.05         # > 5% NaN after fillna → something went wrong
+# 0.995 (not 0.98): catches genuine derivation bugs (|r|→1.0) but not monotonic transforms
+# like vix_level vs vix_percentile at small n, which are expected to be correlated at n≤30.
+_MAX_PAIRWISE_CORR = 0.995
+
+
+def validate_feature_matrix(features: pd.DataFrame) -> None:
+    """Hard gate: raises FeatureValidationError if any feature fails quality checks.
+
+    Must be called before fitting any model. Rules:
+      1. No NaN (after any upstream fillna).
+      2. No constant feature (std ≤ _MIN_NONZERO_STD).
+      3. No feature with > _MAX_ZERO_FRACTION exact zeros (detects silent fallback-to-zero).
+      4. No pair of features with Pearson |r| ≥ _MAX_PAIRWISE_CORR (detects derivation bugs).
+
+    Call signature:
+        validate_feature_matrix(features)   # raises on failure; logs per-feature detail
+    """
+    failures: list[str] = []
+
+    for col in features.columns:
+        series = features[col]
+
+        nan_frac = float(series.isna().mean())
+        if nan_frac > _MAX_NAN_FRACTION:
+            failures.append(f"  {col}: {nan_frac:.1%} NaN (limit {_MAX_NAN_FRACTION:.0%})")
+
+        if col in _BINARY_OR_DESIGN_CONSTANT_FEATURES:
+            continue
+
+        std = float(series.std())
+        if std <= _MIN_NONZERO_STD:
+            failures.append(
+                f"  {col}: constant (std={std:.2e}) — "
+                "check data source, column name, or computation"
+            )
+            continue  # no point computing zero-fraction if series is constant
+
+        zero_frac = float((series == 0.0).mean())
+        if zero_frac > _MAX_ZERO_FRACTION:
+            failures.append(
+                f"  {col}: {zero_frac:.1%} exact zeros (limit {_MAX_ZERO_FRACTION:.0%}) — "
+                "likely silent fallback; check column name or data availability"
+            )
+
+    # Pairwise correlation check (only on non-failing features)
+    ok_cols = [c for c in features.columns if not any(c in f for f in failures)]
+    if len(ok_cols) >= 2:
+        corr = features[ok_cols].corr().abs()
+        for i, c1 in enumerate(ok_cols):
+            for c2 in ok_cols[i + 1:]:
+                r = float(corr.loc[c1, c2])
+                if r >= _MAX_PAIRWISE_CORR:
+                    failures.append(
+                        f"  ({c1}, {c2}): |r|={r:.3f} ≥ {_MAX_PAIRWISE_CORR} — "
+                        "near-duplicate; one may be derived from a broken source"
+                    )
+
+    if failures:
+        msg = (
+            f"Feature matrix failed {len(failures)} quality check(s). "
+            "Fix the data pipeline before training:\n" + "\n".join(failures)
+        )
+        logger.error(msg)
+        raise FeatureValidationError(msg)
+
+    logger.info(
+        "validate_feature_matrix: all %d features passed quality gates "
+        "(NaN<%.0f%%, std>%.0e, zeros<%.0f%%, |r|<%.2f)",
+        len(features.columns),
+        _MAX_NAN_FRACTION * 100,
+        _MIN_NONZERO_STD,
+        _MAX_ZERO_FRACTION * 100,
+        _MAX_PAIRWISE_CORR,
+    )
 
 
 def build_features(
@@ -73,6 +168,9 @@ def build_features(
 
     Returns a DataFrame with one row per sample date and FEATURE_NAMES as columns.
     All features are at decision time (lagged ≥1 day vs forward outcomes).
+
+    Raises FeatureValidationError (via validate_feature_matrix) if any feature
+    fails quality gates — call this before fitting any model.
     """
     parquet_path = Path(parquet_path)
     macro_dir = Path(macro_parquet_dir)
@@ -81,10 +179,9 @@ def build_features(
     df = pd.read_parquet(parquet_path)
     df["date"] = pd.to_datetime(df["date"])
 
-    # One row per sample date (pivot the 3 posture rows)
     sample_dates = sorted(df["date"].unique())
 
-    # --- Group A: Macro features from feature store ---
+    # Macro features (VIX / global stress signals — vix_level available from 2013)
     macro_dfs = []
     for p in sorted(macro_dir.glob("**/*.parquet")):
         macro_dfs.append(pd.read_parquet(p))
@@ -92,9 +189,11 @@ def build_features(
     if not macro.empty and not isinstance(macro.index, pd.DatetimeIndex):
         macro.index = pd.to_datetime(macro.index)
 
-    # --- Price matrix for breadth and regime persistence ---
-    price_matrix = pd.read_parquet(price_path) if price_path.exists() else pd.DataFrame()
-    if not price_matrix.empty and not isinstance(price_matrix.index, pd.DatetimeIndex):
+    # Price matrix — primary source for all Nifty-derived features (full history from 2012)
+    if not price_path.exists():
+        raise FileNotFoundError(f"Price matrix not found: {price_path}")
+    price_matrix = pd.read_parquet(price_path)
+    if not isinstance(price_matrix.index, pd.DatetimeIndex):
         price_matrix.index = pd.to_datetime(price_matrix.index)
 
     rows = []
@@ -103,19 +202,15 @@ def build_features(
         date_ts = pd.Timestamp(date)
         posture_group = df[df["date"] == date_ts]
 
-        # ── Group A: Macro / Regime ──────────────────────────────────────────
-        row.update(_macro_features(macro, date_ts))
-
-        # ── Group B: Cross-sectional / Breadth ──────────────────────────────
+        # Group A: Nifty features from price_matrix; VIX from macro
+        row.update(_macro_features(macro, price_matrix, date_ts))
+        # Group B: Cross-sectional breadth from price_matrix
         row.update(_breadth_features(price_matrix, date_ts, posture_group))
-
-        # ── Group C: Portfolio State ─────────────────────────────────────────
+        # Group C: Portfolio state from posture simulation rows
         row.update(_portfolio_features(posture_group))
-
-        # ── Group D: Execution / Friction ────────────────────────────────────
+        # Group D: Execution friction from posture simulation rows
         row.update(_execution_features(posture_group))
-
-        # ── Group E: Regime Persistence ──────────────────────────────────────
+        # Group E: Regime persistence (Nifty trend duration) from price_matrix
         row.update(_regime_persistence(price_matrix, date_ts))
 
         row["date"] = date_ts
@@ -123,71 +218,116 @@ def build_features(
 
     feat = pd.DataFrame(rows).set_index("date")
 
-    # Fill any missing columns with 0 (graceful degradation when data is absent)
-    for col in FEATURE_NAMES:
-        if col not in feat.columns:
-            feat[col] = 0.0
-            logger.warning("Feature %s missing — filled with 0", col)
+    # Hard failure for missing columns — do NOT silently fill with zeros.
+    missing = [c for c in FEATURE_NAMES if c not in feat.columns]
+    if missing:
+        raise FeatureValidationError(
+            f"Feature columns missing after build: {missing}. "
+            "Fix the feature extraction functions before running the model."
+        )
 
-    return feat[FEATURE_NAMES].fillna(0.0)
+    result = feat[FEATURE_NAMES]
+    if result.isna().any().any():
+        nan_cols = result.columns[result.isna().any()].tolist()
+        logger.warning("NaN in features after build (will be filled with 0): %s", nan_cols)
+        result = result.fillna(0.0)
+
+    return result
 
 
-def _macro_features(macro: pd.DataFrame, date: pd.Timestamp) -> dict[str, float]:
-    if macro.empty:
-        return {k: 0.0 for k in [
-            "nifty_ret_1m", "nifty_ret_3m", "nifty_vol_1m",
-            "vol_percentile_1y", "india_vix", "vix_percentile_1y",
-            "max_drawdown_3m", "trend_50_200",
-        ]}
+def _nifty_prices(price_matrix: pd.DataFrame, date: pd.Timestamp) -> pd.Series | None:
+    """Return Nifty price series up to and including date (lagged). None if unavailable."""
+    nifty_col = next(
+        (c for c in price_matrix.columns if "NSEI" in str(c).upper() or "NIFTY50" in str(c).upper()),
+        None,
+    )
+    if nifty_col is None:
+        return None
+    idx = price_matrix.index[price_matrix.index <= date]
+    if len(idx) < 2:
+        return None
+    return price_matrix.loc[idx, nifty_col].dropna()
 
-    # Use most recent row ≤ date (lagged 1 day)
-    idx = macro.index[macro.index <= date]
-    if idx.empty:
-        return {k: 0.0 for k in [
-            "nifty_ret_1m", "nifty_ret_3m", "nifty_vol_1m",
-            "vol_percentile_1y", "india_vix", "vix_percentile_1y",
-            "max_drawdown_3m", "trend_50_200",
-        ]}
-    row = macro.loc[idx[-1]]
 
-    def _get(col: str, default: float = 0.0) -> float:
-        v = row.get(col, default) if hasattr(row, "get") else getattr(row, col, default)
-        return float(v) if pd.notna(v) else default
+def _macro_features(
+    macro: pd.DataFrame,
+    price_matrix: pd.DataFrame,
+    date: pd.Timestamp,
+) -> dict[str, float]:
+    """Compute Group A features.
 
-    nifty_vol = _get("nifty_vol_1m", _get("nifty_realized_vol_1m", 0.0))
-    vix = _get("india_vix", 0.0)
+    Nifty-derived features (ret, vol, drawdown, trend) come from the price matrix —
+    this is the authoritative source because macro parquet only has nifty_* columns
+    from 2016 onward. VIX (vix_level) comes from macro — available from 2013.
+    """
+    result: dict[str, float] = {}
 
-    # Rolling percentile rank vs trailing 252 trading days
-    trail = macro[macro.index <= date].tail(252)
-    vol_series = trail.get("nifty_vol_1m", trail.get("nifty_realized_vol_1m", pd.Series(dtype=float)))
-    vix_series = trail.get("india_vix", pd.Series(dtype=float))
-    vol_pct = float((vol_series < nifty_vol).mean()) if len(vol_series) > 0 else 0.5
-    vix_pct = float((vix_series < vix).mean()) if len(vix_series) > 0 else 0.5
+    # ── Nifty features from price_matrix ────────────────────────────────────
+    nifty = _nifty_prices(price_matrix, date)
 
-    # Max drawdown of Nifty index over last 63 trading days (~3 months)
-    nifty_col = next((c for c in macro.columns if "nifty" in c.lower() and "ret" in c.lower() and "1m" in c.lower()), None)
-    max_dd_3m = 0.0
-    if nifty_col is not None:
-        rolling_rets = trail[nifty_col].tail(63).dropna()
-        if len(rolling_rets) > 1:
-            cumulative = (1 + rolling_rets).cumprod()
-            peak = cumulative.cummax()
-            max_dd_3m = float(((cumulative - peak) / peak).min())
+    if nifty is not None and len(nifty) >= 22:
+        # 1M and 3M returns
+        result["nifty_ret_1m"] = float(nifty.iloc[-1] / nifty.iloc[-22] - 1)
+        result["nifty_ret_3m"] = float(nifty.iloc[-1] / nifty.iloc[max(0, len(nifty) - 63)] - 1)
 
-    # trend_50_200: Nifty 50MA / 200MA ratio (continuous)
-    trend_col = next((c for c in macro.columns if "ma_50_200" in c.lower() or "trend_50_200" in c.lower()), None)
-    trend_50_200 = _get(trend_col, 1.0) if trend_col else 1.0
+        # Realized 1M volatility (annualized)
+        daily_rets = nifty.pct_change().iloc[-22:].dropna()
+        vol_1m = float(daily_rets.std() * np.sqrt(252)) if len(daily_rets) >= 5 else 0.0
+        result["nifty_vol_1m"] = vol_1m
 
-    return {
-        "nifty_ret_1m": _get("nifty_ret_1m", 0.0),
-        "nifty_ret_3m": _get("nifty_ret_3m", _get("nifty_ret_3m", 0.0)),
-        "nifty_vol_1m": nifty_vol,
-        "vol_percentile_1y": vol_pct,
-        "india_vix": vix,
-        "vix_percentile_1y": vix_pct,
-        "max_drawdown_3m": max_dd_3m,
-        "trend_50_200": trend_50_200,
-    }
+        # Vol percentile vs trailing 252-day rolling window
+        if len(nifty) >= 252 + 22:
+            rolling_vols = [
+                float(nifty.pct_change().iloc[i - 22:i].dropna().std() * np.sqrt(252))
+                for i in range(22, len(nifty) - 230)
+            ]
+            result["vol_percentile_1y"] = float((np.array(rolling_vols) < vol_1m).mean()) if rolling_vols else 0.5
+        else:
+            result["vol_percentile_1y"] = 0.5
+
+        # Max drawdown over last 63 trading days (~3 months)
+        window = nifty.iloc[-63:]
+        peak = window.cummax()
+        result["max_drawdown_3m"] = float(((window - peak) / peak).min())
+
+        # 50MA / 200MA ratio (trend signal)
+        if len(nifty) >= 200:
+            ma50 = float(nifty.iloc[-50:].mean())
+            ma200 = float(nifty.iloc[-200:].mean())
+            result["trend_50_200"] = ma50 / ma200 if ma200 > 0 else 1.0
+        else:
+            result["trend_50_200"] = 1.0
+    else:
+        result.update({
+            "nifty_ret_1m": 0.0, "nifty_ret_3m": 0.0, "nifty_vol_1m": 0.0,
+            "vol_percentile_1y": 0.5, "max_drawdown_3m": 0.0, "trend_50_200": 1.0,
+        })
+        logger.warning("Nifty price series unavailable at %s — Nifty features set to neutral defaults", date.date())
+
+    # ── VIX from macro parquet (vix_level — US VIX, available from 2013) ────
+    if not macro.empty:
+        idx = macro.index[macro.index <= date]
+        if not idx.empty:
+            row = macro.loc[idx[-1]]
+
+            def _get(col: str, default: float = 0.0) -> float:
+                v = row.get(col, default) if hasattr(row, "get") else getattr(row, col, default)
+                return float(v) if pd.notna(v) else default
+
+            vix = _get("vix_level", 0.0)
+            result["india_vix"] = vix
+
+            trail = macro[macro.index <= date].tail(252)
+            vix_series = trail["vix_level"].dropna() if "vix_level" in trail.columns else pd.Series(dtype=float)
+            result["vix_percentile_1y"] = float((vix_series < vix).mean()) if len(vix_series) > 1 else 0.5
+        else:
+            result["india_vix"] = 0.0
+            result["vix_percentile_1y"] = 0.5
+    else:
+        result["india_vix"] = 0.0
+        result["vix_percentile_1y"] = 0.5
+
+    return result
 
 
 def _breadth_features(
@@ -221,28 +361,23 @@ def _breadth_features(
     # Use neutral posture row to get avg portfolio composition proxy
     hit_rate = float((rets > 0).mean())
 
-    # sector_dispersion: approximate from posture_group sector-level data if available
-    sector_disp = 0.0
-    if "mean_selected_sector_count" in posture_group.columns:
-        # Use cross-sectional vol of stock returns as proxy for sector dispersion
-        sector_disp = float(rets.std())
-
     return {
         "top_decile_return_1m": top_ret,
         "bottom_decile_return_1m": bot_ret,
         "spread_decile": top_ret - bot_ret,
         "cross_sectional_vol": float(rets.std()),
         "hit_rate_top_k": hit_rate,
-        "sector_dispersion": sector_disp,
     }
 
 
 def _portfolio_features(posture_group: pd.DataFrame) -> dict[str, float]:
-    """Extract portfolio state from the neutral posture row (path-independent features)."""
-    default = {k: 0.0 for k in [
-        "cash_ratio", "current_drawdown", "portfolio_vol_1m",
-        "turnover_1m", "exposure_concentration", "top5_weight_sum",
-    ]}
+    """Extract portfolio state from the neutral posture row.
+
+    Only returns features that are genuinely computable from the posture dataset.
+    Dropped: cash_ratio, exposure_concentration, top5_weight_sum (no per-sample data),
+             portfolio_vol_1m (was derived from drawdown — not a real computation).
+    """
+    default = {"current_drawdown": 0.0, "turnover_1m": 0.0}
     if posture_group.empty:
         return default
 
@@ -253,41 +388,21 @@ def _portfolio_features(posture_group: pd.DataFrame) -> dict[str, float]:
         v = row.get(col, 0.0) if hasattr(row, "get") else 0.0
         return float(v) if pd.notna(v) else 0.0
 
-    # avg_turnover from posture simulation is available; use as portfolio_vol proxy
-    avg_to = _g("avg_turnover")
-    avg_cost = _g("avg_cost_ratio")
-
-    # current_drawdown: max_drawdown from the neutral path over H rebalances
-    drawdown = _g("max_drawdown")
-
     return {
-        "cash_ratio": 0.05,        # neutral posture default; dataset doesn't store per-step cash
-        "current_drawdown": drawdown,
-        "portfolio_vol_1m": abs(drawdown) * 0.5,   # approximation from drawdown magnitude
-        "turnover_1m": avg_to,
-        "exposure_concentration": 0.08,  # ~1/12 stocks at equal max weight; dataset doesn't store HHI
-        "top5_weight_sum": 0.40,         # 5 × 8% max weight; dataset doesn't store per-stock weights
+        "current_drawdown": _g("max_drawdown"),
+        "turnover_1m": _g("avg_turnover"),
     }
 
 
 def _execution_features(posture_group: pd.DataFrame) -> dict[str, float]:
-    default = {"avg_cost_per_turnover": 0.0025, "turnover_capacity_utilization": 0.6}
-    if posture_group.empty:
-        return default
+    """Execution/friction features from the posture simulation dataset.
 
-    neutral = posture_group[posture_group["posture"] == "neutral"]
-    row = neutral.iloc[0] if not neutral.empty else posture_group.iloc[0]
-
-    avg_cost = float(row.get("avg_cost_ratio", 0.0025))
-    avg_to = float(row.get("avg_turnover", 0.0))
-    max_to = 0.45  # from config
-    utilization = float(avg_to / max_to) if max_to > 0 else 0.0
-    cost_per_to = float(avg_cost / avg_to) if avg_to > 0 else 0.0025
-
-    return {
-        "avg_cost_per_turnover": cost_per_to,
-        "turnover_capacity_utilization": min(1.0, utilization),
-    }
+    Dropped: avg_cost_per_turnover (avg_cost_ratio=0 in current dataset — add back when
+             cost tracking is wired), turnover_capacity_utilization (constant-scale
+             duplicate of turnover_1m with max_to=0.45).
+    Returns empty dict — no execution features currently computable without data.
+    """
+    return {}
 
 
 def _regime_persistence(price_matrix: pd.DataFrame, date: pd.Timestamp) -> dict[str, float]:

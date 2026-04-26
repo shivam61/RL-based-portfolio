@@ -27,9 +27,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.rl.posture_model import (
     FEATURE_NAMES,
     POSTURES,
+    FeatureValidationError,
     PostureUtilityModel,
     build_features,
     build_regression_targets,
+    validate_feature_matrix,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -234,6 +236,20 @@ def main(
     features = build_features(str(parquet_path), str(macro_dir), str(price_path))
     logger.info("Feature matrix shape: %s", features.shape)
     logger.info("Sample dates: %s ... %s", features.index[0].date(), features.index[-1].date())
+
+    # ── HARD GATE: feature quality validation ─────────────────────────────────
+    # This MUST pass before any model fitting. Raises FeatureValidationError on failure.
+    _print_section("FEATURE QUALITY VALIDATION (HARD GATE)")
+    try:
+        validate_feature_matrix(features)
+    except FeatureValidationError as exc:
+        logger.error("FEATURE VALIDATION FAILED — model training aborted.")
+        logger.error("%s", exc)
+        logger.error(
+            "Per-feature audit:\n%s",
+            features.describe().to_string()
+        )
+        raise SystemExit(1) from exc
 
     targets, sample_info = build_regression_targets(str(parquet_path))
     logger.info("Targets shape: %s", targets.shape)

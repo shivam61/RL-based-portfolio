@@ -15,15 +15,8 @@
     "spread_decile",
     "cross_sectional_vol",
     "hit_rate_top_k",
-    "sector_dispersion",
-    "cash_ratio",
     "current_drawdown",
-    "portfolio_vol_1m",
     "turnover_1m",
-    "exposure_concentration",
-    "top5_weight_sum",
-    "avg_cost_per_turnover",
-    "turnover_capacity_utilization",
     "nifty_trend_duration"
   ],
   "is_fitted": true
