@@ -13,9 +13,10 @@ import os
 import sys
 from pathlib import Path
 
-os.environ.setdefault("OMP_NUM_THREADS", "1")
-os.environ.setdefault("MKL_NUM_THREADS", "1")
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+_N_THREADS = str(max(1, os.cpu_count() - 1))
+os.environ.setdefault("OMP_NUM_THREADS", _N_THREADS)
+os.environ.setdefault("MKL_NUM_THREADS", _N_THREADS)
+os.environ.setdefault("OPENBLAS_NUM_THREADS", _N_THREADS)
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 

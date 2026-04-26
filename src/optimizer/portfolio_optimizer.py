@@ -483,6 +483,17 @@ class PortfolioOptimizer:
                 liquidation_cost=float(liquidation_cost),
             )
             diagnostics["fallback_mode"] = "risk_off_de_risk"
+            prev_cash = float(current_weights.get("CASH", 0.0))
+            fb_cash = float(result.get("CASH", 0.0))
+            diagnostics["fallback_cash_target_gap"] = abs(fb_cash - float(cash))
+            diagnostics["fallback_cash_delta"] = abs(fb_cash - prev_cash)
+            diagnostics["fallback_turnover"] = float(
+                0.5 * sum(
+                    abs(float(result.get(t, 0.0)) - float(current_weights.get(t, 0.0)))
+                    for t in set(list(result.keys()) + list(current_weights.keys()))
+                    if t != "CASH"
+                )
+            )
         else:
             result = self._rank_based_weights(
                 alpha,
@@ -760,41 +771,64 @@ class PortfolioOptimizer:
         liquidation_cost: float,
     ) -> dict[str, float]:
         current_cash = float(current_weights.get("CASH", 0.0))
-        result = {
+        current_equity = {
             ticker: float(weight)
             for ticker, weight in current_weights.items()
             if ticker != "CASH" and float(weight) > 1.0e-8
         }
-        if not result:
-            return {"CASH": 1.0}
+        budget = max(0.0, float(max_turnover) - 0.5 * max(0.0, float(liquidation_cost)))
 
-        baseline = 0.5 * max(0.0, float(liquidation_cost))
-        available_turnover = max(0.0, float(max_turnover) - baseline)
-        achievable_cash = min(float(cash_target), current_cash + available_turnover)
-        to_raise = max(0.0, achievable_cash - current_cash)
-        if to_raise <= 1.0e-8:
-            out = dict(result)
-            out["CASH"] = current_cash
+        if current_cash < float(cash_target) - 1.0e-8:
+            # Need more cash: sell lowest-alpha equity up to budget
+            if not current_equity:
+                # Nothing to sell — stay at current cash, do not force to 1.0
+                return {"CASH": current_cash}
+            achievable_cash = min(float(cash_target), current_cash + budget)
+            to_raise = max(0.0, achievable_cash - current_cash)
+            if to_raise <= 1.0e-8:
+                out = dict(current_equity)
+                out["CASH"] = current_cash
+                return out
+            result = dict(current_equity)
+            ordered = sorted(
+                result,
+                key=lambda t: (float(alpha_scores.get(t, 0.0)), float(result.get(t, 0.0))),
+            )
+            remaining = to_raise
+            for ticker in ordered:
+                if remaining <= 1.0e-8:
+                    break
+                sell = min(float(result[ticker]), remaining)
+                result[ticker] -= sell
+                remaining -= sell
+                if result[ticker] <= 1.0e-8:
+                    result.pop(ticker, None)
+            realized_cash = 1.0 - sum(result.values())
+            out = {t: float(w) for t, w in result.items() if w > 1.0e-8}
+            out["CASH"] = float(max(realized_cash, current_cash))
             return out
 
-        ordered = sorted(
-            result,
-            key=lambda ticker: (float(alpha_scores.get(ticker, 0.0)), float(result.get(ticker, 0.0))),
-        )
-        remaining = to_raise
-        for ticker in ordered:
-            if remaining <= 1.0e-8:
-                break
-            sell_weight = min(float(result.get(ticker, 0.0)), remaining)
-            result[ticker] = float(result.get(ticker, 0.0)) - sell_weight
-            remaining -= sell_weight
-            if result[ticker] <= 1.0e-8:
-                result.pop(ticker, None)
+        elif current_cash > float(cash_target) + 1.0e-8:
+            # Too much cash: deploy into top-alpha equity up to budget
+            # (handles initial all-cash state and overshooting scenarios)
+            to_deploy = min(current_cash - float(cash_target), budget)
+            if to_deploy <= 1.0e-8 or not alpha_scores:
+                out = dict(current_equity)
+                out["CASH"] = current_cash
+                return out
+            top_tickers = sorted(alpha_scores, key=alpha_scores.get, reverse=True)[:8]
+            weight_per = to_deploy / len(top_tickers)
+            result = dict(current_equity)
+            for ticker in top_tickers:
+                result[ticker] = result.get(ticker, 0.0) + weight_per
+            result["CASH"] = max(0.0, current_cash - to_deploy)
+            return result
 
-        realized_cash = 1.0 - sum(result.values())
-        out = {ticker: float(weight) for ticker, weight in result.items() if weight > 1.0e-8}
-        out["CASH"] = float(max(realized_cash, current_cash))
-        return out
+        else:
+            # Already at target cash
+            out = dict(current_equity)
+            out["CASH"] = current_cash
+            return out
 
     @staticmethod
     def estimate_covariance(
