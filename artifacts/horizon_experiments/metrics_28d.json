@@ -3,10 +3,10 @@
     "artifact_type": "metrics",
     "backtest_end_date": "2016-12-31",
     "backtest_start_date": "2013-01-01",
-    "freshness_verified_at_utc": "2026-04-25T20:44:34Z",
+    "freshness_verified_at_utc": "2026-04-25T20:55:14Z",
     "manifest_file": "run_manifest.json",
-    "report_generated_at_utc": "2026-04-25T20:44:34Z",
-    "run_id": "selection_only_2013_01_01_2016_12_31_20260425T204434Z",
+    "report_generated_at_utc": "2026-04-25T20:55:14Z",
+    "run_id": "selection_only_2013_01_01_2016_12_31_20260425T205514Z",
     "run_mode": "selection_only",
     "schema_version": 1
   },
@@ -31,7 +31,7 @@
   "n_trigger_events": 0,
   "n_years": 1.9931553730321698,
   "random_seed": 42,
-  "report_generated_at_utc": "2026-04-25T20:44:34Z",
+  "report_generated_at_utc": "2026-04-25T20:55:14Z",
   "rl_training_backend": "causal_historical_env_v1",
   "run_mode": "selection_only",
   "sector_contributions": {

@@ -356,6 +356,23 @@ def compute_selection_diagnostics(records: Sequence[Any] | None) -> dict[str, An
             value = frame[column].dropna().mean()
             summary[column] = None if pd.isna(value) else float(value)
 
+    # IC stability metrics for horizon-shift gate
+    if "within_sector_ic" in frame:
+        ic_series = frame["within_sector_ic"].dropna()
+        if len(ic_series) > 1:
+            summary["within_sector_ic_std"] = float(ic_series.std())
+            summary["within_sector_ic_positive_fraction"] = float((ic_series > 0).mean())
+        if "date" in frame:
+            frame["year"] = pd.to_datetime(frame["date"], errors="coerce").dt.year
+            by_year = (
+                frame.dropna(subset=["year", "within_sector_ic"])
+                .groupby("year")["within_sector_ic"]
+                .mean()
+            )
+            summary["within_sector_ic_by_year"] = {
+                int(yr): round(float(ic), 6) for yr, ic in by_year.items()
+            }
+
     return {
         "summary": summary,
         "per_rebalance": frame,

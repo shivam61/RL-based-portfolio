@@ -28,5 +28,5 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>" >> $REPO/artifacts/lo
 fi
 
 # Push
-git push origin main >> $REPO/artifacts/logs/git_sync.log 2>&1
+git push origin $(git rev-parse --abbrev-ref HEAD) >> $REPO/artifacts/logs/git_sync.log 2>&1
 echo "$(date) git_sync: pushed to origin/main" >> $REPO/artifacts/logs/git_sync.log
