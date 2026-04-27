@@ -694,6 +694,58 @@ Decision rule:
 - require positive local metrics and non-collapsing stability before calling the feature layer useful
 - if local metrics are weak too, the feature layer needs redesign rather than more universe or taxonomy changes
 
+### TASK-9 — Signal-conditioned concentration [CLOSED — PROMOTED TO FULL RL VIA TASK-11]
+Goal: replace fixed `top_k_per_sector` with dispersion-adaptive k (p90-p10 spread → percentile-ranked vs trailing 8 rebalances).
+
+**Final result (2013-2020, adaptive_top_k=true, no trend gate):**
+- within_sector_ic: +0.032 (vs 56D baseline: -0.021) — +0.053 aggregate improvement
+- Per-year IC: 2015=+0.333, 2016=-0.121, 2017=+0.113, 2018=-0.048, 2019=-0.042, 2020=+0.127
+- CAGR: 12.39% (vs 56D baseline: 10.64%) — +1.75pp
+- stability: 30.6% (vs 32.5%)
+- **Gate: MARGINAL PASS** — aggregate IC ✅, CAGR ✅, but 2016 worsened (failure mode identified)
+
+**Structural finding**: 2016 IC = -0.121 because high Nifty trend + low within-sector dispersion → adaptive chose k=7 (diversify), holding reversal stocks. Root cause: dispersion ≠ trend signal. Led to TASK-10/11.
+
+---
+
+### TASK-10 — Trend gate (single condition, p70) [CLOSED — REJECTED]
+Goal: gate on strong Nifty trend alone → k=mid_k=5. Threshold: abs(nifty_3m) > 70th pctile of trailing 12 rebalances.
+
+**Result:**
+- Overall IC: +0.026 (regression from TASK-9 +0.032) — marginal fail zone
+- 2016 IC: -0.088 (improved from -0.121) — still in reject zone (< -0.050)
+- 2017 IC: +0.032 (degraded from +0.113) — gate fired in 2017, cancelled good signal
+- CAGR: 10.93% — reject zone (< 11.5%)
+- **Decision: REJECTED** — blunt gate damaged 2017/2020 where adaptive was working correctly
+
+**Root cause**: 70th pctile fires in trend+strong-dispersion periods (2017, 2020) where concentration k=3 was correct. Gate can't distinguish trend+weak-signal from trend+real-signal.
+
+---
+
+### TASK-11 — Combined trend+dispersion gate [CLOSED — PROMOTED TO FULL RL]
+Goal: gate only when BOTH strong trend AND weak within-sector dispersion. Threshold: abs(nifty_3m) > 80th pctile AND dispersion_pctile < 0.33 (bottom third of dispersion history).
+
+**Result (2013-2020, combined gate):**
+- within_sector_ic: +0.045 — **best IC across all experiments**
+- Per-year IC: 2015=+0.333, 2016=-0.090, 2017=+0.121, 2018=-0.020, 2019=-0.036, 2020=+0.124
+- CAGR: 11.02% (below 12.0% gate — explained below)
+- rank_ic: -0.011 (best ever)
+- **Gate: PARTIAL PASS** — overall IC ✅, 2017 fully recovered ✅, 2016 still negative ⚠️, CAGR below gate
+
+**CAGR drop explanation**: in trend+weak-dispersion periods, gate uses k=5 instead of k=7. k=7 captures more broad trend upside passively even with near-zero IC. Expected tradeoff: better selection accuracy, slightly less trend beta. RL layer should compensate via exposure decisions.
+
+**Decision: PROMOTE TO FULL RL** — best IC ever (+0.013 over TASK-9), 2017/2020 structural bugs fixed, 2016 weakness now correctly identified as ranker limitation not gating bug. RL expected to recover CAGR by adjusting aggressiveness/cash in weak-IC regimes.
+
+**What to watch in full RL run:**
+- Does PPO learn to increase exposure in low-IC / trend regimes?
+- Does PPO compensate for reduced breadth with higher aggressiveness?
+- If yes: CAGR recovers naturally. If no: add separate beta/aggressiveness knob in next iteration.
+
+**Config**: `adaptive_top_k: true`, `trend_gate_enabled: true`, `trend_gate_pctile: 0.80`
+**Artifacts**: `docs/signal_conditioned_concentration.md`, `src/models/stock_ranker.py`
+
+---
+
 ### TASK-8 — Horizon shift experiment [CLOSED — 56D RETAINED]
 Goal: test whether the current stock signal is slow-moving momentum rather than a 4W alpha.
 

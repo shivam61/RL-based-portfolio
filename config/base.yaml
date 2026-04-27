@@ -97,6 +97,13 @@ stock_model:
   retrain_every_rebalances: 3   # 3 x 4-week rebalances = 12 calendar weeks
   top_k_per_sector: 5           # stocks selected per sector
   fwd_window_days: 56           # truth baseline label horizon for stock ranking (~8 weeks)
+  adaptive_top_k: true                  # signal-conditioned concentration (TASK-9)
+  top_k_low_signal: 7                   # k when score dispersion in bottom third of history
+  top_k_mid_signal: 5                   # k when score dispersion in middle third (= default)
+  top_k_high_signal: 3                  # k when score dispersion in top third
+  adaptive_top_k_history_window: 8      # trailing rebalances used for percentile calibration
+  trend_gate_enabled: true              # TASK-11: combined gate (trend AND weak dispersion)
+  trend_gate_pctile: 0.80              # macro condition: abs(nifty_3m) > 80th pctile of trailing 12 rebalances
 
 # ── Portfolio optimizer ───────────────────────────────────────────────────────
 optimizer:
