@@ -789,6 +789,19 @@ Goal: test whether the current stock signal is slow-moving momentum rather than 
 ---
 
 ## Ops Notes
+
+### Active run — full_rl v5 [RUNNING — TASK-11 config, 2026-04-27]
+- PID 35477, launched 07:42 UTC
+- Config: `adaptive_top_k: true`, `trend_gate_enabled: true`, `trend_gate_pctile: 0.80`
+- Baseline to beat: run_020 CAGR 22.19%, Sharpe 0.96 (full window 2013-2026)
+- Minimum bar: `neutral_full_stack` CAGR 17.85%, Sharpe 0.720
+- Key RL learning question: does PPO increase aggressiveness in low-IC / trend regimes to recover the CAGR lost by TASK-11's reduced breadth?
+- **Do not relaunch with different selection config until v5 completes** — one change per measured run
+- ETA: ~58h (limited by sequential CVXPY calls inside RL training loop, not CPU count)
+- VM note: switch to non-preemptible instance if v5 is preempted again
+
+---
+
 - RL controller status after the latest execution pass:
   - production track is now `tilt_only_rl`:
     - posture fixed to `neutral`
