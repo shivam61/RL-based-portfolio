@@ -306,6 +306,12 @@ class WalkForwardEngine:
             posture = str(rl_decision.get("posture", "neutral"))
             selection_profile = posture_selection_profile(self.cfg, posture)
             top_k = int(selection_profile.get("stock_top_k_per_sector") or top_k)
+            nifty_3m = float(
+                (macro_now.get("nifty_ret_3m") or 0.0)
+                if isinstance(macro_now, dict)
+                else float(getattr(macro_now, "nifty_ret_3m", 0.0) or 0.0)
+            )
+            self.stock_ranker.set_market_context(nifty_3m)
             for sector in selected_sectors:
                 ranking = self.stock_ranker.rank_stocks(
                     stock_feats_now, sector, top_k=top_k

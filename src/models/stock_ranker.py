@@ -41,6 +41,13 @@ class StockRanker:
         self.scalers: dict[str, StandardScaler] = {}
         self.feature_names: list[str] = []
         self.is_fitted = False
+        # Adaptive top-k: rolling history of per-rebalance median score dispersion.
+        # Survives fit() calls (it's cumulative observation state, not model state).
+        self._dispersion_history: list[float] = []
+        # Trend gate: rolling history of abs(nifty_3m) at each rebalance.
+        # Set via set_market_context() before rank_stocks() calls.
+        self._nifty_3m_abs_history: list[float] = []
+        self._trend_gate_active: bool = False
 
     # ── Training ──────────────────────────────────────────────────────────────
 
@@ -163,6 +170,76 @@ class StockRanker:
 
         return X, y, groups
 
+    # ── Adaptive top-k helpers ────────────────────────────────────────────────
+
+    @staticmethod
+    def _score_dispersion(scores: np.ndarray) -> float:
+        """p90-p10 spread of rank scores within a sector. Robust to outliers."""
+        if len(scores) < 4:
+            return 0.0
+        return float(np.percentile(scores, 90) - np.percentile(scores, 10))
+
+    def _adaptive_top_k(self, current_dispersion: float) -> int:
+        """
+        Map current dispersion to a top-k using its percentile rank in recent history.
+
+        Thresholds are data-driven (bottom/mid/top third of trailing window), not
+        hardcoded, so they self-calibrate as score scale evolves across training windows.
+        """
+        window = int(self._model_cfg.get("adaptive_top_k_history_window", 8))
+        recent = self._dispersion_history[-window:] if self._dispersion_history else []
+
+        if len(recent) < 4:
+            # Insufficient history — fall back to default k
+            return int(self._model_cfg.get("top_k_per_sector", 5))
+
+        pct_rank = sum(1.0 for h in recent if h < current_dispersion) / len(recent)
+
+        if pct_rank < 0.33:
+            k = int(self._model_cfg.get("top_k_low_signal", 7))
+        elif pct_rank < 0.67:
+            k = int(self._model_cfg.get("top_k_mid_signal", 5))
+        else:
+            k = int(self._model_cfg.get("top_k_high_signal", 3))
+
+        return k
+
+    def set_market_context(self, nifty_3m_return: float | None) -> None:
+        """
+        Call once per rebalance, before rank_stocks(), to update the trend gate.
+
+        Trend regime = abs(nifty_3m) ranks in the top 30% of the trailing 1Y
+        (13 rebalances). Cold start (<13 prior values) → gate disabled.
+        Dispersion history is NOT updated in trend periods to prevent
+        bull-run dispersions from contaminating non-trend calibration.
+        """
+        if not self._model_cfg.get("trend_gate_enabled", False):
+            self._trend_gate_active = False
+            return
+
+        if nifty_3m_return is None or (isinstance(nifty_3m_return, float) and np.isnan(nifty_3m_return)):
+            self._trend_gate_active = False
+            return
+
+        abs_val = abs(float(nifty_3m_return))
+        recent = self._nifty_3m_abs_history[-12:]  # last 12, not including current
+
+        if len(recent) < 12:
+            # Insufficient history — disable gate, append for future use
+            self._trend_gate_active = False
+            self._nifty_3m_abs_history.append(abs_val)
+            return
+
+        threshold = float(self._model_cfg.get("trend_gate_pctile", 0.70))
+        pct_rank = sum(1.0 for h in recent if h < abs_val) / len(recent)
+        self._trend_gate_active = pct_rank > threshold
+        self._nifty_3m_abs_history.append(abs_val)
+
+        logger.debug(
+            "trend_gate: nifty_3m=%.3f abs_pct_rank=%.2f active=%s",
+            float(nifty_3m_return), pct_rank, self._trend_gate_active,
+        )
+
     # ── Prediction ────────────────────────────────────────────────────────────
 
     def rank_stocks(
@@ -210,8 +287,54 @@ class StockRanker:
         ).reset_index(drop=True)
         result["rank"] = range(1, len(result) + 1)
 
-        if top_k:
-            result = result.head(top_k)
+        dispersion = self._score_dispersion(scores)
+
+        if self._trend_gate_active and self._model_cfg.get("adaptive_top_k", False):
+            # Combined gate: strong trend AND weak within-sector signal.
+            # Compute dispersion percentile against existing history (not including current).
+            window = int(self._model_cfg.get("adaptive_top_k_history_window", 8))
+            recent = self._dispersion_history[-window:] if self._dispersion_history else []
+            if len(recent) >= 4:
+                disp_pctile = sum(1.0 for h in recent if h < dispersion) / len(recent)
+            else:
+                disp_pctile = 1.0  # insufficient history → treat as strong signal, don't gate
+
+            if disp_pctile < 0.33:
+                # Trend + weak signal: freeze at mid_k, do NOT update history.
+                # Contaminated period — trend-driven co-movement, not predictive dispersion.
+                effective_k = int(self._model_cfg.get("top_k_mid_signal", 5))
+                logger.debug(
+                    "combined_gate: sector=%s disp_pctile=%.2f (weak) → k=%d (history frozen)",
+                    sector, disp_pctile, effective_k,
+                )
+            else:
+                # Trend but dispersion is real — adaptive signal is working, let it decide.
+                adaptive_k = self._adaptive_top_k(dispersion)
+                self._dispersion_history.append(dispersion)
+                effective_k = adaptive_k
+                logger.debug(
+                    "trend_strong_signal: sector=%s disp_pctile=%.2f → k=%d",
+                    sector, disp_pctile, effective_k,
+                )
+        elif self._model_cfg.get("adaptive_top_k", False):
+            adaptive_k = self._adaptive_top_k(dispersion)
+            # Record dispersion AFTER computing adaptive_k so the current period
+            # doesn't influence its own threshold.
+            self._dispersion_history.append(dispersion)
+            effective_k = adaptive_k
+            logger.debug(
+                "adaptive_top_k: sector=%s dispersion=%.4f pct_rank=%.2f → k=%d",
+                sector, dispersion,
+                sum(1.0 for h in self._dispersion_history[-8:] if h < dispersion)
+                / max(1, len(self._dispersion_history[-8:])),
+                effective_k,
+            )
+        else:
+            self._dispersion_history.append(dispersion)
+            effective_k = top_k
+
+        if effective_k:
+            result = result.head(effective_k)
 
         return result
 
@@ -235,6 +358,9 @@ class StockRanker:
                 "scalers": self.scalers,
                 "feature_names": self.feature_names,
                 "is_fitted": self.is_fitted,
+                "dispersion_history": self._dispersion_history,
+                "nifty_3m_abs_history": self._nifty_3m_abs_history,
+                "trend_gate_active": self._trend_gate_active,
             }, f)
         logger.debug("StockRanker saved → %s", path)
 
@@ -245,4 +371,7 @@ class StockRanker:
         self.scalers = state["scalers"]
         self.feature_names = state["feature_names"]
         self.is_fitted = state["is_fitted"]
+        self._dispersion_history = state.get("dispersion_history", [])
+        self._nifty_3m_abs_history = state.get("nifty_3m_abs_history", [])
+        self._trend_gate_active = state.get("trend_gate_active", False)
         return self

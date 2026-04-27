@@ -1436,6 +1436,9 @@ class HistoricalPeriodExecutor:
         posture = str(decision.get("posture", "neutral"))
         selection_profile = posture_selection_profile(self.engine.cfg, posture)
         top_k = int(selection_profile.get("stock_top_k_per_sector") or top_k)
+        self.engine.stock_ranker.set_market_context(
+            float(prepared.macro_now.get("nifty_ret_3m") or 0.0)
+        )
         for sector in selected_sectors:
             ranking = self.engine.stock_ranker.rank_stocks(
                 prepared.stock_feats_now, sector, top_k=top_k
