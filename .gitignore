@@ -28,4 +28,5 @@ artifacts/logs/
 .vscode/
 
 # Claude
-.claude/
+.claude/*
+!.claude/settings.json
